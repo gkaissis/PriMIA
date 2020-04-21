@@ -2,31 +2,73 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import configparser
+import argparse
+import visdom
+import tqdm
+import numpy as np
 from torchvision import datasets, transforms, models
 from common.dataloader import PPPP
-import syft as sy
+from common.models import vgg16, Net
 
-hook = sy.TorchHook(
-    torch
-)  # <-- NEW: hook PyTorch ie add extra functionalities to support Federated Learning
-bob = sy.VirtualWorker(hook, id="bob")  # <-- NEW: define remote worker bob
-alice = sy.VirtualWorker(hook, id="alice")  # <-- NEW: and alice
+
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "--config",
+    type=str,
+    required=True,
+    default="configs/pneumonia.ini",
+    help="Path to config",
+)
+parser.add_argument(
+    "--train_federated", action="store_true", help="Train in federated setting"
+)
+parser.add_argument(
+    "--dataset",
+    type=str,
+    default="pneumonia",
+    choices=["pneumonia", "mnist"],
+    help="which dataset?",
+)
+parser.add_argument(
+    "--no_visdom", action="store_false", help="dont use a visdom server"
+)
+cmd_args = parser.parse_args()
+
+config = configparser.ConfigParser()
+config.read(cmd_args.config)
 
 
 class Arguments:
-    def __init__(self):
-        self.batch_size = 64
-        self.test_batch_size = 1000
-        self.epochs = 10
-        self.lr = 0.01
-        self.momentum = 0.5
-        self.no_cuda = False
-        self.seed = 1
-        self.log_interval = 10
-        self.save_model = False
+    def __init__(self, cmd_args, config):
+        self.batch_size = config.getint("config", "batch_size", fallback=1)
+        self.test_batch_size = config.getint("config", "test_batch_size", fallback=1)
+        self.epochs = config.getint("config", "epochs", fallback=1)
+        self.lr = config.getfloat("config", "lr", fallback=1e-3)
+        self.momentum = config.getfloat("config", "momentum", fallback=0.5)
+        self.no_cuda = config.getboolean("config", "no_cuda", fallback=False)
+        self.seed = config.getint("config", "seed", fallback=1)
+        self.log_interval = config.getint("config", "log_interval", fallback=10)
+        self.save_model = config.getboolean("config", "save_model", fallback=False)
+        self.train_federated = cmd_args.train_federated
+        # print('Train federated: {0}'.format(self.train_federated))
+        self.dataset = cmd_args.dataset  # options: ['pneumonia', 'mnist']
+        self.visdom = cmd_args.no_visdom
 
 
-args = Arguments()
+args = Arguments(cmd_args, config)
+
+
+if args.train_federated:
+    import syft as sy
+
+    hook = sy.TorchHook(
+        torch
+    )  # <-- NEW: hook PyTorch ie add extra functionalities to support Federated Learning
+    bob = sy.VirtualWorker(hook, id="bob")  # <-- NEW: define remote worker bob
+    alice = sy.VirtualWorker(hook, id="alice")  # <-- NEW: and alice
+    charlie = sy.VirtualWorker(hook, id="charlie")  # <-- NEW: and alice
+
 
 use_cuda = not args.no_cuda and torch.cuda.is_available()
 
@@ -40,108 +82,137 @@ tf = transforms.Compose(
     [transforms.Resize(224), transforms.CenterCrop(224), transforms.ToTensor()]
 )  # TODO: Add normalization
 
-federated_train_loader = sy.FederatedDataLoader(
-    PPPP("Labels.csv", train=False, transform=tf).federate((bob, alice)),
-    # PPPP(label_path='Labels.csv', train=True, transform=transforms.ToTensor()).federate((bob, alice)),
-    batch_size=args.batch_size,
-    shuffle=True,
-    **kwargs
-)
+if args.dataset == "mnist":
+    num_classes = 10
+    dataset = datasets.MNIST(
+        "../data",
+        train=True,
+        download=True,
+        transform=transforms.Compose(
+            [
+                transforms.Resize(56),
+                transforms.ToTensor(),
+                transforms.Normalize((0.1307,), (0.3081,)),
+            ]
+        ),
+    )
+    testset = datasets.MNIST(
+        "../data",
+        train=False,
+        transform=transforms.Compose(
+            [
+                transforms.Resize(56),
+                transforms.ToTensor(),
+                transforms.Normalize((0.1307,), (0.3081,)),
+            ]
+        ),
+    )
+elif args.dataset == "pneumonia":
+    num_classes = 3
+    dataset = PPPP("Labels.csv", train=False, transform=tf)
+    testset = PPPP("Labels.csv", train=False, transform=tf)
+else:
+    raise NotImplementedError("dataset not implemented")
+
+if args.train_federated:
+    train_loader = sy.FederatedDataLoader(
+        dataset.federate((bob, alice, charlie)),
+        batch_size=args.batch_size,
+        shuffle=True,
+        **kwargs
+    )
+else:
+    train_loader = torch.utils.data.DataLoader(
+        dataset, batch_size=args.batch_size, shuffle=True, **kwargs
+    )
+
 
 test_loader = torch.utils.data.DataLoader(
-    PPPP("Labels.csv", train=False, transform=tf),
-    batch_size=args.test_batch_size,
-    shuffle=True,
-    **kwargs
+    testset, batch_size=args.test_batch_size, shuffle=True, **kwargs
 )
+L = len(train_loader)
 
+## visdom
+if args.visdom:
+    vis = visdom.Visdom()
+    assert vis.check_connection(
+        timeout_seconds=3
+    ), "No connection could be formed quickly"
+    vis_env = "{:s}/{:s}".format(
+        "federated" if args.train_federated else "vanilla", args.dataset
+    )
+    plt_dict = dict(
+        name="training loss",
+        ytickmax=10,
+        xlabel="epoch",
+        ylabel="loss",
+        legend=["train_loss"],
+    )
+    vis.line(
+        X=np.zeros((1, 2)),
+        Y=np.zeros((1, 2)),
+        win="loss_win",
+        opts={
+            "legend": ["train_loss", "val_loss"],
+            "xlabel": "epochs",
+            "ylabel": "loss",
+        },
+        env=vis_env,
+    )
+    div = 1.0 / float(L)
 
-"""class Net(nn.Module):
-    def __init__(self):
-        super(Net, self).__init__()
-        self.conv1 = nn.Conv2d(1, 20, 5, 1)
-        self.conv2 = nn.Conv2d(20, 50, 5, 1)
-        self.fc1 = nn.Linear(4 * 4 * 50, 500)
-        self.fc2 = nn.Linear(500, 10)
-
-    def forward(self, x):
-        x = F.relu(self.conv1(x))
-        x = F.max_pool2d(x, 2, 2)
-        x = F.relu(self.conv2(x))
-        x = F.max_pool2d(x, 2, 2)
-        #print(x.size())
-        #exit()
-        x = x.view(-1, 4 * 4 * 50)
-        x = F.relu(self.fc1(x))
-        x = self.fc2(x)
-        return F.log_softmax(x, dim=1)
-"""
-class Net(nn.Module): # TODO: use something better
-    def __init__(self, n_classes=3):
-        super(Net, self).__init__()
-        self.convs = nn.Sequential(
-            nn.Conv2d(1, 16, 3, 1),
-            nn.LeakyReLU(),
-            nn.MaxPool2d(2),
-            nn.Conv2d(16, 32, 3, 1),
-            nn.LeakyReLU(),
-            nn.MaxPool2d(2),
-            nn.Conv2d(32, 64, 3),
-            nn.LeakyReLU(),
-            nn.MaxPool2d(2),
-            nn.Conv2d(64, 128, 3),
-            nn.LeakyReLU(),
-            nn.MaxPool2d(2),
-            nn.Conv2d(128, 128, 3),
-            nn.LeakyReLU(),
-            nn.MaxPool2d(2),
-        )
-        self.classifier = nn.Sequential(
-            nn.Linear(128*5*5, 128),
-            nn.LeakyReLU(),
-            nn.Linear(128, n_classes),
-            nn.LogSoftmax(dim=1)
-        )
-
-    def forward(self, x):
-        x = self.convs(x)
-        x = x.view(-1, 128*5*5)
-        x = self.classifier(x)
-        return x
 
 def train(args, model, device, train_loader, optimizer, epoch):
     model.train()
-    for batch_idx, (data, target) in enumerate(
-        federated_train_loader
+    avg_loss = []
+    for batch_idx, (data, target) in tqdm.tqdm(
+        enumerate(train_loader), leave=False, desc="training", total=L
     ):  # <-- now it is a distributed dataset
-        model.send(data.location)  # <-- NEW: send the model to the right location
+        if args.train_federated:
+            model.send(data.location)  # <-- NEW: send the model to the right location
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
         output = model(data)
         loss = F.nll_loss(output, target)
         loss.backward()
         optimizer.step()
-        model.get()  # <-- NEW: get the model back
+        if args.train_federated:
+            model.get()  # <-- NEW: get the model back
         if batch_idx % args.log_interval == 0:
-            loss = loss.get()  # <-- NEW: get the loss back
-            print(
-                "Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}".format(
-                    epoch,
-                    batch_idx * args.batch_size,
-                    len(train_loader)
-                    * args.batch_size,  # batch_idx * len(data), len(train_loader.dataset),
-                    100.0 * batch_idx / len(train_loader),
-                    loss.item(),
+            if args.train_federated:
+                loss = loss.get()  # <-- NEW: get the loss back
+
+            if args.visdom:
+                vis.line(
+                    X=np.asarray([epoch + float(batch_idx) * div - 1]),
+                    Y=np.asarray([loss.item()]),
+                    win="loss_win",
+                    name="train_loss",
+                    update="append",
+                    env=vis_env,
                 )
-            )
+            else:
+                avg_loss.append(loss.item)
+    print(
+        "Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}".format(
+            epoch,
+            batch_idx * args.batch_size,
+            len(train_loader)
+            * args.batch_size,  # batch_idx * len(data), len(train_loader.dataset),
+            100.0 * batch_idx / len(train_loader),
+            np.mean(avg_loss),
+        )
+    )
 
 
-def test(args, model, device, test_loader):
+def test(args, model, device, test_loader, epoch):
     model.eval()
     test_loss = 0
     correct = 0
     with torch.no_grad():
-        for data, target in test_loader:
+        for data, target in tqdm.tqdm(
+            test_loader, total=len(test_loader), desc="testing", leave=False
+        ):
             data, target = data.to(device), target.to(device)
             output = model(data)
             test_loss += F.nll_loss(
@@ -162,18 +233,31 @@ def test(args, model, device, test_loader):
             100.0 * correct / len(test_loader.dataset),
         )
     )
+    if args.visdom:
+        vis.line(
+            X=np.asarray([epoch - 1]),
+            Y=np.asarray([test_loss]),
+            win="loss_win",
+            name="val_loss",
+            update="append",
+            env=vis_env,
+        )
 
 
 if __name__ == "__main__":
-    model = Net().to(device)
-    #model = models.vgg16().to(device)
+    # model = Net().to(device)
+    model = vgg16(pretrained=False, num_classes=num_classes, in_channels=1)
+    # model = models.vgg16(pretrained=False, num_classes=3)
+    # model.classifier = vggclassifier()
+    model.to(device)
     optimizer = optim.SGD(
         model.parameters(), lr=args.lr
     )  # TODO momentum is not supported at the moment
 
+    test(args, model, device, test_loader, 1)
     for epoch in range(1, args.epochs + 1):
-        train(args, model, device, federated_train_loader, optimizer, epoch)
-        test(args, model, device, test_loader)
+        train(args, model, device, train_loader, optimizer, epoch)
+        test(args, model, device, test_loader, epoch)
 
     if args.save_model:
         torch.save(model.state_dict(), "chestxray.pt")

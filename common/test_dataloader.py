@@ -20,5 +20,7 @@ def test_load():
     )  # TODO: Add normalization
     x = PPPP('Labels.csv', train=True, transform=tf)
     img, label = x[0]
+    print(img)
+    print(label)
 
 
