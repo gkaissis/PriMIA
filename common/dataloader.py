@@ -8,13 +8,14 @@ import syft as sy
 
 
 def single_channel_loader(filename):
-    with open(filename, 'rb') as f:
+    with open(filename, "rb") as f:
         img = Image.open(f)
         return img.copy()
 
 
 class PPPP(sy.BaseDataset):
     def __init__(self, label_path="Labels.csv", train=False, transform=None):
+        self.class_names = {0: "normal", 1: "bacterial pneumonia", 2: "viral pneumonia"}
         self.train = train
         self.labels = pd.read_csv(label_path)
         self.labels = self.labels[
@@ -35,18 +36,28 @@ class PPPP(sy.BaseDataset):
             img = self.transform(img)
         return img, label
 
-    
+    def get_class_name(self, numeric_label):
+        return self.class_names[numeric_label]
 
 
 if __name__ == "__main__":
-    ds = PPPP(transform=transforms.Compose([transforms.Resize(224), transforms.CenterCrop(224)]))
+    ds = PPPP(
+        transform=transforms.Compose(
+            [transforms.Resize(224), transforms.CenterCrop(224)]
+        )
+    )
     L = len(ds)
     img, label = ds[1]
-    img.show()
+    # img.show()
     tf = transforms.Compose(
-    [transforms.Resize(224), transforms.CenterCrop(224), transforms.ToTensor()]
+        [transforms.Resize(224), transforms.CenterCrop(224), transforms.ToTensor()]
     )  # TODO: Add normalization
     ds = PPPP(train=True, transform=tf)
     img, label = ds[0]
     print(img.size())
     print(label)
+    ds = PPPP()
+    import matplotlib.pyplot as plt
+
+    hist = ds.labels.hist(bins=3, column="Numeric_Label")
+    plt.show()

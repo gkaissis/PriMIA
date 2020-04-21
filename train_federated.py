@@ -7,9 +7,11 @@ import argparse
 import visdom
 import tqdm
 import numpy as np
+from tabulate import tabulate
 from torchvision import datasets, transforms, models
 from common.dataloader import PPPP
 from common.models import vgg16, Net
+from common.utils import LearningRateScheduler
 
 
 parser = argparse.ArgumentParser()
@@ -45,10 +47,13 @@ class Arguments:
         self.test_batch_size = config.getint("config", "test_batch_size", fallback=1)
         self.epochs = config.getint("config", "epochs", fallback=1)
         self.lr = config.getfloat("config", "lr", fallback=1e-3)
+        self.end_lr = config.getfloat("config", "end_lr", fallback=self.lr)
         self.momentum = config.getfloat("config", "momentum", fallback=0.5)
         self.no_cuda = config.getboolean("config", "no_cuda", fallback=False)
         self.seed = config.getint("config", "seed", fallback=1)
+        self.test_interval = config.getint("config", "test_interval", fallback=1)
         self.log_interval = config.getint("config", "log_interval", fallback=10)
+        self.save_interval = config.getint("config", "save_interval", fallback=10)
         self.save_model = config.getboolean("config", "save_model", fallback=False)
         self.train_federated = cmd_args.train_federated
         # print('Train federated: {0}'.format(self.train_federated))
@@ -131,6 +136,7 @@ test_loader = torch.utils.data.DataLoader(
     testset, batch_size=args.test_batch_size, shuffle=True, **kwargs
 )
 L = len(train_loader)
+scheduler = LearningRateScheduler(args.epochs, np.log10(args.lr), np.log10(args.end_lr))
 
 ## visdom
 if args.visdom:
@@ -157,6 +163,13 @@ if args.visdom:
             "xlabel": "epochs",
             "ylabel": "loss",
         },
+        env=vis_env,
+    )
+    vis.line(
+        X=np.zeros((1, 1)),
+        Y=np.zeros((1, 1)),
+        win="lr_win",
+        opts={"legend": ["learning_rate"], "xlabel": "epochs", "ylabel": "lr"},
         env=vis_env,
     )
     div = 1.0 / float(L)
@@ -193,22 +206,28 @@ def train(args, model, device, train_loader, optimizer, epoch):
                 )
             else:
                 avg_loss.append(loss.item)
-    print(
-        "Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}".format(
-            epoch,
-            batch_idx * args.batch_size,
-            len(train_loader)
-            * args.batch_size,  # batch_idx * len(data), len(train_loader.dataset),
-            100.0 * batch_idx / len(train_loader),
-            np.mean(avg_loss),
+    if not args.visdom:
+        print(
+            "Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}".format(
+                epoch,
+                batch_idx * args.batch_size,
+                len(train_loader)
+                * args.batch_size,  # batch_idx * len(data), len(train_loader.dataset),
+                100.0 * batch_idx / len(train_loader),
+                np.mean(avg_loss),
+            )
         )
-    )
 
 
 def test(args, model, device, test_loader, epoch):
     model.eval()
     test_loss = 0
     correct = 0
+    correct_per_class = {}
+    incorrect_per_class = {}
+    for i in range(num_classes):
+        correct_per_class[i] = 0
+        incorrect_per_class[i] = 0
     with torch.no_grad():
         for data, target in tqdm.tqdm(
             test_loader, total=len(test_loader), desc="testing", leave=False
@@ -221,21 +240,43 @@ def test(args, model, device, test_loader, epoch):
             pred = output.argmax(
                 1, keepdim=True
             )  # get the index of the max log-probability
-            correct += pred.eq(target.view_as(pred)).sum().item()
+            tgts = target.view_as(pred)
+            equal = pred.eq(tgts)
+            for i, t in enumerate(tgts):
+                t = t.item()
+                if equal[i]:
+                    correct_per_class[t] += 1
+                else:
+                    incorrect_per_class[t] += 1
+            correct += equal.sum().item()
 
     test_loss /= len(test_loader.dataset)
 
     print(
-        "\nTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n".format(
+        "\nTest set: Epoch: {:d} Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n".format(
+            epoch,
             test_loss,
             correct,
             len(test_loader.dataset),
             100.0 * correct / len(test_loader.dataset),
-        )
+        ),
+        end="",
     )
+    rows = []
+    for i, v in correct_per_class.items():
+        total = v + incorrect_per_class[i]
+        rows.append(
+            [
+                dataset.get_class_name(i) if hasattr(dataset, "get_class_name") else i,
+                "{:.1f} %".format(100.0 * (v / float(total))),
+                v,
+                total,
+            ]
+        )
+    print(tabulate(rows, headers=["Class", "Accuracy", "n correct", "n total"]))
     if args.visdom:
         vis.line(
-            X=np.asarray([epoch - 1]),
+            X=np.asarray([epoch]),
             Y=np.asarray([test_loss]),
             win="loss_win",
             name="val_loss",
@@ -254,10 +295,35 @@ if __name__ == "__main__":
         model.parameters(), lr=args.lr
     )  # TODO momentum is not supported at the moment
 
-    test(args, model, device, test_loader, 1)
+    test(args, model, device, test_loader, 0)
     for epoch in range(1, args.epochs + 1):
+        new_lr = scheduler.adjust_learning_rate(optimizer, epoch - 1)
+        if args.visdom:
+            vis.line(
+                X=np.asarray([epoch - 1]),
+                Y=np.asarray([new_lr]),
+                win="lr_win",
+                name="learning_rate",
+                update="append",
+                env=vis_env,
+            )
         train(args, model, device, train_loader, optimizer, epoch)
-        test(args, model, device, test_loader, epoch)
+        if (epoch % args.test_interval) == 0:
+            test(args, model, device, test_loader, epoch)
+
+        if args.save_model and (epoch % args.save_interval) == 0:
+            torch.save(
+                model.state_dict(),
+                "model_weights/{:s}_chestxray_epoch_{:3d}.pt".format(
+                    "federated" if args.train_federated else "vanilla", epoch
+                ),
+            )
 
     if args.save_model:
-        torch.save(model.state_dict(), "chestxray.pt")
+        torch.save(
+            model.state_dict(),
+            "model_weights/{:s}_chestxray_final.pt".format(
+                "federated" if args.train_federated else "vanilla"
+            ),
+        )
+
