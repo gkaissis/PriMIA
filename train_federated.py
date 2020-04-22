@@ -35,6 +35,18 @@ parser.add_argument(
 parser.add_argument(
     "--no_visdom", action="store_false", help="dont use a visdom server"
 )
+parser.add_argument(
+    "--start_at_epoch",
+    type=int,
+    default=1,
+    help="At which epoch should the training start?",
+)
+parser.add_argument(
+    "--resume_checkpoint",
+    type=str,
+    default=None,
+    help="Start training from older model checkpoint",
+)
 cmd_args = parser.parse_args()
 
 config = configparser.ConfigParser()
@@ -83,9 +95,6 @@ device = torch.device("cuda" if use_cuda else "cpu")  # pylint: disable=no-membe
 
 kwargs = {"num_workers": 1, "pin_memory": True} if use_cuda else {}
 
-tf = transforms.Compose(
-    [transforms.Resize(224), transforms.CenterCrop(224), transforms.ToTensor()]
-)  # TODO: Add normalization
 
 if args.dataset == "mnist":
     num_classes = 10
@@ -114,6 +123,9 @@ if args.dataset == "mnist":
     )
 elif args.dataset == "pneumonia":
     num_classes = 3
+    tf = transforms.Compose(
+        [transforms.Resize(224), transforms.CenterCrop(224), transforms.ToTensor()]
+    )  # TODO: Add normalization
     dataset = PPPP("Labels.csv", train=False, transform=tf)
     testset = PPPP("Labels.csv", train=False, transform=tf)
 else:
@@ -288,6 +300,8 @@ def test(args, model, device, test_loader, epoch):
 if __name__ == "__main__":
     # model = Net().to(device)
     model = vgg16(pretrained=False, num_classes=num_classes, in_channels=1)
+    if cmd_args.resume_checkpoint:
+        model.load_state_dict(torch.load(cmd_args.resume_checkpoint))
     # model = models.vgg16(pretrained=False, num_classes=3)
     # model.classifier = vggclassifier()
     model.to(device)
@@ -295,8 +309,8 @@ if __name__ == "__main__":
         model.parameters(), lr=args.lr
     )  # TODO momentum is not supported at the moment
 
-    test(args, model, device, test_loader, 0)
-    for epoch in range(1, args.epochs + 1):
+    test(args, model, device, test_loader, cmd_args.start_at_epoch - 1)
+    for epoch in range(cmd_args.start_at_epoch, args.epochs + 1):
         new_lr = scheduler.adjust_learning_rate(optimizer, epoch - 1)
         if args.visdom:
             vis.line(
@@ -314,7 +328,7 @@ if __name__ == "__main__":
         if args.save_model and (epoch % args.save_interval) == 0:
             torch.save(
                 model.state_dict(),
-                "model_weights/{:s}_chestxray_epoch_{:3d}.pt".format(
+                "model_weights/{:s}_chestxray_epoch_{:03d}.pt".format(
                     "federated" if args.train_federated else "vanilla", epoch
                 ),
             )
@@ -326,4 +340,3 @@ if __name__ == "__main__":
                 "federated" if args.train_federated else "vanilla"
             ),
         )
-
