@@ -1,7 +1,12 @@
 # Private Paediatric Pneumonia Prediction (4P)
 
-## Please check [this file](Dataset_Description.md) for information on how to use this dataset
+## Dataset 
+Please check [this file](docs/Dataset_Description.md) for information on how to use this dataset.
 
+## Allocating data to clients for federated learning
+The [client_data.py](common/client_data.py) script can be used to allocate the dataset to specific clients. All federated training code should rely on this script to generate data for experiments, and should make note of any changes to default parameters for reproducibility.
+
+You can use the script by running `python client_data.py` at the command line. This will populate the `data/train_clients/` and `data/test_clients/` directories with client-allocated data. See the script for configuration options (or use `python client_data.py -h`).
 
 ___
 

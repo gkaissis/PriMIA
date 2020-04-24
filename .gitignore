@@ -1,3 +1,5 @@
+data/*_clients/*/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
