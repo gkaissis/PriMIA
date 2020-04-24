@@ -9,7 +9,7 @@ import syft as sy
 
 def single_channel_loader(filename):
     with open(filename, "rb") as f:
-        img = Image.open(f)
+        img = Image.open(f).convert("L")
         return img.copy()
 
 
@@ -39,6 +39,9 @@ class PPPP(sy.BaseDataset):
     def get_class_name(self, numeric_label):
         return self.class_names[numeric_label]
 
+    def get_class_occurances(self):
+        return dict(self.labels["Numeric_Label"].value_counts())
+
 
 if __name__ == "__main__":
     ds = PPPP(
@@ -46,16 +49,29 @@ if __name__ == "__main__":
             [transforms.Resize(224), transforms.CenterCrop(224)]
         )
     )
+    ds.get_class_occurances()
     L = len(ds)
+    print("length test set: {:d}".format(L))
     img, label = ds[1]
     # img.show()
     tf = transforms.Compose(
         [transforms.Resize(224), transforms.CenterCrop(224), transforms.ToTensor()]
     )  # TODO: Add normalization
     ds = PPPP(train=True, transform=tf)
+    L = len(ds)
+    print("length train set: {:d}".format(L))
     img, label = ds[0]
     print(img.size())
     print(label)
+    """
+    cnt = 0
+    import tqdm
+
+    for img, label in tqdm.tqdm(ds, total=L, leave=False):
+        if img.size(0) != 1:
+            cnt += 1
+    print("{:d} images that are not grayscale".format(cnt))"""
+
     ds = PPPP()
     import matplotlib.pyplot as plt
 
