@@ -9,9 +9,9 @@ import tqdm
 import numpy as np
 from tabulate import tabulate
 from torchvision import datasets, transforms, models
-from common.dataloader import PPPP
-from common.models import vgg16, resnet18, Net
-from common.utils import LearningRateScheduler
+from torchlib.dataloader import PPPP
+from torchlib.models import vgg16, resnet18, Net
+from torchlib.utils import LearningRateScheduler
 
 
 class Arguments:
@@ -281,8 +281,8 @@ if __name__ == "__main__":
                 transforms.ToTensor(),
             ]
         )
-        dataset = PPPP("Labels.csv", train=True, transform=train_tf)
-        testset = PPPP("Labels.csv", train=False, transform=test_tf)
+        dataset = PPPP("data/Labels.csv", train=True, transform=train_tf)
+        testset = PPPP("data/Labels.csv", train=False, transform=test_tf)
     else:
         raise NotImplementedError("dataset not implemented")
 

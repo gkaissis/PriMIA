@@ -14,7 +14,7 @@ def single_channel_loader(filename):
 
 
 class PPPP(sy.BaseDataset):
-    def __init__(self, label_path="Labels.csv", train=False, transform=None):
+    def __init__(self, label_path="data/Labels.csv", train=False, transform=None):
         self.class_names = {0: "normal", 1: "bacterial pneumonia", 2: "viral pneumonia"}
         self.train = train
         self.labels = pd.read_csv(label_path)
@@ -30,7 +30,7 @@ class PPPP(sy.BaseDataset):
         row = self.labels.iloc[index]
         label = row["Numeric_Label"]
         path = "train" if self.train else "test"
-        path = os.path.join(path, row["X_ray_image_name"])
+        path = os.path.join('data', path, row["X_ray_image_name"])
         img = single_channel_loader(path)
         if self.transform:
             img = self.transform(img)
