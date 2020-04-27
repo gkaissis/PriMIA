@@ -113,6 +113,14 @@ def test(args, model, device, test_loader, epoch, num_classes):
                 total,
             ]
         )
+    rows.append(
+        [
+            "Total",
+            "{:.1f} %".format(100.0 * correct / len(test_loader.dataset)),
+            correct,
+            len(test_loader.dataset),
+        ]
+    )
     print(tabulate(rows, headers=["Class", "Accuracy", "n correct", "n total"]))
     if args.visdom:
         vis.line(
@@ -180,6 +188,7 @@ if __name__ == "__main__":
             self.test_batch_size = config.getint(
                 "config", "test_batch_size", fallback=1
             )
+            self.resolution = config.getint("config", "resolution", fallback=224)
             self.epochs = config.getint("config", "epochs", fallback=1)
             self.lr = config.getfloat("config", "lr", fallback=1e-3)
             self.end_lr = config.getfloat("config", "end_lr", fallback=self.lr)
@@ -196,9 +205,10 @@ if __name__ == "__main__":
             self.visdom = cmd_args.no_visdom
             self.optimizer = config.get("config", "optimizer", fallback="SGD")
             assert self.optimizer in ["SGD", "Adam"], "Unknown optimizer"
-            if self.optimizer == 'Adam':
-                self.beta1 = config.getfloat('config', 'beta1', fallback=0.9)
-                self.beta2 = config.getfloat('config', 'beta2', fallback=0.999)
+            if self.optimizer == "Adam":
+                self.beta1 = config.getfloat("config", "beta1", fallback=0.9)
+                self.beta2 = config.getfloat("config", "beta2", fallback=0.999)
+            self.weight_decay = config.getfloat("config", "weight_decay", fallback=0.0)
             self.class_weights = config.getboolean(
                 "config", "weight_classes", fallback=False
             )
@@ -251,7 +261,11 @@ if __name__ == "__main__":
     elif args.dataset == "pneumonia":
         num_classes = 3
         tf = transforms.Compose(
-            [transforms.Resize(224), transforms.CenterCrop(224), transforms.ToTensor()]
+            [
+                transforms.Resize(args.resolution),
+                transforms.CenterCrop(args.resolution),
+                transforms.ToTensor(),
+            ]
         )  # TODO: Add normalization
         dataset = PPPP("Labels.csv", train=True, transform=tf)
         testset = PPPP("Labels.csv", train=False, transform=tf)
@@ -278,7 +292,7 @@ if __name__ == "__main__":
     if args.class_weights:
         occurances = {}
         if hasattr(dataset, "get_class_occurances"):
-            occurances = dataset.get_class_occurances
+            occurances = dataset.get_class_occurances()
         else:
             for _, c in tqdm.tqdm(
                 dataset, total=len(dataset), leave=False, desc="calc class weights"
@@ -338,12 +352,15 @@ if __name__ == "__main__":
     model.to(device)
     if args.optimizer == "SGD":
         optimizer = optim.SGD(
-            model.parameters(), lr=args.lr
+            model.parameters(), lr=args.lr, weight_decay=args.weight_decay,
         )  # TODO momentum is not supported at the moment
     elif args.optimizer == "Adam":
         optimizer = optim.Adam(
-            model.parameters(), lr=args.lr, betas=(args.beta1, args.beta2)
-        )  # TODO: add to config
+            model.parameters(),
+            lr=args.lr,
+            betas=(args.beta1, args.beta2),
+            weight_decay=args.weight_decay,
+        )
     else:
         raise NotImplementedError("optimization not implemented")
 
