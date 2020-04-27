@@ -15,6 +15,7 @@ def provide_client_data_fn(
     clients_dir: pathlib.Path,
     img_height: int,
     img_width: int,
+    batch_size: int,
     augment_fn: callable = None):
   process_path = _provide_process_fn(
       img_width=img_width, img_height=img_height)
@@ -26,7 +27,7 @@ def provide_client_data_fn(
     ds = ds.map(process_path, num_parallel_calls=AUTOTUNE)
     if augment_fn is not None:
       ds = ds.map(augment_fn, num_parallel_calls=AUTOTUNE)
-    return ds
+    return ds.batch(batch_size)
 
   return create_tf_dataset_for_client
 
@@ -35,7 +36,7 @@ def _get_label(file_path):
   # convert the path to a list of path components
   parts = tf.strings.split(file_path, os.path.sep)
   # The second to last is the class-directory
-  return int(parts[-2])
+  return tf.cast(int(parts[-2]), tf.int64)
 
 
 def _decode_img(img, img_width, img_height):
