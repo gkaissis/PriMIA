@@ -10,11 +10,48 @@ import numpy as np
 from tabulate import tabulate
 from torchvision import datasets, transforms, models
 from common.dataloader import PPPP
-from common.models import vgg16, Net
+from common.models import vgg16, resnet18, Net
 from common.utils import LearningRateScheduler
 
 
-def train(args, model, device, train_loader, optimizer, epoch, class_weights=None):
+class Arguments:
+    def __init__(self, cmd_args, config):
+        self.batch_size = config.getint("config", "batch_size", fallback=1)
+        self.test_batch_size = config.getint("config", "test_batch_size", fallback=1)
+        self.train_resolution = config.getint(
+            "config", "train_resolution", fallback=224
+        )
+        self.inference_resolution = config.getint(
+            "config", "inference_resolution", fallback=self.train_resolution
+        )
+        self.epochs = config.getint("config", "epochs", fallback=1)
+        self.lr = config.getfloat("config", "lr", fallback=1e-3)
+        self.end_lr = config.getfloat("config", "end_lr", fallback=self.lr)
+        self.momentum = config.getfloat("config", "momentum", fallback=0.5)
+        self.no_cuda = (
+            cmd_args.no_cuda
+        )  # config.getboolean("config", "no_cuda", fallback=False)
+        self.seed = config.getint("config", "seed", fallback=1)
+        self.test_interval = config.getint("config", "test_interval", fallback=1)
+        self.log_interval = config.getint("config", "log_interval", fallback=10)
+        self.save_interval = config.getint("config", "save_interval", fallback=10)
+        self.save_model = config.getboolean("config", "save_model", fallback=False)
+        self.train_federated = cmd_args.train_federated
+        # print('Train federated: {0}'.format(self.train_federated))
+        self.dataset = cmd_args.dataset  # options: ['pneumonia', 'mnist']
+        self.visdom = cmd_args.no_visdom
+        self.optimizer = config.get("config", "optimizer", fallback="SGD")
+        assert self.optimizer in ["SGD", "Adam"], "Unknown optimizer"
+        if self.optimizer == "Adam":
+            self.beta1 = config.getfloat("config", "beta1", fallback=0.9)
+            self.beta2 = config.getfloat("config", "beta2", fallback=0.999)
+        self.weight_decay = config.getfloat("config", "weight_decay", fallback=0.0)
+        self.class_weights = config.getboolean(
+            "config", "weight_classes", fallback=False
+        )
+
+
+def train(args, model, device, train_loader, optimizer, epoch, loss_fn):
     model.train()
     avg_loss = []
     for batch_idx, (data, target) in tqdm.tqdm(
@@ -25,7 +62,7 @@ def train(args, model, device, train_loader, optimizer, epoch, class_weights=Non
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
         output = model(data)
-        loss = F.nll_loss(output, target, weight=class_weights)
+        loss = loss_fn(output, target)
         loss.backward()
         optimizer.step()
         if args.train_federated:
@@ -58,7 +95,7 @@ def train(args, model, device, train_loader, optimizer, epoch, class_weights=Non
         )
 
 
-def test(args, model, device, test_loader, epoch, num_classes):
+def test(args, model, device, test_loader, epoch, loss_fn, num_classes):
     model.eval()
     test_loss = 0
     correct = 0
@@ -73,9 +110,7 @@ def test(args, model, device, test_loader, epoch, num_classes):
         ):
             data, target = data.to(device), target.to(device)
             output = model(data)
-            test_loss += F.nll_loss(
-                output, target, reduction="sum"
-            ).item()  # sum up batch loss
+            test_loss += loss_fn(output, target).item()  # sum up batch loss
             pred = output.argmax(
                 1, keepdim=True
             )  # get the index of the max log-probability
@@ -89,7 +124,7 @@ def test(args, model, device, test_loader, epoch, num_classes):
                     incorrect_per_class[t] += 1
             correct += equal.sum().item()
 
-    test_loss /= len(test_loader.dataset)
+    test_loss /= len(test_loader)
 
     print(
         "\nTest set: Epoch: {:d} Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n".format(
@@ -166,6 +201,9 @@ if __name__ == "__main__":
         "--no_visdom", action="store_false", help="dont use a visdom server"
     )
     parser.add_argument(
+        "--no_cuda", action="store_true", help="dont use a visdom server"
+    )
+    parser.add_argument(
         "--start_at_epoch",
         type=int,
         default=1,
@@ -181,37 +219,6 @@ if __name__ == "__main__":
 
     config = configparser.ConfigParser()
     config.read(cmd_args.config)
-
-    class Arguments:
-        def __init__(self, cmd_args, config):
-            self.batch_size = config.getint("config", "batch_size", fallback=1)
-            self.test_batch_size = config.getint(
-                "config", "test_batch_size", fallback=1
-            )
-            self.resolution = config.getint("config", "resolution", fallback=224)
-            self.epochs = config.getint("config", "epochs", fallback=1)
-            self.lr = config.getfloat("config", "lr", fallback=1e-3)
-            self.end_lr = config.getfloat("config", "end_lr", fallback=self.lr)
-            self.momentum = config.getfloat("config", "momentum", fallback=0.5)
-            self.no_cuda = config.getboolean("config", "no_cuda", fallback=False)
-            self.seed = config.getint("config", "seed", fallback=1)
-            self.test_interval = config.getint("config", "test_interval", fallback=1)
-            self.log_interval = config.getint("config", "log_interval", fallback=10)
-            self.save_interval = config.getint("config", "save_interval", fallback=10)
-            self.save_model = config.getboolean("config", "save_model", fallback=False)
-            self.train_federated = cmd_args.train_federated
-            # print('Train federated: {0}'.format(self.train_federated))
-            self.dataset = cmd_args.dataset  # options: ['pneumonia', 'mnist']
-            self.visdom = cmd_args.no_visdom
-            self.optimizer = config.get("config", "optimizer", fallback="SGD")
-            assert self.optimizer in ["SGD", "Adam"], "Unknown optimizer"
-            if self.optimizer == "Adam":
-                self.beta1 = config.getfloat("config", "beta1", fallback=0.9)
-                self.beta2 = config.getfloat("config", "beta2", fallback=0.999)
-            self.weight_decay = config.getfloat("config", "weight_decay", fallback=0.0)
-            self.class_weights = config.getboolean(
-                "config", "weight_classes", fallback=False
-            )
 
     args = Arguments(cmd_args, config)
 
@@ -260,15 +267,22 @@ if __name__ == "__main__":
         )
     elif args.dataset == "pneumonia":
         num_classes = 3
-        tf = transforms.Compose(
+        train_tf = transforms.Compose(
             [
-                transforms.Resize(args.resolution),
-                transforms.CenterCrop(args.resolution),
+                transforms.Resize(args.inference_resolution),
+                transforms.RandomCrop(args.train_resolution),
                 transforms.ToTensor(),
             ]
         )  # TODO: Add normalization
-        dataset = PPPP("Labels.csv", train=True, transform=tf)
-        testset = PPPP("Labels.csv", train=False, transform=tf)
+        test_tf = transforms.Compose(
+            [
+                transforms.Resize(args.inference_resolution),
+                transforms.CenterCrop(args.inference_resolution),
+                transforms.ToTensor(),
+            ]
+        )
+        dataset = PPPP("Labels.csv", train=True, transform=train_tf)
+        testset = PPPP("Labels.csv", train=False, transform=test_tf)
     else:
         raise NotImplementedError("dataset not implemented")
 
@@ -347,6 +361,7 @@ if __name__ == "__main__":
         div = 1.0 / float(L)
     # model = Net().to(device)
     model = vgg16(pretrained=False, num_classes=num_classes, in_channels=1)
+    # model = resnet18(pretrained=False, num_classes=num_classes, in_channels=1)
     # model = models.vgg16(pretrained=False, num_classes=3)
     # model.classifier = vggclassifier()
     model.to(device)
@@ -363,6 +378,7 @@ if __name__ == "__main__":
         )
     else:
         raise NotImplementedError("optimization not implemented")
+    loss_fn = nn.CrossEntropyLoss(weight=cw, reduction="mean")
 
     if cmd_args.resume_checkpoint:
         state = torch.load(cmd_args.resume_checkpoint)
@@ -377,7 +393,8 @@ if __name__ == "__main__":
         device,
         test_loader,
         cmd_args.start_at_epoch - 1,
-        num_classes=num_classes,
+        loss_fn,
+        num_classes,
     )
     for epoch in range(cmd_args.start_at_epoch, args.epochs + 1):
         new_lr = scheduler.adjust_learning_rate(optimizer, epoch - 1)
@@ -390,9 +407,17 @@ if __name__ == "__main__":
                 update="append",
                 env=vis_env,
             )
-        train(args, model, device, train_loader, optimizer, epoch)
+        train(args, model, device, train_loader, optimizer, epoch, loss_fn)
         if (epoch % args.test_interval) == 0:
-            test(args, model, device, test_loader, epoch, num_classes=num_classes)
+            test(
+                args,
+                model,
+                device,
+                test_loader,
+                epoch,
+                loss_fn,
+                num_classes=num_classes,
+            )
 
         if args.save_model and (epoch % args.save_interval) == 0:
             save_model(
