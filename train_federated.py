@@ -6,176 +6,13 @@ import configparser
 import argparse
 import visdom
 import tqdm
+from os import path
 import numpy as np
 from tabulate import tabulate
 from torchvision import datasets, transforms, models
 from torchlib.dataloader import PPPP
 from torchlib.models import vgg16, resnet18, Net
-from torchlib.utils import LearningRateScheduler
-
-
-class Arguments:
-    def __init__(self, cmd_args, config):
-        self.batch_size = config.getint("config", "batch_size", fallback=1)
-        self.test_batch_size = config.getint("config", "test_batch_size", fallback=1)
-        self.train_resolution = config.getint(
-            "config", "train_resolution", fallback=224
-        )
-        self.inference_resolution = config.getint(
-            "config", "inference_resolution", fallback=self.train_resolution
-        )
-        self.epochs = config.getint("config", "epochs", fallback=1)
-        self.lr = config.getfloat("config", "lr", fallback=1e-3)
-        self.end_lr = config.getfloat("config", "end_lr", fallback=self.lr)
-        self.momentum = config.getfloat("config", "momentum", fallback=0.5)
-        self.no_cuda = (
-            cmd_args.no_cuda
-        )  # config.getboolean("config", "no_cuda", fallback=False)
-        self.seed = config.getint("config", "seed", fallback=1)
-        self.test_interval = config.getint("config", "test_interval", fallback=1)
-        self.log_interval = config.getint("config", "log_interval", fallback=10)
-        self.save_interval = config.getint("config", "save_interval", fallback=10)
-        self.save_model = config.getboolean("config", "save_model", fallback=False)
-        self.train_federated = cmd_args.train_federated
-        # print('Train federated: {0}'.format(self.train_federated))
-        self.dataset = cmd_args.dataset  # options: ['pneumonia', 'mnist']
-        self.visdom = cmd_args.no_visdom
-        self.optimizer = config.get("config", "optimizer", fallback="SGD")
-        assert self.optimizer in ["SGD", "Adam"], "Unknown optimizer"
-        if self.optimizer == "Adam":
-            self.beta1 = config.getfloat("config", "beta1", fallback=0.9)
-            self.beta2 = config.getfloat("config", "beta2", fallback=0.999)
-        self.weight_decay = config.getfloat("config", "weight_decay", fallback=0.0)
-        self.class_weights = config.getboolean(
-            "config", "weight_classes", fallback=False
-        )
-
-
-def train(args, model, device, train_loader, optimizer, epoch, loss_fn):
-    model.train()
-    avg_loss = []
-    for batch_idx, (data, target) in tqdm.tqdm(
-        enumerate(train_loader), leave=False, desc="training", total=L
-    ):  # <-- now it is a distributed dataset
-        if args.train_federated:
-            model.send(data.location)  # <-- NEW: send the model to the right location
-        data, target = data.to(device), target.to(device)
-        optimizer.zero_grad()
-        output = model(data)
-        loss = loss_fn(output, target)
-        loss.backward()
-        optimizer.step()
-        if args.train_federated:
-            model.get()  # <-- NEW: get the model back
-        if batch_idx % args.log_interval == 0:
-            if args.train_federated:
-                loss = loss.get()  # <-- NEW: get the loss back
-
-            if args.visdom:
-                vis.line(
-                    X=np.asarray([epoch + float(batch_idx) * div - 1]),
-                    Y=np.asarray([loss.item()]),
-                    win="loss_win",
-                    name="train_loss",
-                    update="append",
-                    env=vis_env,
-                )
-            else:
-                avg_loss.append(loss.item)
-    if not args.visdom:
-        print(
-            "Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}".format(
-                epoch,
-                batch_idx * args.batch_size,
-                len(train_loader)
-                * args.batch_size,  # batch_idx * len(data), len(train_loader.dataset),
-                100.0 * batch_idx / len(train_loader),
-                np.mean(avg_loss),
-            )
-        )
-
-
-def test(args, model, device, test_loader, epoch, loss_fn, num_classes):
-    model.eval()
-    test_loss = 0
-    correct = 0
-    correct_per_class = {}
-    incorrect_per_class = {}
-    for i in range(num_classes):
-        correct_per_class[i] = 0
-        incorrect_per_class[i] = 0
-    with torch.no_grad():
-        for data, target in tqdm.tqdm(
-            test_loader, total=len(test_loader), desc="testing", leave=False
-        ):
-            data, target = data.to(device), target.to(device)
-            output = model(data)
-            test_loss += loss_fn(output, target).item()  # sum up batch loss
-            pred = output.argmax(
-                1, keepdim=True
-            )  # get the index of the max log-probability
-            tgts = target.view_as(pred)
-            equal = pred.eq(tgts)
-            for i, t in enumerate(tgts):
-                t = t.item()
-                if equal[i]:
-                    correct_per_class[t] += 1
-                else:
-                    incorrect_per_class[t] += 1
-            correct += equal.sum().item()
-
-    test_loss /= len(test_loader)
-
-    print(
-        "\nTest set: Epoch: {:d} Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n".format(
-            epoch,
-            test_loss,
-            correct,
-            len(test_loader.dataset),
-            100.0 * correct / len(test_loader.dataset),
-        ),
-        end="",
-    )
-    rows = []
-    dataset = test_loader.dataset
-    for i, v in correct_per_class.items():
-        total = v + incorrect_per_class[i]
-        rows.append(
-            [
-                dataset.get_class_name(i) if hasattr(dataset, "get_class_name") else i,
-                "{:.1f} %".format(100.0 * (v / float(total))),
-                v,
-                total,
-            ]
-        )
-    rows.append(
-        [
-            "Total",
-            "{:.1f} %".format(100.0 * correct / len(test_loader.dataset)),
-            correct,
-            len(test_loader.dataset),
-        ]
-    )
-    print(tabulate(rows, headers=["Class", "Accuracy", "n correct", "n total"]))
-    if args.visdom:
-        vis.line(
-            X=np.asarray([epoch]),
-            Y=np.asarray([test_loss]),
-            win="loss_win",
-            name="val_loss",
-            update="append",
-            env=vis_env,
-        )
-
-
-def save_model(model, optim, path):
-    torch.save(
-        {
-            "model_state_dict": model.state_dict(),
-            "optim_state_dict": optim.state_dict(),
-        },
-        path,
-    )
+from torchlib.utils import LearningRateScheduler, Arguments, train, test, save_model
 
 
 if __name__ == "__main__":
@@ -218,9 +55,10 @@ if __name__ == "__main__":
     cmd_args = parser.parse_args()
 
     config = configparser.ConfigParser()
+    assert path.isfile(cmd_args.config), "config file not found"
     config.read(cmd_args.config)
 
-    args = Arguments(cmd_args, config)
+    args = Arguments(cmd_args, config, mode='train')
 
     if args.train_federated:
         import syft as sy
@@ -301,7 +139,6 @@ if __name__ == "__main__":
     test_loader = torch.utils.data.DataLoader(
         testset, batch_size=args.test_batch_size, shuffle=True, **kwargs
     )
-    L = len(train_loader)
     cw = None
     if args.class_weights:
         occurances = {}
@@ -341,13 +178,13 @@ if __name__ == "__main__":
             legend=["train_loss"],
         )
         vis.line(
-            X=np.zeros((1, 2)),
-            Y=np.zeros((1, 2)),
+            X=np.zeros((1, 3)),
+            Y=np.zeros((1, 3)),
             win="loss_win",
             opts={
-                "legend": ["train_loss", "val_loss"],
+                "legend": ["train_loss", "val_loss", "accuracy"],
                 "xlabel": "epochs",
-                "ylabel": "loss",
+                "ylabel": "loss / accuracy [%]",
             },
             env=vis_env,
         )
@@ -358,13 +195,12 @@ if __name__ == "__main__":
             opts={"legend": ["learning_rate"], "xlabel": "epochs", "ylabel": "lr"},
             env=vis_env,
         )
-        div = 1.0 / float(L)
+        vis_params = {"vis": vis, "vis_env": vis_env}
     # model = Net().to(device)
     model = vgg16(pretrained=False, num_classes=num_classes, in_channels=1)
     # model = resnet18(pretrained=False, num_classes=num_classes, in_channels=1)
     # model = models.vgg16(pretrained=False, num_classes=3)
     # model.classifier = vggclassifier()
-    model.to(device)
     if args.optimizer == "SGD":
         optimizer = optim.SGD(
             model.parameters(), lr=args.lr, weight_decay=args.weight_decay,
@@ -381,12 +217,14 @@ if __name__ == "__main__":
     loss_fn = nn.CrossEntropyLoss(weight=cw, reduction="mean")
 
     if cmd_args.resume_checkpoint:
-        state = torch.load(cmd_args.resume_checkpoint)
+        state = torch.load(cmd_args.resume_checkpoint, map_location=device)
         if "optim_state_dict" in state:
             optimizer.load_state_dict(state["optim_state_dict"])
             model.load_state_dict(state["model_state_dict"])
         else:
             model.load_state_dict(state)
+    model.to(device)
+        
     test(
         args,
         model,
@@ -395,6 +233,7 @@ if __name__ == "__main__":
         cmd_args.start_at_epoch - 1,
         loss_fn,
         num_classes,
+        vis_params=vis_params,
     )
     for epoch in range(cmd_args.start_at_epoch, args.epochs + 1):
         new_lr = scheduler.adjust_learning_rate(optimizer, epoch - 1)
@@ -407,7 +246,16 @@ if __name__ == "__main__":
                 update="append",
                 env=vis_env,
             )
-        train(args, model, device, train_loader, optimizer, epoch, loss_fn)
+        train(
+            args,
+            model,
+            device,
+            train_loader,
+            optimizer,
+            epoch,
+            loss_fn,
+            vis_params=vis_params,
+        )
         if (epoch % args.test_interval) == 0:
             test(
                 args,
@@ -417,14 +265,17 @@ if __name__ == "__main__":
                 epoch,
                 loss_fn,
                 num_classes=num_classes,
+                vis_params=vis_params,
             )
 
         if args.save_model and (epoch % args.save_interval) == 0:
             save_model(
                 model,
                 optimizer,
-                "model_weights/{:s}_chestxray_epoch_{:03d}.pt".format(
-                    "federated" if args.train_federated else "vanilla", epoch
+                "model_weights/{:s}_{:s}_epoch_{:03d}.pt".format(
+                    "federated" if args.train_federated else "vanilla",
+                    args.dataset,
+                    epoch,
                 ),
             )
 
@@ -432,7 +283,7 @@ if __name__ == "__main__":
         save_model(
             model,
             optimizer,
-            "model_weights/{:s}_chestxray_final.pt".format(
-                "federated" if args.train_federated else "vanilla"
+            "model_weights/{:s}_{:s}_final.pt".format(
+                "federated" if args.train_federated else "vanilla", args.dataset
             ),
         )

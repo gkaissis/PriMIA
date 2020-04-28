@@ -1,10 +1,20 @@
+"""
+This implementation is based on the pysyft tutorial:
+https://github.com/OpenMined/PySyft/blob/master/examples/tutorials/Part%2011%20-%20Secure%20Deep%20Learning%20Classification.ipynb
+"""
+
+
 import torch
 import configparser
 import argparse
+import syft as sy
 from torchvision import datasets, transforms, models
-from common.dataloader import PPPP
-from common.models import vgg16
+import sys, os.path
+
+sys.path.insert(0, os.path.split(sys.path[0])[0])  # TODO: make prettier
 from train_federated import test, Arguments
+from torchlib.dataloader import PPPP
+from torchlib.models import vgg16
 
 
 if __name__ == "__main__":
@@ -31,14 +41,25 @@ if __name__ == "__main__":
         default=None,
         help="Start training from older model checkpoint",
     )
+    parser.add_argument(
+        "--encrypted_inference", action="store_true", help="Perform encrypted inference"
+    )
+    parser.add_argument(
+        "--no_cuda", action="store_true", help="dont use a visdom server"
+    )
     cmd_args = parser.parse_args()
 
     config = configparser.ConfigParser()
     config.read(cmd_args.config)
 
+    args = Arguments(cmd_args, config, mode="inference")
 
-
-    args = Arguments(cmd_args, config)
+    if cmd_args.encrypted_inference:
+        hook = sy.TorchHook(torch)
+        client = sy.VirtualWorker(hook, id="client")
+        bob = sy.VirtualWorker(hook, id="bob")
+        alice = sy.VirtualWorker(hook, id="alice")
+        crypto_provider = sy.VirtualWorker(hook, id="crypto_provider")
 
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
@@ -70,21 +91,38 @@ if __name__ == "__main__":
                 transforms.ToTensor(),
             ]
         )
-        testset = PPPP("Labels.csv", train=False, transform=tf)
+        testset = PPPP("data/Labels.csv", train=False, transform=tf)
     else:
         raise NotImplementedError("dataset not implemented")
 
     test_loader = torch.utils.data.DataLoader(
         testset, batch_size=args.test_batch_size, shuffle=True, **kwargs
     )
+    if cmd_args.encrypted_inference:
+        priv_test_loader = []
+        for data, target in test_loader:
+            data.to(device)
+            target.to(device)
+            priv_test_loader.append(
+                (
+                    data.fix_prec().share(alice, bob, crypto_provider=crypto_provider),
+                    target.fix_prec().share(
+                        alice, bob, crypto_provider=crypto_provider
+                    ),
+                )
+            )
+        test_loader = priv_test_loader
+        del priv_test_loader
     # model = Net().to(device)
     model = vgg16(pretrained=False, num_classes=num_classes, in_channels=1)
-    state = torch.load(cmd_args.model_weights)
+    state = torch.load(cmd_args.model_weights, map_location=device)
     if "optim_state_dict" in state:
         state = state["model_state_dict"]
     model.load_state_dict(state)
     # model = models.vgg16(pretrained=False, num_classes=3)
     # model.classifier = vggclassifier()
     model.to(device)
-    loss_fn = lambda x: 0
+    if args.encrypted_inference:
+        model.fix_precision().share(alice, bob, crypto_provider=crypto_provider)
+    loss_fn = lambda x, y: torch.Tensor([0])
     test(args, model, device, test_loader, 0, loss_fn, num_classes)

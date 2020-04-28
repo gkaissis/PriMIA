@@ -1,6 +1,6 @@
 import sys
 from torchvision import transforms
-from common.dataloader import PPPP
+from torchlib.dataloader import PPPP
 
 
 def test_init():

@@ -68,13 +68,13 @@ class VGG(nn.Module):
         self.avgpool = nn.AdaptiveAvgPool2d((7, 7))
         self.classifier = nn.Sequential(
             nn.Linear(512 * 7 * 7, 4096),
-            nn.ReLU(True),
+            nn.ReLU(),  # True), changed for pysyft
             nn.Dropout(),
             nn.Linear(4096, 4096),
-            nn.ReLU(True),
+            nn.ReLU(),  # True), changed for pysyft
             nn.Dropout(),
             nn.Linear(4096, num_classes),
-            #nn.LogSoftmax(dim=1),
+            # nn.LogSoftmax(dim=1),
         )
         if init_weights:
             self._initialize_weights()
@@ -108,9 +108,13 @@ def make_layers(cfg, batch_norm=False, in_channels=3):
         else:
             conv2d = nn.Conv2d(in_channels, v, kernel_size=3, padding=1)
             if batch_norm:
-                layers += [conv2d, nn.BatchNorm2d(v), nn.ReLU(inplace=True)]
+                layers += [
+                    conv2d,
+                    nn.BatchNorm2d(v),
+                    nn.ReLU(),
+                ]  # inplace=True)] changed for pysyft
             else:
-                layers += [conv2d, nn.ReLU(inplace=True)]
+                layers += [conv2d, nn.ReLU()]  # inplace=True)] changed for pysyft
             in_channels = v
     return nn.Sequential(*layers)
 
@@ -317,7 +321,7 @@ class ResNet(nn.Module):
         )
         self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         self.fc = nn.Linear(512 * block.expansion, num_classes)
-        #self.sm = nn.LogSoftmax(dim=1)
+        # self.sm = nn.LogSoftmax(dim=1)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -392,7 +396,7 @@ class ResNet(nn.Module):
         x = self.avgpool(x)
         x = torch.flatten(x, 1)  # pylint: disable=no-member
         x = self.fc(x)
-        #x = self.sm(x)
+        # x = self.sm(x)
 
         return x
 
