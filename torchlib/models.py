@@ -1,4 +1,5 @@
 import torch
+from numpy import prod
 from torch import nn
 from torch.hub import load_state_dict_from_url
 
@@ -61,17 +62,37 @@ cfgs = {
 }
 
 
+class identity(nn.Module):
+    def __init__(self):
+        super(identity, self).__init__()
+
+    def forward(self, x):
+        return x
+
+
 class VGG(nn.Module):
-    def __init__(self, features, num_classes=1000, init_weights=True):
+    def __init__(
+        self,
+        features,
+        num_classes=1000,
+        init_weights=True,
+        avgpool=True,
+        input_size=(224, 224),
+    ):
         super(VGG, self).__init__()
         self.features = features
-        self.avgpool = nn.AdaptiveAvgPool2d((7, 7))
+        if avgpool:
+            self.avgpool = nn.AdaptiveAvgPool2d((7, 7))
+        else:
+            self.avgpool = identity()  # only works for input of size (224, 224)
+            print("No avg pooling")
+        final_size = int(prod(input_size) * ((1.0 / 32.0) ** len(input_size)))
         self.classifier = nn.Sequential(
-            nn.Linear(512 * 7 * 7, 4096),
-            nn.ReLU(),  # True), changed for pysyft
+            nn.Linear(512 * final_size, 4096),
+            nn.ReLU(),  # inplace=True),  # changed for pysyft
             nn.Dropout(),
             nn.Linear(4096, 4096),
-            nn.ReLU(),  # True), changed for pysyft
+            nn.ReLU(),  # inplace=True),  # changed for pysyft
             nn.Dropout(),
             nn.Linear(4096, num_classes),
             # nn.LogSoftmax(dim=1),
