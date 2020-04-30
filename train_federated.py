@@ -11,7 +11,7 @@ import numpy as np
 from tabulate import tabulate
 from torchvision import datasets, transforms, models
 from torchlib.dataloader import PPPP
-from torchlib.models import vgg16, resnet18, Net
+from torchlib.models import vgg16, resnet18, conv_at_resolution
 from torchlib.utils import LearningRateScheduler, Arguments, train, test, save_model
 
 
@@ -86,7 +86,7 @@ if __name__ == "__main__":
             download=True,
             transform=transforms.Compose(
                 [
-                    transforms.Resize(56),
+                    transforms.Resize(args.train_resolution),
                     transforms.ToTensor(),
                     transforms.Normalize((0.1307,), (0.3081,)),
                 ]
@@ -97,7 +97,7 @@ if __name__ == "__main__":
             train=False,
             transform=transforms.Compose(
                 [
-                    transforms.Resize(56),
+                    transforms.Resize(args.inference_resolution),
                     transforms.ToTensor(),
                     transforms.Normalize((0.1307,), (0.3081,)),
                 ]
@@ -197,7 +197,14 @@ if __name__ == "__main__":
         )
         vis_params = {"vis": vis, "vis_env": vis_env}
     # model = Net().to(device)
-    model = vgg16(pretrained=False, num_classes=num_classes, in_channels=1)
+    if args.model == 'vgg16':
+        model = vgg16(pretrained=False, num_classes=num_classes, in_channels=1, adptpool=False)
+    elif args.model == 'simpleconv':
+        model = conv_at_resolution[args.train_resolution](num_classes=num_classes)
+    elif args.model == 'resnet-18':
+        model = resnet18(pretrained=False, num_classes=num_classes, in_channels=1, adptpool=False)
+    else:
+        raise NotImplementedError('model unknown')
     # model = resnet18(pretrained=False, num_classes=num_classes, in_channels=1)
     # model = models.vgg16(pretrained=False, num_classes=3)
     # model.classifier = vggclassifier()

@@ -73,6 +73,8 @@ class Arguments:
         if self.optimizer == "Adam":
             self.beta1 = config.getfloat("config", "beta1", fallback=0.9)
             self.beta2 = config.getfloat("config", "beta2", fallback=0.999)
+        self.model = config.get('config', 'architecture', fallback='simpleconv')
+        assert self.model in ['simpleconv', 'resnet-18', 'vgg16']
         self.weight_decay = config.getfloat("config", "weight_decay", fallback=0.0)
         self.class_weights = config.getboolean(
             "config", "weight_classes", fallback=False
@@ -157,69 +159,68 @@ def test(
             #exit()
             output = model(data)
             test_loss += loss_fn(output, target).item()  # sum up batch loss
-            pred = output.argmax(
-                1, keepdim=True
-            )  # get the index of the max log-probability
+            pred = output.argmax(dim=1) 
             tgts = target.view_as(pred)
             equal = pred.eq(tgts)
-            for i, t in enumerate(tgts):
-                t = t.item()
-                if equal[i]:
-                    correct_per_class[t] += 1
-                else:
-                    incorrect_per_class[t] += 1
             if args.encrypted_inference:
                 correct += equal.sum().copy().get().float_precision().long().item()
             else:
+                for i, t in enumerate(tgts):
+                    t = t.item()
+                    if equal[i]:
+                        correct_per_class[t] += 1
+                    else:
+                        incorrect_per_class[t] += 1
                 correct += equal.sum().item()
 
     test_loss /= len(test_loader)
-    accuracy = 100.0 * correct / len(test_loader.dataset)
+    accuracy = 100.0 * correct / (len(test_loader)*args.test_batch_size)
     print(
-        "\nTest set: Epoch: {:d} Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n".format(
+        "Test set: Epoch: {:d} Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n".format(
             epoch, test_loss, correct, len(test_loader.dataset), accuracy,
         ),
-        end="",
+        #end="",
     )
-    rows = []
-    dataset = test_loader.dataset
-    for i, v in correct_per_class.items():
-        total = v + incorrect_per_class[i]
+    if not args.encrypted_inference:
+        rows = []
+        dataset = test_loader.dataset
+        for i, v in correct_per_class.items():
+            total = v + incorrect_per_class[i]
+            rows.append(
+                [
+                    dataset.get_class_name(i) if hasattr(dataset, "get_class_name") else i,
+                    "{:.1f} %".format(100.0 * (v / float(total))),
+                    v,
+                    total,
+                ]
+            )
         rows.append(
-            [
-                dataset.get_class_name(i) if hasattr(dataset, "get_class_name") else i,
-                "{:.1f} %".format(100.0 * (v / float(total))),
-                v,
-                total,
-            ]
+            ["Total", "{:.1f} %".format(accuracy), correct, len(test_loader.dataset),]
         )
-    rows.append(
-        ["Total", "{:.1f} %".format(accuracy), correct, len(test_loader.dataset),]
-    )
-    print(
-        tabulate(
-            rows,
-            headers=["Class", "Accuracy", "n correct", "n total"],
-            tablefmt="fancy_grid",
+        print(
+            tabulate(
+                rows,
+                headers=["Class", "Accuracy", "n correct", "n total"],
+                tablefmt="fancy_grid",
+            )
         )
-    )
-    if args.visdom:
-        vis_params["vis"].line(
-            X=np.asarray([epoch]),
-            Y=np.asarray([test_loss]),
-            win="loss_win",
-            name="val_loss",
-            update="append",
-            env=vis_params["vis_env"],
-        )
-        vis_params["vis"].line(
-            X=np.asarray([epoch]),
-            Y=np.asarray([accuracy / 100.0]),
-            win="loss_win",
-            name="accuracy",
-            update="append",
-            env=vis_params["vis_env"],
-        )
+        if args.visdom:
+            vis_params["vis"].line(
+                X=np.asarray([epoch]),
+                Y=np.asarray([test_loss]),
+                win="loss_win",
+                name="val_loss",
+                update="append",
+                env=vis_params["vis_env"],
+            )
+            vis_params["vis"].line(
+                X=np.asarray([epoch]),
+                Y=np.asarray([accuracy / 100.0]),
+                win="loss_win",
+                name="accuracy",
+                update="append",
+                env=vis_params["vis_env"],
+            )
 
 
 def save_model(model, optim, path):

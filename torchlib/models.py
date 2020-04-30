@@ -76,25 +76,26 @@ class VGG(nn.Module):
         features,
         num_classes=1000,
         init_weights=True,
-        avgpool=True,
-        input_size=(224, 224),
+        adptpool=True,
+        input_size=224,
     ):
         super(VGG, self).__init__()
         self.features = features
-        if avgpool:
-            self.avgpool = nn.AdaptiveAvgPool2d((7, 7))
+        if adptpool:
+            self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
         else:
-            self.avgpool = identity()  # only works for input of size (224, 224)
-            print("No avg pooling")
-        final_size = int(prod(input_size) * ((1.0 / 32.0) ** len(input_size)))
+            self.avgpool = nn.AvgPool2d(
+                int(input_size / 32)
+            )  # only works for input of size (224, 224)
+            # print("No avg pooling")
         self.classifier = nn.Sequential(
-            nn.Linear(512 * final_size, 4096),
+            nn.Linear(512, 512),
             nn.ReLU(),  # inplace=True),  # changed for pysyft
             nn.Dropout(),
-            nn.Linear(4096, 4096),
+            nn.Linear(512, 512),
             nn.ReLU(),  # inplace=True),  # changed for pysyft
             nn.Dropout(),
-            nn.Linear(4096, num_classes),
+            nn.Linear(512, num_classes),
             # nn.LogSoftmax(dim=1),
         )
         if init_weights:
@@ -305,6 +306,8 @@ class ResNet(nn.Module):
         replace_stride_with_dilation=None,
         norm_layer=None,
         in_channels=3,
+        adptpool=True,
+        input_size=224,
     ):
         super(ResNet, self).__init__()
         if norm_layer is None:
@@ -329,7 +332,7 @@ class ResNet(nn.Module):
         )
         self.bn1 = norm_layer(self.inplanes)
         self.relu = nn.ReLU(inplace=True)
-        self.maxpool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        self.maxpool = nn.AvgPool2d(kernel_size=3, stride=2, padding=1)
         self.layer1 = self._make_layer(block, 64, layers[0])
         self.layer2 = self._make_layer(
             block, 128, layers[1], stride=2, dilate=replace_stride_with_dilation[0]
@@ -340,7 +343,11 @@ class ResNet(nn.Module):
         self.layer4 = self._make_layer(
             block, 512, layers[3], stride=2, dilate=replace_stride_with_dilation[2]
         )
-        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        self.avgpool = (
+            nn.AdaptiveAvgPool2d((1, 1))
+            if adptpool
+            else nn.AvgPool2d(int(input_size / 32))
+        )
         self.fc = nn.Linear(512 * block.expansion, num_classes)
         # self.sm = nn.LogSoftmax(dim=1)
 
@@ -413,7 +420,6 @@ class ResNet(nn.Module):
         x = self.layer2(x)
         x = self.layer3(x)
         x = self.layer4(x)
-
         x = self.avgpool(x)
         x = torch.flatten(x, 1)  # pylint: disable=no-member
         x = self.fc(x)
@@ -470,58 +476,117 @@ def resnet34(pretrained=False, progress=True, in_channels=3, **kwargs):
         **kwargs
     )
 
-
-class Net(nn.Module):  # TODO: use something better
-    def __init__(self, input_channels=3, num_classes=3):
-        super(Net, self).__init__()
-        self.convs = nn.Sequential(
-            nn.Conv2d(input_channels, 16, 3, 1),
-            nn.LeakyReLU(),
-            nn.MaxPool2d(2),
-            nn.Conv2d(16, 32, 3, 1),
-            nn.LeakyReLU(),
-            nn.MaxPool2d(2),
+class ConvNet512(nn.Module):
+    def __init__(self, num_classes=10):
+        super(ConvNet512, self).__init__()
+        self.features = nn.Sequential(
+            nn.Conv2d(1, 8, 3),
+            nn.ReLU(),
+            nn.AvgPool2d(2),
+            nn.AvgPool2d(2),
+            nn.Conv2d(8, 32, 3),
+            nn.ReLU(),
+            nn.AvgPool2d(2),
             nn.Conv2d(32, 64, 3),
-            nn.LeakyReLU(),
-            nn.MaxPool2d(2),
+            nn.ReLU(),
+            nn.AvgPool2d(2),
             nn.Conv2d(64, 128, 3),
-            nn.LeakyReLU(),
-            nn.MaxPool2d(2),
+            nn.ReLU(),
+            nn.AvgPool2d(2),
             nn.Conv2d(128, 256, 3),
-            nn.LeakyReLU(),
-            nn.MaxPool2d(2),
+            nn.ReLU(),
+            nn.AvgPool2d(2),
+            nn.Conv2d(256, 512, 3),
+            nn.ReLU(),
+            nn.AvgPool2d(2),
+            nn.AvgPool2d(2),
         )
         self.classifier = nn.Sequential(
-            nn.Linear(256 * 5 * 5, 256),
-            nn.LeakyReLU(),
-            nn.Linear(256, num_classes),
-            # nn.LogSoftmax(dim=1),
+            nn.Linear(512, 512),
+            nn.ReLU(),
+            nn.Linear(512, 512),
+            nn.ReLU(),
+            nn.Linear(512, num_classes)
         )
 
     def forward(self, x):
-        x = self.convs(x)
-        x = x.view(-1, 256 * 5 * 5)
+        x = self.features(x)
+        x = x.view(-1, 512)
         x = self.classifier(x)
         return x
 
-
-class vggclassifier(torch.nn.Module):
-    def __init__(self, num_classes=3):
-        super(vggclassifier, self).__init__()
+class ConvNet224(nn.Module):
+    def __init__(self, num_classes=10):
+        super(ConvNet224, self).__init__()
+        self.features = nn.Sequential(
+            nn.Conv2d(1, 8, 3),
+            nn.ReLU(),
+            nn.AvgPool2d(2),
+            nn.Conv2d(8, 32, 3),
+            nn.ReLU(),
+            nn.AvgPool2d(2),
+            nn.Conv2d(32, 64, 3),
+            nn.ReLU(),
+            nn.AvgPool2d(2),
+            nn.Conv2d(64, 128, 3),
+            nn.ReLU(),
+            nn.AvgPool2d(2),
+            nn.Conv2d(128, 256, 3),
+            nn.ReLU(),
+            nn.AvgPool2d(2),
+            nn.Conv2d(256, 512, 3),
+            nn.ReLU(),
+            nn.AvgPool2d(2),
+        )
         self.classifier = nn.Sequential(
-            nn.Linear(512 * 7 * 7, 4096),
-            nn.ReLU(True),
-            nn.Dropout(),
-            nn.Linear(4096, 4096),
-            nn.ReLU(True),
-            nn.Dropout(),
-            nn.Linear(4096, num_classes),
-            nn.LogSoftmax(dim=1),
+            nn.Linear(512, 512),
+            nn.ReLU(),
+            nn.Linear(512, 512),
+            nn.ReLU(),
+            nn.Linear(512, num_classes)
         )
 
     def forward(self, x):
-        return self.classifier(x)
+        x = self.features(x)
+        x = x.view(-1, 512)
+        x = self.classifier(x)
+        return x
 
+class ConvNetMNIST(nn.Module):
+    def __init__(self, num_classes=10):
+        super(ConvNetMNIST, self).__init__()
+        self.features = nn.Sequential(
+            nn.Conv2d(1, 8, 3),
+            nn.ReLU(),
+            nn.Conv2d(8, 32, 3),
+            nn.ReLU(),
+            nn.Conv2d(32, 64, 3),
+            nn.ReLU(),
+            nn.Conv2d(64, 128, 3),
+            nn.ReLU(),
+            nn.AvgPool2d(2),
+            nn.Conv2d(128, 256, 3),
+            nn.ReLU(),
+            nn.AvgPool2d(2),
+            nn.Conv2d(256, 512, 3),
+            nn.ReLU(),
+            nn.AvgPool2d(2),
+        )
+        self.classifier = nn.Sequential(
+            nn.Linear(512, 512),
+            nn.ReLU(),
+            nn.Linear(512, 512),
+            nn.ReLU(),
+            nn.Linear(512, num_classes)
+        )
+
+    def forward(self, x):
+        x = self.features(x)
+        x = x.view(-1, 512)
+        x = self.classifier(x)
+        return x
+    
+conv_at_resolution = {28: ConvNetMNIST, 224: ConvNet224, 512: ConvNet512}
 
 """class Net(nn.Module):
     def __init__(self):

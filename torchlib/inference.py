@@ -14,7 +14,7 @@ import sys, os.path
 sys.path.insert(0, os.path.split(sys.path[0])[0])  # TODO: make prettier
 from train_federated import test, Arguments
 from torchlib.dataloader import PPPP
-from torchlib.models import vgg16
+from torchlib.models import vgg16, resnet18, conv_at_resolution
 
 
 if __name__ == "__main__":
@@ -114,7 +114,14 @@ if __name__ == "__main__":
         test_loader = priv_test_loader
         del priv_test_loader
     # model = Net().to(device)
-    model = vgg16(pretrained=False, num_classes=num_classes, in_channels=1)
+    if args.model == 'vgg16':
+        model = vgg16(pretrained=False, num_classes=num_classes, in_channels=1, adptpool=False)
+    elif args.model == 'simpleconv':
+        model = conv_at_resolution[args.train_resolution](num_classes=num_classes)
+    elif args.model == 'resnet-18':
+        model = resnet18(pretrained=False, num_classes=num_classes, in_channels=1, adptpool=False)
+    else:
+        raise NotImplementedError('model unknown')
     state = torch.load(cmd_args.model_weights, map_location=device)
     if "optim_state_dict" in state:
         state = state["model_state_dict"]
