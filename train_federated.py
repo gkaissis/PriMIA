@@ -6,8 +6,9 @@ import configparser
 import argparse
 import visdom
 import tqdm
-from os import path
+import shutil
 import numpy as np
+from os import path
 from tabulate import tabulate
 from torchvision import datasets, transforms, models
 from torchlib.dataloader import PPPP
@@ -58,7 +59,7 @@ if __name__ == "__main__":
     assert path.isfile(cmd_args.config), "config file not found"
     config.read(cmd_args.config)
 
-    args = Arguments(cmd_args, config, mode='train')
+    args = Arguments(cmd_args, config, mode="train")
 
     if args.train_federated:
         import syft as sy
@@ -124,6 +125,14 @@ if __name__ == "__main__":
     else:
         raise NotImplementedError("dataset not implemented")
 
+    total_L = len(dataset)
+    fraction = 1.0 / args.val_split
+    dataset, valset = torch.utils.data.random_split(
+        dataset,
+        [int(round(total_L * (1.0 - fraction))), int(round(total_L * fraction))],
+    )
+    del total_L, fraction
+
     if args.train_federated:
         train_loader = sy.FederatedDataLoader(
             dataset.federate((bob, alice, charlie)),
@@ -131,10 +140,19 @@ if __name__ == "__main__":
             shuffle=True,
             **kwargs
         )
+        """val_loader = sy.FederatedDataLoader(
+            valset.federate((bob, alice, charlie)),
+            batch_size=args.test_batch_size,
+            shuffle=True,
+            **kwargs
+        )"""
     else:
         train_loader = torch.utils.data.DataLoader(
             dataset, batch_size=args.batch_size, shuffle=True, **kwargs
         )
+    val_loader = torch.utils.data.DataLoader(
+        valset, batch_size=args.test_batch_size, shuffle=True, **kwargs
+    )
 
     test_loader = torch.utils.data.DataLoader(
         testset, batch_size=args.test_batch_size, shuffle=True, **kwargs
@@ -197,14 +215,18 @@ if __name__ == "__main__":
         )
         vis_params = {"vis": vis, "vis_env": vis_env}
     # model = Net().to(device)
-    if args.model == 'vgg16':
-        model = vgg16(pretrained=False, num_classes=num_classes, in_channels=1, adptpool=False)
-    elif args.model == 'simpleconv':
+    if args.model == "vgg16":
+        model = vgg16(
+            pretrained=False, num_classes=num_classes, in_channels=1, adptpool=False
+        )
+    elif args.model == "simpleconv":
         model = conv_at_resolution[args.train_resolution](num_classes=num_classes)
-    elif args.model == 'resnet-18':
-        model = resnet18(pretrained=False, num_classes=num_classes, in_channels=1, adptpool=False)
+    elif args.model == "resnet-18":
+        model = resnet18(
+            pretrained=False, num_classes=num_classes, in_channels=1, adptpool=False
+        )
     else:
-        raise NotImplementedError('model unknown')
+        raise NotImplementedError("model unknown")
     # model = resnet18(pretrained=False, num_classes=num_classes, in_channels=1)
     # model = models.vgg16(pretrained=False, num_classes=3)
     # model.classifier = vggclassifier()
@@ -231,17 +253,18 @@ if __name__ == "__main__":
         else:
             model.load_state_dict(state)
     model.to(device)
-        
+
     test(
         args,
         model,
         device,
-        test_loader,
+        val_loader,
         cmd_args.start_at_epoch - 1,
         loss_fn,
         num_classes,
         vis_params=vis_params,
     )
+    accuracies = []
     for epoch in range(cmd_args.start_at_epoch, args.epochs + 1):
         new_lr = scheduler.adjust_learning_rate(optimizer, epoch - 1)
         if args.visdom:
@@ -264,18 +287,17 @@ if __name__ == "__main__":
             vis_params=vis_params,
         )
         if (epoch % args.test_interval) == 0:
-            test(
+            _, acc = test(
                 args,
                 model,
                 device,
-                test_loader,
+                val_loader,
                 epoch,
                 loss_fn,
                 num_classes=num_classes,
                 vis_params=vis_params,
             )
-
-        if args.save_model and (epoch % args.save_interval) == 0:
+            accuracies.append(acc)
             save_model(
                 model,
                 optimizer,
@@ -285,12 +307,46 @@ if __name__ == "__main__":
                     epoch,
                 ),
             )
+    # reversal and formula because we want last occurance of highest value
+    accuracies = np.array(accuracies)[::-1]
+    am = np.argmax(accuracies)
+    highest_acc = len(accuracies) - am - 1
+    best_epoch = highest_acc * args.test_interval
+    best_model_file = "model_weights/{:s}_{:s}_epoch_{:03d}.pt".format(
+        "federated" if args.train_federated else "vanilla", args.dataset, best_epoch,
+    )
+    print(
+        "Highest accuracy was {:.1f}% in epoch {:d}".format(accuracies[am], best_epoch)
+    )
+    # load best model on val set
+    state = torch.load(best_model_file, map_location=device)
+    if "optim_state_dict" in state:
+        # optimizer.load_state_dict(state["optim_state_dict"])
+        model.load_state_dict(state["model_state_dict"])
+    else:
+        model.load_state_dict(state)
 
-    if args.save_model:
-        save_model(
-            model,
-            optimizer,
-            "model_weights/{:s}_{:s}_final.pt".format(
-                "federated" if args.train_federated else "vanilla", args.dataset
-            ),
-        )
+    test(
+        args,
+        model,
+        device,
+        test_loader,
+        args.epochs + 1,
+        loss_fn,
+        num_classes=num_classes,
+        vis_params=vis_params,
+    )
+
+    shutil.copyfile(
+        best_model_file,
+        "model_weights/{:s}_{:s}_final.pt".format(
+            "federated" if args.train_federated else "vanilla", args.dataset
+        ),
+    )
+    """save_model(
+        model,
+        optimizer,
+        "model_weights/{:s}_{:s}_final.pt".format(
+            "federated" if args.train_federated else "vanilla", args.dataset
+        ),
+    )"""

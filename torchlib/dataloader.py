@@ -14,14 +14,34 @@ def single_channel_loader(filename):
 
 
 class PPPP(sy.BaseDataset):
-    def __init__(self, label_path="data/Labels.csv", train=False, transform=None):
+    def __init__(
+        self,
+        label_path="data/Labels.csv",
+        train=False,
+        transform=None,
+        # val=False, val_split=10,
+    ):
         self.class_names = {0: "normal", 1: "bacterial pneumonia", 2: "viral pneumonia"}
         self.train = train
+        #self.val = val
+        #self.val_split = val_split
         self.labels = pd.read_csv(label_path)
         self.labels = self.labels[
             self.labels["Dataset_type"] == ("TRAIN" if train else "TEST")
         ]
         self.transform = transform
+
+        """
+        Split into train and validation set
+        if self.train:
+            indices = [
+                i
+                for i in range(len(self.labels))
+                if ((i % self.val_split) != 0 and self.val)
+                or (not self.val and (i % self.val_split) == 0)
+            ]
+            self.labels = self.labels.drop(index=indices)
+        """
 
     def __len__(self):
         return len(self.labels)
@@ -30,7 +50,7 @@ class PPPP(sy.BaseDataset):
         row = self.labels.iloc[index]
         label = row["Numeric_Label"]
         path = "train" if self.train else "test"
-        path = os.path.join('data', path, row["X_ray_image_name"])
+        path = os.path.join("data", path, row["X_ray_image_name"])
         img = single_channel_loader(path)
         if self.transform:
             img = self.transform(img)
@@ -44,6 +64,8 @@ class PPPP(sy.BaseDataset):
 
 
 if __name__ == "__main__":
+    
+
     ds = PPPP(
         transform=transforms.Compose(
             [transforms.Resize(224), transforms.CenterCrop(224)]

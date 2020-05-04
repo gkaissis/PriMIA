@@ -59,6 +59,7 @@ class Arguments:
         self.inference_resolution = config.getint(
             "config", "inference_resolution", fallback=self.train_resolution
         )
+        self.val_split = config.getint("config", "validation_split", fallback=10)
         self.epochs = config.getint("config", "epochs", fallback=1)
         self.lr = config.getfloat("config", "lr", fallback=1e-3)
         self.end_lr = config.getfloat("config", "end_lr", fallback=self.lr)
@@ -66,15 +67,15 @@ class Arguments:
         self.seed = config.getint("config", "seed", fallback=1)
         self.test_interval = config.getint("config", "test_interval", fallback=1)
         self.log_interval = config.getint("config", "log_interval", fallback=10)
-        self.save_interval = config.getint("config", "save_interval", fallback=10)
-        self.save_model = config.getboolean("config", "save_model", fallback=False)
+        # self.save_interval = config.getint("config", "save_interval", fallback=10)
+        # self.save_model = config.getboolean("config", "save_model", fallback=False)
         self.optimizer = config.get("config", "optimizer", fallback="SGD")
         assert self.optimizer in ["SGD", "Adam"], "Unknown optimizer"
         if self.optimizer == "Adam":
             self.beta1 = config.getfloat("config", "beta1", fallback=0.9)
             self.beta2 = config.getfloat("config", "beta2", fallback=0.999)
-        self.model = config.get('config', 'architecture', fallback='simpleconv')
-        assert self.model in ['simpleconv', 'resnet-18', 'vgg16']
+        self.model = config.get("config", "architecture", fallback="simpleconv")
+        assert self.model in ["simpleconv", "resnet-18", "vgg16"]
         self.weight_decay = config.getfloat("config", "weight_decay", fallback=0.0)
         self.class_weights = config.getboolean(
             "config", "weight_classes", fallback=False
@@ -155,11 +156,11 @@ def test(
             if not args.encrypted_inference:
                 data = data.to(device)
                 target = target.to(device)
-            #print(model)
-            #exit()
+            # print(model)
+            # exit()
             output = model(data)
             test_loss += loss_fn(output, target).item()  # sum up batch loss
-            pred = output.argmax(dim=1) 
+            pred = output.argmax(dim=1)
             tgts = target.view_as(pred)
             equal = pred.eq(tgts)
             if args.encrypted_inference:
@@ -174,12 +175,12 @@ def test(
                 correct += equal.sum().item()
 
     test_loss /= len(test_loader)
-    accuracy = 100.0 * correct / (len(test_loader)*args.test_batch_size)
+    accuracy = 100.0 * correct / (len(test_loader) * args.test_batch_size)
     print(
         "Test set: Epoch: {:d} Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n".format(
             epoch, test_loss, correct, len(test_loader.dataset), accuracy,
         ),
-        #end="",
+        # end="",
     )
     if not args.encrypted_inference:
         rows = []
@@ -188,7 +189,9 @@ def test(
             total = v + incorrect_per_class[i]
             rows.append(
                 [
-                    dataset.get_class_name(i) if hasattr(dataset, "get_class_name") else i,
+                    dataset.get_class_name(i)
+                    if hasattr(dataset, "get_class_name")
+                    else i,
                     "{:.1f} %".format(100.0 * (v / float(total))),
                     v,
                     total,
@@ -221,6 +224,7 @@ def test(
                 update="append",
                 env=vis_params["vis_env"],
             )
+    return test_loss, accuracy
 
 
 def save_model(model, optim, path):
