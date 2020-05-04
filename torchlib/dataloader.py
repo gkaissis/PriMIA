@@ -21,10 +21,9 @@ class PPPP(sy.BaseDataset):
         transform=None,
         # val=False, val_split=10,
     ):
-        self.class_names = {0: "normal", 1: "bacterial pneumonia", 2: "viral pneumonia"}
         self.train = train
-        #self.val = val
-        #self.val_split = val_split
+        # self.val = val
+        # self.val_split = val_split
         self.labels = pd.read_csv(label_path)
         self.labels = self.labels[
             self.labels["Dataset_type"] == ("TRAIN" if train else "TEST")
@@ -56,15 +55,18 @@ class PPPP(sy.BaseDataset):
             img = self.transform(img)
         return img, label
 
-    def get_class_name(self, numeric_label):
-        return self.class_names[numeric_label]
+    # def get_class_name(self, numeric_label):
+    #    return self.class_names[numeric_label]
+
+    """
+    Works only if not torch.utils.data.random_split is applied
+    """
 
     def get_class_occurances(self):
         return dict(self.labels["Numeric_Label"].value_counts())
 
 
 if __name__ == "__main__":
-    
 
     ds = PPPP(
         transform=transforms.Compose(

@@ -12,6 +12,15 @@ model_urls = {
     "vgg13_bn": "https://download.pytorch.org/models/vgg13_bn-abd245e5.pth",
     "vgg16_bn": "https://download.pytorch.org/models/vgg16_bn-6c64b313.pth",
     "vgg19_bn": "https://download.pytorch.org/models/vgg19_bn-c79401a0.pth",
+    "resnet18": "https://download.pytorch.org/models/resnet18-5c106cde.pth",
+    "resnet34": "https://download.pytorch.org/models/resnet34-333f7ec4.pth",
+    "resnet50": "https://download.pytorch.org/models/resnet50-19c8e357.pth",
+    "resnet101": "https://download.pytorch.org/models/resnet101-5d3b4d8f.pth",
+    "resnet152": "https://download.pytorch.org/models/resnet152-b121ed2d.pth",
+    "resnext50_32x4d": "https://download.pytorch.org/models/resnext50_32x4d-7cdf4587.pth",
+    "resnext101_32x8d": "https://download.pytorch.org/models/resnext101_32x8d-8ba56ff5.pth",
+    "wide_resnet50_2": "https://download.pytorch.org/models/wide_resnet50_2-95faca4d.pth",
+    "wide_resnet101_2": "https://download.pytorch.org/models/wide_resnet101_2-32ee1156.pth",
 }
 cfgs = {
     "A": [64, "M", 128, "M", 256, 256, "M", 512, 512, "M", 512, 512, "M"],
@@ -348,7 +357,7 @@ class ResNet(nn.Module):
             if adptpool
             else nn.AvgPool2d(int(input_size / 32))
         )
-        self.fc = nn.Linear(512 * block.expansion, num_classes)
+        self.fc = nn.Linear(512 * block.expansion, 1000)
         # self.sm = nn.LogSoftmax(dim=1)
 
         for m in self.modules():
@@ -431,11 +440,12 @@ class ResNet(nn.Module):
         return self._forward_impl(x)
 
 
-def _resnet(arch, block, layers, pretrained, progress, **kwargs):
+def _resnet(arch, block, layers, pretrained, progress, num_classes, **kwargs):
     model = ResNet(block, layers, **kwargs)
     if pretrained:
         state_dict = load_state_dict_from_url(model_urls[arch], progress=progress)
         model.load_state_dict(state_dict)
+        model.fc = nn.Linear(512 * block.expansion, num_classes)
     return model
 
 
@@ -476,11 +486,12 @@ def resnet34(pretrained=False, progress=True, in_channels=3, **kwargs):
         **kwargs
     )
 
+
 class ConvNet512(nn.Module):
-    def __init__(self, num_classes=10):
+    def __init__(self, num_classes=10, in_channels=1):
         super(ConvNet512, self).__init__()
         self.features = nn.Sequential(
-            nn.Conv2d(1, 8, 3),
+            nn.Conv2d(in_channels, 8, 3),
             nn.ReLU(),
             nn.AvgPool2d(2),
             nn.AvgPool2d(2),
@@ -506,7 +517,7 @@ class ConvNet512(nn.Module):
             nn.ReLU(),
             nn.Linear(512, 512),
             nn.ReLU(),
-            nn.Linear(512, num_classes)
+            nn.Linear(512, num_classes),
         )
 
     def forward(self, x):
@@ -514,12 +525,13 @@ class ConvNet512(nn.Module):
         x = x.view(-1, 512)
         x = self.classifier(x)
         return x
+
 
 class ConvNet224(nn.Module):
-    def __init__(self, num_classes=10):
+    def __init__(self, num_classes=10, in_channels=1):
         super(ConvNet224, self).__init__()
         self.features = nn.Sequential(
-            nn.Conv2d(1, 8, 3),
+            nn.Conv2d(in_channels, 8, 3),
             nn.ReLU(),
             nn.AvgPool2d(2),
             nn.Conv2d(8, 32, 3),
@@ -543,7 +555,7 @@ class ConvNet224(nn.Module):
             nn.ReLU(),
             nn.Linear(512, 512),
             nn.ReLU(),
-            nn.Linear(512, num_classes)
+            nn.Linear(512, num_classes),
         )
 
     def forward(self, x):
@@ -551,12 +563,13 @@ class ConvNet224(nn.Module):
         x = x.view(-1, 512)
         x = self.classifier(x)
         return x
+
 
 class ConvNetMNIST(nn.Module):
-    def __init__(self, num_classes=10):
+    def __init__(self, num_classes=10, in_channels=1):
         super(ConvNetMNIST, self).__init__()
         self.features = nn.Sequential(
-            nn.Conv2d(1, 8, 3),
+            nn.Conv2d(in_channels, 8, 3),
             nn.ReLU(),
             nn.Conv2d(8, 32, 3),
             nn.ReLU(),
@@ -577,7 +590,7 @@ class ConvNetMNIST(nn.Module):
             nn.ReLU(),
             nn.Linear(512, 512),
             nn.ReLU(),
-            nn.Linear(512, num_classes)
+            nn.Linear(512, num_classes),
         )
 
     def forward(self, x):
@@ -585,7 +598,8 @@ class ConvNetMNIST(nn.Module):
         x = x.view(-1, 512)
         x = self.classifier(x)
         return x
-    
+
+
 conv_at_resolution = {28: ConvNetMNIST, 224: ConvNet224, 512: ConvNet512}
 
 """class Net(nn.Module):

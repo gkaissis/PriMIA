@@ -74,8 +74,9 @@ class Arguments:
         if self.optimizer == "Adam":
             self.beta1 = config.getfloat("config", "beta1", fallback=0.9)
             self.beta2 = config.getfloat("config", "beta2", fallback=0.999)
-        self.model = config.get("config", "architecture", fallback="simpleconv")
+        self.model = config.get("config", "model", fallback="simpleconv")
         assert self.model in ["simpleconv", "resnet-18", "vgg16"]
+        self.pretrained = config.getboolean("config", "pretrained", fallback=False)
         self.weight_decay = config.getfloat("config", "weight_decay", fallback=0.0)
         self.class_weights = config.getboolean(
             "config", "weight_classes", fallback=False
@@ -139,16 +140,26 @@ def train(
 
 
 def test(
-    args, model, device, test_loader, epoch, loss_fn, num_classes, vis_params=None
+    args,
+    model,
+    device,
+    test_loader,
+    epoch,
+    loss_fn,
+    num_classes,
+    vis_params=None,
+    class_names=None,
 ):
     model.eval()
     test_loss = 0
-    correct = 0
-    correct_per_class = {}
-    incorrect_per_class = {}
+    TP = 0
+    tp_per_class = {}
+    fn_per_class = {}
+    fp_per_class = {}
     for i in range(num_classes):
-        correct_per_class[i] = 0
-        incorrect_per_class[i] = 0
+        tp_per_class[i] = 0
+        fp_per_class[i] = 0
+        fn_per_class[i] = 0
     with torch.no_grad():
         for data, target in tqdm.tqdm(
             test_loader, total=len(test_loader), desc="testing", leave=False
@@ -164,46 +175,110 @@ def test(
             tgts = target.view_as(pred)
             equal = pred.eq(tgts)
             if args.encrypted_inference:
-                correct += equal.sum().copy().get().float_precision().long().item()
+                TP += equal.sum().copy().get().float_precision().long().item()
             else:
                 for i, t in enumerate(tgts):
                     t = t.item()
                     if equal[i]:
-                        correct_per_class[t] += 1
+                        tp_per_class[t] += 1
                     else:
-                        incorrect_per_class[t] += 1
-                correct += equal.sum().item()
+                        fn_per_class[t] += 1
+                for i, p in enumerate(pred):
+                    p = p.item()
+                    if not equal[i]:
+                        fp_per_class[p] += 1
+                TP += equal.sum().item()
 
     test_loss /= len(test_loader)
-    accuracy = 100.0 * correct / (len(test_loader) * args.test_batch_size)
+    objective = 100.0 * TP / (len(test_loader) * args.test_batch_size)
     print(
-        "Test set: Epoch: {:d} Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)\n".format(
-            epoch, test_loss, correct, len(test_loader.dataset), accuracy,
+        "Test set: Epoch: {:d} Average loss: {:.4f}, Recall: {}/{} ({:.0f}%)\n".format(
+            epoch, test_loss, TP, len(test_loader.dataset), objective,
         ),
         # end="",
     )
     if not args.encrypted_inference:
         rows = []
-        dataset = test_loader.dataset
-        for i, v in correct_per_class.items():
-            total = v + incorrect_per_class[i]
+        tn_per_class = {}
+        accs, recs, precs, total_per_class = [], [], [], []
+        total_items = len(test_loader.dataset)
+        for i, fp in fp_per_class.items():
+            total = tp_per_class[i] + fn_per_class[i]
+            total_per_class.append(total)
+            tn_per_class[i] = total_items - total - fp
+        # dataset = test_loader.dataset
+        for i, tp in tp_per_class.items():
+            total = tp + fn_per_class[i]
+            acc = 100.0 * (tp + tn_per_class[i]) / float(total_items)
+            rec = 100.0 * (tp / float(total))
+            prec = (
+                100.0 * (tp / float(tp + fp_per_class[i]))
+                if tp + fp_per_class[i]
+                else float("NaN")
+            )
+            accs.append(acc)
+            recs.append(rec)
+            precs.append(prec)
             rows.append(
                 [
-                    dataset.get_class_name(i)
-                    if hasattr(dataset, "get_class_name")
-                    else i,
-                    "{:.1f} %".format(100.0 * (v / float(total))),
-                    v,
+                    class_names[i] if class_names else i,
+                    "{:.1f} %".format(acc),
+                    "{:.1f} %".format(rec),
+                    "{:.1f} %".format(prec),
                     total,
+                    tp,
+                    tn_per_class[i],
+                    fp_per_class[i],
+                    fn_per_class[i],
                 ]
             )
+        """
+        Measures can be weighted s.t. larger classes have higher impact.
+        It is currently not used as it makes sense to try to have all classes evenly good not depending on the class distribution
+        weights = np.array(total_per_class, dtype=np.float64)
+        weights *= 1./np.sum(weights)
+        """
+        precs = np.array(precs)
+        indices = ~np.isnan(precs)
         rows.append(
-            ["Total", "{:.1f} %".format(accuracy), correct, len(test_loader.dataset),]
+            [
+                "Mean / Total",
+                "{:.1f} %".format(
+                    np.average(accs)  # , weights=weights)
+                ),  # "{:.1f} %".format(
+                # 100.0 * ((sum(tp_per_class.values()) + sum(tn_per_class.values()))
+                # / total_items)
+                # ),
+                "{:.1f} %".format(np.average(recs)),  # weights=weights)),  # recall),
+                "{:.1f} %".format(
+                    np.average(precs[indices])
+                ),  # weights=weights[indices])),
+                # 100.0 * (TP / float(TP + sum(fp_per_class.values())))
+                # if TP + sum(fp_per_class.values())
+                # else float("NaN")
+                # ),"""
+                total_items,
+                TP,
+                "N/A",  # "{:d}".format(sum(tn_per_class.values())),
+                "{:d}".format(sum(fp_per_class.values())),
+                "{:d}".format(sum(fn_per_class.values())),
+            ]
         )
+        objective = np.average(accs)  # , weights=weights)
         print(
             tabulate(
                 rows,
-                headers=["Class", "Accuracy", "n correct", "n total"],
+                headers=[
+                    "Class",
+                    "Accuracy",
+                    "Recall",
+                    "Precision",
+                    "n total",
+                    "TP",
+                    "TN",
+                    "FP",
+                    "FN",
+                ],
                 tablefmt="fancy_grid",
             )
         )
@@ -218,13 +293,13 @@ def test(
             )
             vis_params["vis"].line(
                 X=np.asarray([epoch]),
-                Y=np.asarray([accuracy / 100.0]),
+                Y=np.asarray([objective / 100.0]),
                 win="loss_win",
                 name="accuracy",
                 update="append",
                 env=vis_params["vis_env"],
             )
-    return test_loss, accuracy
+    return test_loss, objective
 
 
 def save_model(model, optim, path):

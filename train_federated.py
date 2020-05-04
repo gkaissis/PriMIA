@@ -7,6 +7,7 @@ import argparse
 import visdom
 import tqdm
 import shutil
+from warnings import warn
 import numpy as np
 from os import path
 from tabulate import tabulate
@@ -79,49 +80,67 @@ if __name__ == "__main__":
 
     kwargs = {"num_workers": 1, "pin_memory": True} if use_cuda else {}
 
+    class_names = None
     if args.dataset == "mnist":
         num_classes = 10
+        train_tf = [
+            transforms.Resize(args.train_resolution),
+            transforms.ToTensor(),
+            transforms.Normalize((0.1307,), (0.3081,)),
+        ]
+        test_tf = [
+            transforms.Resize(args.inference_resolution),
+            transforms.ToTensor(),
+            transforms.Normalize((0.1307,), (0.3081,)),
+        ]
+        if args.pretrained:
+            repeat = transforms.Lambda(
+                lambda x: torch.repeat_interleave(  # pylint: disable=no-member
+                    x, 3, dim=0
+                )
+            )
+            train_tf.append(repeat)
+            test_tf.append(repeat)
         dataset = datasets.MNIST(
             "../data",
             train=True,
             download=True,
-            transform=transforms.Compose(
-                [
-                    transforms.Resize(args.train_resolution),
-                    transforms.ToTensor(),
-                    transforms.Normalize((0.1307,), (0.3081,)),
-                ]
-            ),
+            transform=transforms.Compose(train_tf),
         )
+
         testset = datasets.MNIST(
-            "../data",
-            train=False,
-            transform=transforms.Compose(
-                [
-                    transforms.Resize(args.inference_resolution),
-                    transforms.ToTensor(),
-                    transforms.Normalize((0.1307,), (0.3081,)),
-                ]
-            ),
+            "../data", train=False, transform=transforms.Compose(test_tf),
         )
     elif args.dataset == "pneumonia":
         num_classes = 3
-        train_tf = transforms.Compose(
-            [
-                transforms.Resize(args.inference_resolution),
-                transforms.RandomCrop(args.train_resolution),
-                transforms.ToTensor(),
-            ]
-        )  # TODO: Add normalization
-        test_tf = transforms.Compose(
-            [
-                transforms.Resize(args.inference_resolution),
-                transforms.CenterCrop(args.inference_resolution),
-                transforms.ToTensor(),
-            ]
+        train_tf = [
+            transforms.Resize(args.inference_resolution),
+            transforms.RandomCrop(args.train_resolution),
+            transforms.ToTensor(),
+        ]
+        # TODO: Add normalization
+        test_tf = [
+            transforms.Resize(args.inference_resolution),
+            transforms.CenterCrop(args.inference_resolution),
+            transforms.ToTensor(),
+        ]
+
+        if args.pretrained:
+            repeat = transforms.Lambda(
+                lambda x: torch.repeat_interleave(  # pylint: disable=no-member
+                    x, 3, dim=0
+                )
+            )
+            train_tf.append(repeat)
+            test_tf.append(repeat)
+        dataset = PPPP(
+            "data/Labels.csv", train=True, transform=transforms.Compose(train_tf)
         )
-        dataset = PPPP("data/Labels.csv", train=True, transform=train_tf)
-        testset = PPPP("data/Labels.csv", train=False, transform=test_tf)
+        testset = PPPP(
+            "data/Labels.csv", train=False, transform=transforms.Compose(test_tf)
+        )
+        class_names = {0: "normal", 1: "bacterial pneumonia", 2: "viral pneumonia"}
+        occurances = dataset.get_class_occurances()
     else:
         raise NotImplementedError("dataset not implemented")
 
@@ -159,10 +178,11 @@ if __name__ == "__main__":
     )
     cw = None
     if args.class_weights:
-        occurances = {}
-        if hasattr(dataset, "get_class_occurances"):
-            occurances = dataset.get_class_occurances()
-        else:
+        if not occurances:
+            occurances = {}
+            # if hasattr(dataset, "get_class_occurances"):
+            #    occurances = dataset.get_class_occurances()
+            # else:
             for _, c in tqdm.tqdm(
                 dataset, total=len(dataset), leave=False, desc="calc class weights"
             ):
@@ -174,6 +194,7 @@ if __name__ == "__main__":
         for c, n in occurances.items():
             cw[c] = 1.0 / float(n)
         cw /= torch.sum(cw)  # pylint: disable=no-member
+        cw = cw.to(device)
 
     scheduler = LearningRateScheduler(
         args.epochs, np.log10(args.lr), np.log10(args.end_lr)
@@ -217,13 +238,23 @@ if __name__ == "__main__":
     # model = Net().to(device)
     if args.model == "vgg16":
         model = vgg16(
-            pretrained=False, num_classes=num_classes, in_channels=1, adptpool=False
+            pretrained=args.pretrained,
+            num_classes=num_classes,
+            in_channels=3 if args.pretrained else 1,
+            adptpool=False,
         )
     elif args.model == "simpleconv":
-        model = conv_at_resolution[args.train_resolution](num_classes=num_classes)
+        if args.pretrained:
+            warn("No pretrained version available")
+        model = conv_at_resolution[args.train_resolution](
+            num_classes=num_classes, in_channels=3 if args.pretrained else 1
+        )
     elif args.model == "resnet-18":
         model = resnet18(
-            pretrained=False, num_classes=num_classes, in_channels=1, adptpool=False
+            pretrained=args.pretrained,
+            num_classes=num_classes,
+            in_channels=3 if args.pretrained else 1,
+            adptpool=False,
         )
     else:
         raise NotImplementedError("model unknown")
@@ -263,6 +294,7 @@ if __name__ == "__main__":
         loss_fn,
         num_classes,
         vis_params=vis_params,
+        class_names=class_names,
     )
     accuracies = []
     for epoch in range(cmd_args.start_at_epoch, args.epochs + 1):
@@ -296,6 +328,7 @@ if __name__ == "__main__":
                 loss_fn,
                 num_classes=num_classes,
                 vis_params=vis_params,
+                class_names=class_names,
             )
             accuracies.append(acc)
             save_model(
@@ -335,6 +368,7 @@ if __name__ == "__main__":
         loss_fn,
         num_classes=num_classes,
         vis_params=vis_params,
+        class_names=class_names,
     )
 
     shutil.copyfile(
