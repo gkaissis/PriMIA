@@ -12,6 +12,8 @@ ___
 
 The dataset in this repository is being re-used under the license terms from [the CoronaHack Chest X-Ray Dataset on Kaggle](https://www.kaggle.com/praveengovi/coronahack-chest-xraydataset) and modified as indicated in `Dataset_Description.md`.
 
+Original citation for the majority of the images: https://data.mendeley.com/datasets/rscbjbr9sj/2
+
 [![CC BY 4.0][cc-by-shield]][cc-by]
 
 This work is licensed under a [Creative Commons Attribution 4.0 International
