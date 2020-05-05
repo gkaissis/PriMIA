@@ -8,7 +8,7 @@ import os.path
 sys.path.append(
     os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
 )
-from torchlib.models import Net, vgg16, resnet18
+from torchlib.models import vgg16, resnet18
 
 
 if __name__ == "__main__":

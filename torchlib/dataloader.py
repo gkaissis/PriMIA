@@ -65,23 +65,92 @@ class PPPP(sy.BaseDataset):
     def get_class_occurances(self):
         return dict(self.labels["Numeric_Label"].value_counts())
 
+    def __compute_mean_std__(self, crop_size=224, consider_black_pixels=False):
+        import numpy as np
+        from tqdm import tqdm
+        from torch.utils.data import DataLoader
+
+        batch_size = 90
+        num_workers = 8
+
+        loader = DataLoader(self, batch_size=batch_size, num_workers=num_workers)
+        acc = np.zeros((3, crop_size, crop_size))
+        sq_acc = np.zeros((3, crop_size, crop_size))
+        n_black_pixels = 0
+        for _, (imgs, _) in tqdm(enumerate(loader), total=len(loader)):
+            imgs = imgs.numpy()
+            acc += np.sum(imgs, axis=0)
+            sq_acc += np.sum(imgs ** 2, axis=0)
+            n_black_pixels += np.where(imgs == 0)[0].size
+
+            # if batch_idx % 50 == 0:
+            #    print('Accumulated {:d} / {:d}'.format(
+            #        batch_idx * batch_size, len(dset)))
+
+        N = len(self) * acc.shape[1] * acc.shape[2]
+        if not consider_black_pixels:
+            print("{:d} pixels in dataset".format(N))
+            N -= n_black_pixels
+            print("{:d} black pixels in dataset".format(n_black_pixels))
+
+        mean_p = np.asarray([np.sum(acc[c]) for c in range(3)])
+        mean_p /= N
+        print("Mean pixel = ", mean_p)
+
+        # std = E[x^2] - E[x]^2
+        var = np.asarray([np.sum(sq_acc[c]) for c in range(3)])
+        var /= N
+        var -= mean_p ** 2
+        var = np.sqrt(var)
+        print("Var. pixel = ", var)
+        np.savetxt(
+            os.path.join("data/mean_var.txt"), np.vstack((mean_p, var)), fmt="%8.7f"
+        )
+
 
 if __name__ == "__main__":
+    # import matplotlib.pyplot as plt
+    import sys
 
+    sys.path.append(
+        os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
+    )
+    from torchlib.utils import AddGaussianNoise
+
+    # cj = transforms.ColorJitter(0, 0.5, 0.5, 0.5)
     ds = PPPP(
         transform=transforms.Compose(
-            [transforms.Resize(224), transforms.CenterCrop(224)]
+            [
+                transforms.RandomVerticalFlip(p=0.5),
+                transforms.RandomAffine(
+                    degrees=30,
+                    translate=(0.0, 0.0),
+                    scale=(0.85, 1.15),
+                    shear=10,
+                    fillcolor=0.0,
+                ),
+                transforms.Resize(224),
+                transforms.RandomCrop(224),
+                transforms.ToTensor(),
+                transforms.Normalize((0.57282609,), (0.17427578,)),
+                transforms.RandomApply([AddGaussianNoise(mean=0.0, std=0.05)], p=0.5),
+                transforms.ToPILImage(),
+            ]
         )
     )
     ds.get_class_occurances()
     L = len(ds)
     print("length test set: {:d}".format(L))
     img, label = ds[1]
-    # img.show()
+    img.show()
+    exit()
+
     tf = transforms.Compose(
-        [transforms.Resize(224), transforms.CenterCrop(224), transforms.ToTensor()]
+        [transforms.Resize(224), transforms.CenterCrop(224), transforms.ToTensor(),]
     )  # TODO: Add normalization
     ds = PPPP(train=True, transform=tf)
+
+    ds.__compute_mean_std__(consider_black_pixels=False)
     L = len(ds)
     print("length train set: {:d}".format(L))
     img, label = ds[0]
@@ -94,10 +163,11 @@ if __name__ == "__main__":
     for img, label in tqdm.tqdm(ds, total=L, leave=False):
         if img.size(0) != 1:
             cnt += 1
-    print("{:d} images that are not grayscale".format(cnt))"""
+    print("{:d} images that are not grayscale".format(cnt))
 
     ds = PPPP()
     import matplotlib.pyplot as plt
 
     hist = ds.labels.hist(bins=3, column="Numeric_Label")
     plt.show()
+    """

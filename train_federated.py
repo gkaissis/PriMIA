@@ -14,7 +14,14 @@ from tabulate import tabulate
 from torchvision import datasets, transforms, models
 from torchlib.dataloader import PPPP
 from torchlib.models import vgg16, resnet18, conv_at_resolution
-from torchlib.utils import LearningRateScheduler, Arguments, train, test, save_model
+from torchlib.utils import (
+    LearningRateScheduler,
+    Arguments,
+    train,
+    test,
+    save_model,
+    AddGaussianNoise,
+)
 
 
 if __name__ == "__main__":
@@ -114,15 +121,26 @@ if __name__ == "__main__":
     elif args.dataset == "pneumonia":
         num_classes = 3
         train_tf = [
+            transforms.RandomVerticalFlip(p=0.5),
+            transforms.RandomAffine(
+                degrees=30,
+                translate=(0.0, 0.0),
+                scale=(0.85, 1.15),
+                shear=10,
+                fillcolor=0.0,
+            ),
             transforms.Resize(args.inference_resolution),
             transforms.RandomCrop(args.train_resolution),
             transforms.ToTensor(),
+            transforms.Normalize((0.57282609,), (0.17427578,)),
+            transforms.RandomApply([AddGaussianNoise(mean=0.0, std=0.05)], p=0.5),
         ]
         # TODO: Add normalization
         test_tf = [
             transforms.Resize(args.inference_resolution),
             transforms.CenterCrop(args.inference_resolution),
             transforms.ToTensor(),
+            transforms.Normalize((0.57282609,), (0.17427578,)),
         ]
 
         if args.pretrained:

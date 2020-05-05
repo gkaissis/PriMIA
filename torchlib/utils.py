@@ -90,6 +90,24 @@ class Arguments:
         self.no_cuda = cmd_args.no_cuda
 
 
+class AddGaussianNoise(object):
+    def __init__(self, mean=0.0, std=1.0):
+        self.std = std
+        self.mean = mean
+
+    def __call__(self, tensor):
+        return (
+            tensor
+            + torch.randn(tensor.size()) * self.std  # pylint: disable=no-member
+            + self.mean
+        )
+
+    def __repr__(self):
+        return self.__class__.__name__ + "(mean={0}, std={1})".format(
+            self.mean, self.std
+        )
+
+
 def train(
     args, model, device, train_loader, optimizer, epoch, loss_fn, vis_params=None
 ):
