@@ -7,9 +7,11 @@ import argparse
 import visdom
 import tqdm
 import shutil
-from warnings import warn
+import random
 import numpy as np
-from os import path
+from os import path, remove
+from warnings import warn
+from datetime import datetime
 from tabulate import tabulate
 from torchvision import datasets, transforms, models
 from torchlib.dataloader import PPPP
@@ -20,6 +22,7 @@ from torchlib.utils import (
     train,
     test,
     save_model,
+    save_config_results,
     AddGaussianNoise,
 )
 
@@ -82,11 +85,18 @@ if __name__ == "__main__":
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
     torch.manual_seed(args.seed)
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
     device = torch.device("cuda" if use_cuda else "cpu")  # pylint: disable=no-member
 
     kwargs = {"num_workers": 1, "pin_memory": True} if use_cuda else {}
 
+    """
+    Dataset creation and definition
+    """
     class_names = None
     if args.dataset == "mnist":
         num_classes = 10
@@ -120,20 +130,26 @@ if __name__ == "__main__":
         )
     elif args.dataset == "pneumonia":
         num_classes = 3
+        """
+        Different train and inference resolution only works with adaptive
+        pooling in model activated
+        """
         train_tf = [
-            transforms.RandomVerticalFlip(p=0.5),
+            transforms.RandomVerticalFlip(p=args.vertical_flip_prob),
             transforms.RandomAffine(
-                degrees=30,
-                translate=(0.0, 0.0),
-                scale=(0.85, 1.15),
-                shear=10,
+                degrees=args.rotation,
+                translate=(args.translate, args.translate),
+                scale=(1.0 - args.scale, 1.0 + args.scale),
+                shear=args.shear,
                 fillcolor=0.0,
             ),
             transforms.Resize(args.inference_resolution),
             transforms.RandomCrop(args.train_resolution),
             transforms.ToTensor(),
             transforms.Normalize((0.57282609,), (0.17427578,)),
-            transforms.RandomApply([AddGaussianNoise(mean=0.0, std=0.05)], p=0.5),
+            transforms.RandomApply(
+                [AddGaussianNoise(mean=0.0, std=args.noise_std)], p=args.noise_prob
+            ),
         ]
         # TODO: Add normalization
         test_tf = [
@@ -143,6 +159,9 @@ if __name__ == "__main__":
             transforms.Normalize((0.57282609,), (0.17427578,)),
         ]
 
+        """
+        Duplicate grayscale one channel image into 3 channels
+        """
         if args.pretrained:
             repeat = transforms.Lambda(
                 lambda x: torch.repeat_interleave(  # pylint: disable=no-member
@@ -152,11 +171,18 @@ if __name__ == "__main__":
             train_tf.append(repeat)
             test_tf.append(repeat)
         dataset = PPPP(
-            "data/Labels.csv", train=True, transform=transforms.Compose(train_tf)
+            "data/Labels.csv",
+            train=True,
+            transform=transforms.Compose(train_tf),
+            seed=args.seed,
         )
+        """ Removed because bad practice
         testset = PPPP(
-            "data/Labels.csv", train=False, transform=transforms.Compose(test_tf)
-        )
+            "data/Labels.csv",
+            train=False,
+            transform=transforms.Compose(test_tf),
+            seed=args.seed,
+        )"""
         class_names = {0: "normal", 1: "bacterial pneumonia", 2: "viral pneumonia"}
         occurances = dataset.get_class_occurances()
     else:
@@ -191,9 +217,10 @@ if __name__ == "__main__":
         valset, batch_size=args.test_batch_size, shuffle=True, **kwargs
     )
 
+    """ Removed because bad practice
     test_loader = torch.utils.data.DataLoader(
         testset, batch_size=args.test_batch_size, shuffle=True, **kwargs
-    )
+    )"""
     cw = None
     if args.class_weights:
         if not occurances:
@@ -315,6 +342,7 @@ if __name__ == "__main__":
         class_names=class_names,
     )
     accuracies = []
+    model_paths = []
     for epoch in range(cmd_args.start_at_epoch, args.epochs + 1):
         new_lr = scheduler.adjust_learning_rate(optimizer, epoch - 1)
         if args.visdom:
@@ -348,53 +376,50 @@ if __name__ == "__main__":
                 vis_params=vis_params,
                 class_names=class_names,
             )
-            accuracies.append(acc)
-            save_model(
-                model,
-                optimizer,
-                "model_weights/{:s}_{:s}_epoch_{:03d}.pt".format(
-                    "federated" if args.train_federated else "vanilla",
-                    args.dataset,
-                    epoch,
-                ),
+            model_path = "model_weights/{:s}_{:s}_epoch_{:03d}.pt".format(
+                "federated" if args.train_federated else "vanilla", args.dataset, epoch,
             )
+
+            save_model(model, optimizer, model_path, args)
+            accuracies.append(acc)
+            model_paths.append(model_path)
     # reversal and formula because we want last occurance of highest value
     accuracies = np.array(accuracies)[::-1]
     am = np.argmax(accuracies)
     highest_acc = len(accuracies) - am - 1
     best_epoch = highest_acc * args.test_interval
-    best_model_file = "model_weights/{:s}_{:s}_epoch_{:03d}.pt".format(
-        "federated" if args.train_federated else "vanilla", args.dataset, best_epoch,
-    )
+    best_model_file = model_paths[highest_acc]
     print(
         "Highest accuracy was {:.1f}% in epoch {:d}".format(accuracies[am], best_epoch)
     )
     # load best model on val set
     state = torch.load(best_model_file, map_location=device)
-    if "optim_state_dict" in state:
-        # optimizer.load_state_dict(state["optim_state_dict"])
-        model.load_state_dict(state["model_state_dict"])
-    else:
-        model.load_state_dict(state)
+    model.load_state_dict(state["model_state_dict"])
 
-    test(
+    """_, result = test(
         args,
         model,
         device,
-        test_loader,
+        val_loader,
         args.epochs + 1,
         loss_fn,
         num_classes=num_classes,
         vis_params=vis_params,
         class_names=class_names,
     )
-
+    print('result: {:.1f} - best accuracy: {:.1f}'.format(result, accuracies[am]))"""
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
     shutil.copyfile(
         best_model_file,
-        "model_weights/{:s}_{:s}_final.pt".format(
-            "federated" if args.train_federated else "vanilla", args.dataset
+        "model_weights/final_{:s}_{:s}_{:s}.pt".format(
+            "federated" if args.train_federated else "vanilla", args.dataset, timestamp
         ),
     )
+    save_config_results(args, accuracies[am], "model_weights/completed_trainings.csv")
+
+    # delete old model weights
+    for model_file in model_paths:
+        remove(model_file)
     """save_model(
         model,
         optimizer,

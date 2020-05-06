@@ -8,8 +8,9 @@ import torch
 import configparser
 import argparse
 import syft as sy
-from torchvision import datasets, transforms, models
 import sys, os.path
+from warnings import warn
+from torchvision import datasets, transforms, models
 
 sys.path.insert(0, os.path.split(sys.path[0])[0])  # TODO: make prettier
 from train_federated import test, Arguments
@@ -84,14 +85,21 @@ if __name__ == "__main__":
         )
     elif args.dataset == "pneumonia":
         num_classes = 3
-        tf = transforms.Compose(
-            [
-                transforms.Resize(args.inference_resolution),
-                transforms.CenterCrop(args.inference_resolution),
-                transforms.ToTensor(),
-            ]
-        )
-        testset = PPPP("data/Labels.csv", train=False, transform=tf)
+        tf = [
+            transforms.Resize(args.inference_resolution),
+            transforms.CenterCrop(args.inference_resolution),
+            transforms.ToTensor(),
+            transforms.Normalize((0.57282609,), (0.17427578,)),
+        ]
+
+        if args.pretrained:
+            repeat = transforms.Lambda(
+                lambda x: torch.repeat_interleave(  # pylint: disable=no-member
+                    x, 3, dim=0
+                )
+            )
+            tf.append(repeat)
+        testset = PPPP("data/Labels.csv", train=False, transform=transforms.Compose(tf))
     else:
         raise NotImplementedError("dataset not implemented")
 
@@ -113,15 +121,28 @@ if __name__ == "__main__":
             )
         test_loader = priv_test_loader
         del priv_test_loader
-    # model = Net().to(device)
-    if args.model == 'vgg16':
-        model = vgg16(pretrained=False, num_classes=num_classes, in_channels=1, adptpool=False)
-    elif args.model == 'simpleconv':
-        model = conv_at_resolution[args.train_resolution](num_classes=num_classes)
-    elif args.model == 'resnet-18':
-        model = resnet18(pretrained=False, num_classes=num_classes, in_channels=1, adptpool=False)
+    if args.model == "vgg16":
+        model = vgg16(
+            pretrained=args.pretrained,
+            num_classes=num_classes,
+            in_channels=3 if args.pretrained else 1,
+            adptpool=False,
+        )
+    elif args.model == "simpleconv":
+        if args.pretrained:
+            warn("No pretrained version available")
+        model = conv_at_resolution[args.train_resolution](
+            num_classes=num_classes, in_channels=3 if args.pretrained else 1
+        )
+    elif args.model == "resnet-18":
+        model = resnet18(
+            pretrained=args.pretrained,
+            num_classes=num_classes,
+            in_channels=3 if args.pretrained else 1,
+            adptpool=False,
+        )
     else:
-        raise NotImplementedError('model unknown')
+        raise NotImplementedError("model unknown")
     state = torch.load(cmd_args.model_weights, map_location=device)
     if "optim_state_dict" in state:
         state = state["model_state_dict"]

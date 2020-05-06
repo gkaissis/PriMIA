@@ -1,10 +1,12 @@
 import os
+import random
+import syft as sy
 import pandas as pd
 from PIL import Image
+from torch import manual_seed
 from torch.utils import data
 from torchvision import transforms
 from torchvision.datasets.folder import default_loader
-import syft as sy
 
 
 def single_channel_loader(filename):
@@ -19,8 +21,11 @@ class PPPP(sy.BaseDataset):
         label_path="data/Labels.csv",
         train=False,
         transform=None,
+        seed = 1,
         # val=False, val_split=10,
     ):
+        random.seed(seed)
+        manual_seed(seed)
         self.train = train
         # self.val = val
         # self.val_split = val_split
@@ -29,7 +34,6 @@ class PPPP(sy.BaseDataset):
             self.labels["Dataset_type"] == ("TRAIN" if train else "TEST")
         ]
         self.transform = transform
-
         """
         Split into train and validation set
         if self.train:
@@ -143,7 +147,7 @@ if __name__ == "__main__":
     print("length test set: {:d}".format(L))
     img, label = ds[1]
     img.show()
-    exit()
+    #exit()
 
     tf = transforms.Compose(
         [transforms.Resize(224), transforms.CenterCrop(224), transforms.ToTensor(),]

@@ -1,6 +1,8 @@
 import torch
 import tqdm
 import numpy as np
+import pandas as pd
+from os.path import isfile
 from tabulate import tabulate
 
 
@@ -81,6 +83,15 @@ class Arguments:
         self.class_weights = config.getboolean(
             "config", "weight_classes", fallback=False
         )
+        self.vertical_flip_prob = config.getfloat(
+            "augmentation", "vertical_flip_prob", fallback=0.0
+        )
+        self.rotation = config.getfloat("augmentation", "rotation", fallback=0.0)
+        self.translate = config.getfloat("augmentation", "translate", fallback=0.0)
+        self.scale = config.getfloat("augmentation", "scale", fallback=0.0)
+        self.shear = config.getfloat("augmentation", "shear", fallback=0.0)
+        self.noise_std = config.getfloat("augmentation", "noise_std", fallback=1.0)
+        self.noise_prob = config.getfloat("augmentation", "noise_prob", fallback=0.0)
         self.train_federated = cmd_args.train_federated if mode == "train" else False
         self.visdom = cmd_args.no_visdom if mode == "train" else False
         self.encrypted_inference = (
@@ -106,6 +117,23 @@ class AddGaussianNoise(object):
         return self.__class__.__name__ + "(mean={0}, std={1})".format(
             self.mean, self.std
         )
+
+
+def save_config_results(args, accuracy, table):
+    members = [
+        attr
+        for attr in dir(args)
+        if not callable(getattr(args, attr)) and not attr.startswith("__")
+    ]
+    if not isfile(table):
+        print("Configuration table does not exist - Creating new")
+        df = pd.DataFrame(columns=members)
+    else:
+        df = pd.read_csv(table)
+    new_row = dict(zip(members, [getattr(args, x) for x in members]))
+    new_row["result"] = accuracy
+    df = df.append(new_row, ignore_index=True)
+    df.to_csv(table, index=False)
 
 
 def train(
@@ -218,7 +246,7 @@ def test(
     if not args.encrypted_inference:
         rows = []
         tn_per_class = {}
-        accs, recs, precs, total_per_class = [], [], [], []
+        accs, recs, precs, f1s, total_per_class = [], [], [], [], []
         total_items = len(test_loader.dataset)
         for i, fp in fp_per_class.items():
             total = tp_per_class[i] + fn_per_class[i]
@@ -234,15 +262,18 @@ def test(
                 if tp + fp_per_class[i]
                 else float("NaN")
             )
+            f1_score = (2 * prec * rec) / (prec + rec)
             accs.append(acc)
             recs.append(rec)
             precs.append(prec)
+            f1s.append(f1_score)
             rows.append(
                 [
                     class_names[i] if class_names else i,
                     "{:.1f} %".format(acc),
                     "{:.1f} %".format(rec),
                     "{:.1f} %".format(prec),
+                    "{:.1f} %".format(f1_score),
                     total,
                     tp,
                     tn_per_class[i],
@@ -257,7 +288,10 @@ def test(
         weights *= 1./np.sum(weights)
         """
         precs = np.array(precs)
-        indices = ~np.isnan(precs)
+        #indices = ~np.isnan(precs)
+        rec = np.average(recs)
+        prec = np.average(precs)#[indices])
+        f1_score = np.average(f1s)
         rows.append(
             [
                 "Mean / Total",
@@ -267,14 +301,13 @@ def test(
                 # 100.0 * ((sum(tp_per_class.values()) + sum(tn_per_class.values()))
                 # / total_items)
                 # ),
-                "{:.1f} %".format(np.average(recs)),  # weights=weights)),  # recall),
-                "{:.1f} %".format(
-                    np.average(precs[indices])
-                ),  # weights=weights[indices])),
+                "{:.1f} %".format(rec),  # weights=weights)),  # recall),
+                "{:.1f} %".format(prec),  # weights=weights[indices])),
                 # 100.0 * (TP / float(TP + sum(fp_per_class.values())))
                 # if TP + sum(fp_per_class.values())
                 # else float("NaN")
                 # ),"""
+                "{:.1f} %".format(f1_score),
                 total_items,
                 TP,
                 "N/A",  # "{:d}".format(sum(tn_per_class.values())),
@@ -291,6 +324,7 @@ def test(
                     "Accuracy",
                     "Recall",
                     "Precision",
+                    "F1 score",
                     "n total",
                     "TP",
                     "TN",
@@ -320,11 +354,12 @@ def test(
     return test_loss, objective
 
 
-def save_model(model, optim, path):
+def save_model(model, optim, path, args):
     torch.save(
         {
             "model_state_dict": model.state_dict(),
             "optim_state_dict": optim.state_dict(),
+            "args": args,
         },
         path,
     )
