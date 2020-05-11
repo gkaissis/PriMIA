@@ -67,7 +67,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--websockets",
         action="store_true",
-        help="If true uses websockets to for distributed workers else virtual workers are used",
+        help="Use websockets instead of virtual workers",
     )
     cmd_args = parser.parse_args()
 
@@ -79,27 +79,30 @@ if __name__ == "__main__":
 
     if args.train_federated:
         import syft as sy
+        from torchlib.websocket_utils import read_websocket_config
 
-        hook = sy.TorchHook(
-            torch
-        )  # <-- NEW: hook PyTorch ie add extra functionalities to support Federated Learning
-        worker_dict = {"alice": 8777, "bob": 8778, "charlie": 8779}
+        hook = sy.TorchHook(torch)
+        worker_dict = read_websocket_config("configs/websetting/config.csv")
         if cmd_args.websockets:
-            servers = [
-                sy.workers.websocket_server.WebsocketServerWorker(
-                    hook, host="localhost", port=port, id=name
-                )
-                for name, port in worker_dict
-            ]
-
-            kwargs_websocket = {"host": "localhost", "hook": hook, "verbose": True}
+            kwargs_websocket = {
+                "hook": hook,
+                "verbose": False,
+            }
             workers = [
-                sy.WebsocketClientWorker(id=name, port=port, **kwargs_websocket)
-                for name, port in worker_dict
+                sy.WebsocketClientWorker(
+                    id=id_dict["id"],
+                    port=id_dict["port"],
+                    host=id_dict["host"],
+                    **kwargs_websocket,
+                )
+                for row, id_dict in worker_dict.items()
             ]
 
         else:
-            workers = [sy.VirtualWorker(hook, id=name) for name, _ in worker_dict]
+            workers = [
+                sy.VirtualWorker(hook, id=id_dict["id"])
+                for row, id_dict in worker_dict.items()
+            ]
 
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
@@ -225,9 +228,8 @@ if __name__ == "__main__":
             dataset.federate(tuple(workers)),
             batch_size=args.batch_size,
             shuffle=True,
-            **kwargs
+            **kwargs,
         )
-        print(type(train_loader))
         """val_loader = sy.FederatedDataLoader(
             valset.federate((bob, alice, charlie)),
             batch_size=args.test_batch_size,
