@@ -115,11 +115,26 @@ class PPPP(sy.BaseDataset):
 if __name__ == "__main__":
     # import matplotlib.pyplot as plt
     import sys
+    from tqdm import tqdm
+    import numpy as np
 
     sys.path.append(
         os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
     )
     from torchlib.utils import AddGaussianNoise
+
+    sizes = []
+    ds = PPPP(train=True, transform=transforms.ToTensor())
+    for data, _ in tqdm(ds, total=len(ds), leave=False):
+        sizes.append(data.size()[1:])
+    sizes = np.array(sizes)
+    print(np.min(sizes, axis=0))
+    print(np.max(sizes, axis=0))
+    print(np.mean(sizes, axis=0))
+    print(np.median(sizes, axis=0))
+
+
+    exit()
 
     # cj = transforms.ColorJitter(0, 0.5, 0.5, 0.5)
     ds = PPPP(

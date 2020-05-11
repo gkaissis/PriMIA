@@ -98,13 +98,13 @@ class VGG(nn.Module):
             )  # only works for input of size (224, 224)
             # print("No avg pooling")
         self.classifier = nn.Sequential(
-            nn.Linear(512, 512),
+            nn.Linear(25088, 4096),
             nn.ReLU(),  # inplace=True),  # changed for pysyft
             nn.Dropout(),
-            nn.Linear(512, 512),
+            nn.Linear(4096, 4096),
             nn.ReLU(),  # inplace=True),  # changed for pysyft
             nn.Dropout(),
-            nn.Linear(512, num_classes),
+            nn.Linear(4096, num_classes),
             # nn.LogSoftmax(dim=1),
         )
         if init_weights:
@@ -150,7 +150,7 @@ def make_layers(cfg, batch_norm=False, in_channels=3):
     return nn.Sequential(*layers)
 
 
-def _vgg(arch, cfg, batch_norm, pretrained, progress, in_channels=3, **kwargs):
+def _vgg(arch, cfg, batch_norm, pretrained, progress, in_channels=3, num_classes=1000, **kwargs):
     if pretrained:
         kwargs["init_weights"] = False
     assert not (pretrained and in_channels != 3), "If pretrained you need 3 in channels"
@@ -161,6 +161,16 @@ def _vgg(arch, cfg, batch_norm, pretrained, progress, in_channels=3, **kwargs):
     if pretrained:
         state_dict = load_state_dict_from_url(model_urls[arch], progress=progress)
         model.load_state_dict(state_dict)
+        model.classifier =  nn.Sequential(
+            nn.Linear(512, 512),
+            nn.ReLU(),  # inplace=True),  # changed for pysyft
+            nn.Dropout(),
+            nn.Linear(512, 512),
+            nn.ReLU(),  # inplace=True),  # changed for pysyft
+            nn.Dropout(),
+            nn.Linear(512, num_classes),
+            # nn.LogSoftmax(dim=1),
+        )
     return model
 
 

@@ -64,6 +64,11 @@ if __name__ == "__main__":
         default=None,
         help="Start training from older model checkpoint",
     )
+    parser.add_argument(
+        "--websockets",
+        action="store_true",
+        help="If true uses websockets to for distributed workers else virtual workers are used",
+    )
     cmd_args = parser.parse_args()
 
     config = configparser.ConfigParser()
@@ -78,9 +83,23 @@ if __name__ == "__main__":
         hook = sy.TorchHook(
             torch
         )  # <-- NEW: hook PyTorch ie add extra functionalities to support Federated Learning
-        bob = sy.VirtualWorker(hook, id="bob")  # <-- NEW: define remote worker bob
-        alice = sy.VirtualWorker(hook, id="alice")  # <-- NEW: and alice
-        charlie = sy.VirtualWorker(hook, id="charlie")  # <-- NEW: and alice
+        worker_dict = {"alice": 8777, "bob": 8778, "charlie": 8779}
+        if cmd_args.websockets:
+            servers = [
+                sy.workers.websocket_server.WebsocketServerWorker(
+                    hook, host="localhost", port=port, id=name
+                )
+                for name, port in worker_dict
+            ]
+
+            kwargs_websocket = {"host": "localhost", "hook": hook, "verbose": True}
+            workers = [
+                sy.WebsocketClientWorker(id=name, port=port, **kwargs_websocket)
+                for name, port in worker_dict
+            ]
+
+        else:
+            workers = [sy.VirtualWorker(hook, id=name) for name, _ in worker_dict]
 
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
@@ -93,6 +112,11 @@ if __name__ == "__main__":
     device = torch.device("cuda" if use_cuda else "cpu")  # pylint: disable=no-member
 
     kwargs = {"num_workers": 1, "pin_memory": True} if use_cuda else {}
+
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
+    exp_name = "{:s}_{:s}_{:s}".format(
+        "federated" if args.train_federated else "vanilla", args.dataset, timestamp
+    )
 
     """
     Dataset creation and definition
@@ -198,11 +222,12 @@ if __name__ == "__main__":
 
     if args.train_federated:
         train_loader = sy.FederatedDataLoader(
-            dataset.federate((bob, alice, charlie)),
+            dataset.federate(tuple(workers)),
             batch_size=args.batch_size,
             shuffle=True,
             **kwargs
         )
+        print(type(train_loader))
         """val_loader = sy.FederatedDataLoader(
             valset.federate((bob, alice, charlie)),
             batch_size=args.test_batch_size,
@@ -214,7 +239,7 @@ if __name__ == "__main__":
             dataset, batch_size=args.batch_size, shuffle=True, **kwargs
         )
     val_loader = torch.utils.data.DataLoader(
-        valset, batch_size=args.test_batch_size, shuffle=True, **kwargs
+        valset, batch_size=args.test_batch_size, shuffle=False, **kwargs
     )
 
     """ Removed because bad practice
@@ -242,7 +267,7 @@ if __name__ == "__main__":
         cw = cw.to(device)
 
     scheduler = LearningRateScheduler(
-        args.epochs, np.log10(args.lr), np.log10(args.end_lr)
+        args.epochs, np.log10(args.lr), np.log10(args.end_lr), restarts=args.restarts
     )
 
     ## visdom
@@ -251,8 +276,8 @@ if __name__ == "__main__":
         assert vis.check_connection(
             timeout_seconds=3
         ), "No connection could be formed quickly"
-        vis_env = "{:s}/{:s}".format(
-            "federated" if args.train_federated else "vanilla", args.dataset
+        vis_env = path.join(
+            args.dataset, "federated" if args.train_federated else "vanilla", timestamp
         )
         plt_dict = dict(
             name="training loss",
@@ -287,6 +312,7 @@ if __name__ == "__main__":
             num_classes=num_classes,
             in_channels=3 if args.pretrained else 1,
             adptpool=False,
+            input_size=args.inference_resolution,
         )
     elif args.model == "simpleconv":
         if args.pretrained:
@@ -300,6 +326,7 @@ if __name__ == "__main__":
             num_classes=num_classes,
             in_channels=3 if args.pretrained else 1,
             adptpool=False,
+            input_size=args.inference_resolution,
         )
     else:
         raise NotImplementedError("model unknown")
@@ -376,9 +403,7 @@ if __name__ == "__main__":
                 vis_params=vis_params,
                 class_names=class_names,
             )
-            model_path = "model_weights/{:s}_{:s}_epoch_{:03d}.pt".format(
-                "federated" if args.train_federated else "vanilla", args.dataset, epoch,
-            )
+            model_path = "model_weights/{:s}_epoch_{:03d}.pt".format(exp_name, epoch,)
 
             save_model(model, optimizer, model_path, args)
             accuracies.append(acc)
@@ -408,14 +433,12 @@ if __name__ == "__main__":
         class_names=class_names,
     )
     print('result: {:.1f} - best accuracy: {:.1f}'.format(result, accuracies[am]))"""
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
     shutil.copyfile(
-        best_model_file,
-        "model_weights/final_{:s}_{:s}_{:s}.pt".format(
-            "federated" if args.train_federated else "vanilla", args.dataset, timestamp
-        ),
+        best_model_file, "model_weights/final_{:s}.pt".format(exp_name),
     )
-    save_config_results(args, accuracies[am], "model_weights/completed_trainings.csv")
+    save_config_results(
+        args, accuracies[am], timestamp, "model_weights/completed_trainings.csv"
+    )
 
     # delete old model weights
     for model_file in model_paths:

@@ -20,13 +20,13 @@ from torchlib.models import vgg16, resnet18, conv_at_resolution
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument(
+    """parser.add_argument(
         "--config",
         type=str,
         required=True,
         default="configs/pneumonia.ini",
         help="Path to config",
-    )
+    )"""
     parser.add_argument(
         "--dataset",
         type=str,
@@ -50,10 +50,18 @@ if __name__ == "__main__":
     )
     cmd_args = parser.parse_args()
 
-    config = configparser.ConfigParser()
-    config.read(cmd_args.config)
+    use_cuda = not cmd_args.no_cuda and torch.cuda.is_available()
 
-    args = Arguments(cmd_args, config, mode="inference")
+
+    device = torch.device("cuda" if use_cuda else "cpu")  # pylint: disable=no-member
+    state = torch.load(cmd_args.model_weights, map_location=device)
+
+    args = state['args']
+    args.from_previous_checkpoint(cmd_args)
+
+    torch.manual_seed(args.seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
     if cmd_args.encrypted_inference:
         hook = sy.TorchHook(torch)
@@ -62,11 +70,6 @@ if __name__ == "__main__":
         alice = sy.VirtualWorker(hook, id="alice")
         crypto_provider = sy.VirtualWorker(hook, id="crypto_provider")
 
-    use_cuda = not args.no_cuda and torch.cuda.is_available()
-
-    torch.manual_seed(args.seed)
-
-    device = torch.device("cuda" if use_cuda else "cpu")  # pylint: disable=no-member
 
     kwargs = {"num_workers": 1, "pin_memory": True} if use_cuda else {}
 
@@ -127,6 +130,7 @@ if __name__ == "__main__":
             num_classes=num_classes,
             in_channels=3 if args.pretrained else 1,
             adptpool=False,
+            input_size=args.inference_resolution,
         )
     elif args.model == "simpleconv":
         if args.pretrained:
@@ -140,13 +144,11 @@ if __name__ == "__main__":
             num_classes=num_classes,
             in_channels=3 if args.pretrained else 1,
             adptpool=False,
+            input_size=args.inference_resolution,
         )
     else:
         raise NotImplementedError("model unknown")
-    state = torch.load(cmd_args.model_weights, map_location=device)
-    if "optim_state_dict" in state:
-        state = state["model_state_dict"]
-    model.load_state_dict(state)
+    model.load_state_dict(state["model_state_dict"])
     # model = models.vgg16(pretrained=False, num_classes=3)
     # model.classifier = vggclassifier()
     model.to(device)

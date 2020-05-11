@@ -15,17 +15,28 @@ log_cosine : Cosine interpolation with log learning rate scale
 
 class LearningRateScheduler:
     def __init__(
-        self, total_epochs, log_start_lr, log_end_lr, schedule_plan="log_linear"
+        self,
+        total_epochs,
+        log_start_lr,
+        log_end_lr,
+        schedule_plan="log_linear",
+        restarts=None,
     ):
-        self.total_epochs = total_epochs
+        if restarts == 0:
+            restarts = None
+        self.total_epochs = (
+            total_epochs if not restarts else total_epochs / (restarts + 1)
+        )
         if schedule_plan == "log_linear":
             self.calc_lr = lambda epoch: np.power(
-                10, ((log_end_lr - log_start_lr) / total_epochs) * epoch + log_start_lr
+                10,
+                ((log_end_lr - log_start_lr) / self.total_epochs) * epoch
+                + log_start_lr,
             )
         elif schedule_plan == "log_cosine":
             self.calc_lr = lambda epoch: np.power(
                 10,
-                (np.cos(np.pi * (epoch / total_epochs)) / 2.0 + 0.5)
+                (np.cos(np.pi * (epoch / self.total_epochs)) / 2.0 + 0.5)
                 * abs(log_start_lr - log_end_lr)
                 + log_end_lr,
             )
@@ -37,6 +48,7 @@ class LearningRateScheduler:
             )
 
     def get_lr(self, epoch):
+        epoch = epoch % self.total_epochs
         if (type(epoch) is int and epoch > self.total_epochs) or (
             type(epoch) is np.ndarray and np.max(epoch) > self.total_epochs
         ):
@@ -65,6 +77,7 @@ class Arguments:
         self.epochs = config.getint("config", "epochs", fallback=1)
         self.lr = config.getfloat("config", "lr", fallback=1e-3)
         self.end_lr = config.getfloat("config", "end_lr", fallback=self.lr)
+        self.restarts = config.getint("config", "restarts", fallback=None)
         self.momentum = config.getfloat("config", "momentum", fallback=0.5)
         self.seed = config.getint("config", "seed", fallback=1)
         self.test_interval = config.getint("config", "test_interval", fallback=1)
@@ -100,6 +113,11 @@ class Arguments:
         self.dataset = cmd_args.dataset  # options: ['pneumonia', 'mnist']
         self.no_cuda = cmd_args.no_cuda
 
+    def from_previous_checkpoint(self, cmd_args):
+        self.visdom = False
+        self.encrypted_inference = cmd_args.encrypted_inference
+        self.no_cuda = cmd_args.no_cuda
+
 
 class AddGaussianNoise(object):
     def __init__(self, mean=0.0, std=1.0):
@@ -119,7 +137,7 @@ class AddGaussianNoise(object):
         )
 
 
-def save_config_results(args, accuracy, table):
+def save_config_results(args, accuracy, timestamp, table):
     members = [
         attr
         for attr in dir(args)
@@ -131,7 +149,8 @@ def save_config_results(args, accuracy, table):
     else:
         df = pd.read_csv(table)
     new_row = dict(zip(members, [getattr(args, x) for x in members]))
-    new_row["result"] = accuracy
+    new_row["timestamp"] = timestamp
+    new_row["best_validation_accuracy"] = accuracy
     df = df.append(new_row, ignore_index=True)
     df.to_csv(table, index=False)
 
@@ -149,6 +168,10 @@ def train(
     ):  # <-- now it is a distributed dataset
         if args.train_federated:
             model.send(data.location)  # <-- NEW: send the model to the right location
+            # print("data location: {:s}".format(str(data.location)))
+            # print("target location: {:s}".format(str(target.location)))
+            # print("model location: {:s}".format(str(model.location)))
+            # model = model.to(device)
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
         output = model(data)
@@ -288,9 +311,9 @@ def test(
         weights *= 1./np.sum(weights)
         """
         precs = np.array(precs)
-        #indices = ~np.isnan(precs)
+        # indices = ~np.isnan(precs)
         rec = np.average(recs)
-        prec = np.average(precs)#[indices])
+        prec = np.average(precs)  # [indices])
         f1_score = np.average(f1s)
         rows.append(
             [
