@@ -6,12 +6,11 @@ from absl import flags
 import tensorflow as tf
 import tensorflow_federated as tff
 
-from data_helpers import make_client_ids
-from data_helpers import provide_client_data_fn
-from model_helpers import build_vgg16
+import data_helpers as data
+import model_helpers as model
 
 
-# Hyperparams
+# Training hparams
 flags.DEFINE_integer("num_rounds", default=10,
     help="Number of rounds of federated averaging.")
 flags.DEFINE_integer("clients_per_round", default=10,
@@ -20,16 +19,8 @@ flags.DEFINE_float("client_learning_rate", default=.02,
     help="Learning rate for client optimizers.")
 flags.DEFINE_float("server_learning_rate", default=1.0,
     help="Learning rate for client optimizers.")
-flags.DEFINE_bool("freeze_model", default=True,
-    help="Freeze early layers in the model (if its builder fn allows)")
-flags.DEFINE_integer("image_width", default=224,
-    help="Width dimension of input radiology images.")
-flags.DEFINE_integer("image_height", default=224,
-    help="Height dimension of input radiology images.")
-flags.DEFINE_integer("batch_size", default=4,
+flags.DEFINE_integer("client_batch_size", default=4,
     help="Local batch size for each client.")
-flags.DEFINE_enum("model", default="vgg16", enum_values=["vgg16"],
-    help="Which model to use. Must have a builder in model_helpers.")
 
 # Data flags
 flags.DEFINE_string("data_root", default="./data",
@@ -45,15 +36,19 @@ FLAGS = flags.FLAGS
 
 
 def main(argv):
+  if len(argv) > 1:
+    raise app.UsageError('Expected no command-line arguments, '
+                         'got: {}'.format(argv))
   dataroot = pathlib.Path(FLAGS.data_root)
   train_path = dataroot.joinpath(FLAGS.train_clients_subdir)
   test_path = dataroot.joinpath(FLAGS.test_clients_subdir)
-  train_client_ids = make_client_ids(train_path)
-  test_client_ids = make_client_ids(test_path)
+  train_client_ids = data.make_client_ids(train_path)
+  test_client_ids = data.make_client_ids(test_path)
 
-  img_dims = (FLAGS.image_width, FLAGS.image_height)
-  train_client_fn = provide_client_data_fn(train_path, *img_dims, FLAGS.batch_size)
-  test_client_fn = provide_client_data_fn(test_path, *img_dims, FLAGS.batch_size)
+  train_client_fn = data.provide_client_data_fn(
+      train_path, FLAGS.client_batch_size)
+  test_client_fn = data.provide_client_data_fn(
+      test_path, FLAGS.client_batch_size)
 
   train_clients = tff.simulation.ClientData.from_clients_and_fn(
       train_client_ids, train_client_fn)
@@ -69,6 +64,7 @@ def main(argv):
       for client_id in test_client_ids
   ]
 
+  model_fn = model.model_fn_factory(FLAGS.model)
   client_opt_fn = lambda: tf.keras.optimizers.SGD(FLAGS.client_learning_rate)
   server_opt_fn = lambda: tf.keras.optimizers.SGD(FLAGS.server_learning_rate)
 
@@ -77,20 +73,10 @@ def main(argv):
 
   state = iterative_process.initialize()
   for rnd in range(FLAGS.num_rounds):
-    round_clients = random.sample(federated_train_data, FLAGS.clients_per_round)
+    round_clients = random.sample(
+        federated_train_data, FLAGS.clients_per_round)
     state, metrics = iterative_process.next(state, round_clients)
     print('round  {rnd}, metrics={metrics}'.format(rnd=rnd, metrics=metrics))
-
-
-def model_fn():
-  x_spec = (tf.float32, [None, 224, 224, 3])
-  y_spec = (tf.int64, [None])
-  input_spec = (x_spec, y_spec)
-  loss_fn = tf.keras.losses.SparseCategoricalCrossentropy(from_logits=True)
-  model = build_vgg16(freeze=FLAGS.freeze_model)
-  return tff.learning.from_keras_model(
-      model, loss_fn, input_spec=input_spec,
-      metrics=[tf.keras.metrics.SparseCategoricalAccuracy()])
 
 
 if __name__ == "__main__":
