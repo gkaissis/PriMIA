@@ -161,6 +161,8 @@ def train(
     model.train()
     L = len(train_loader)
     div = 1.0 / float(L)
+    if not args.train_federated:
+        opt = optimizer
 
     avg_loss = []
     for batch_idx, (data, target) in tqdm.tqdm(
@@ -168,16 +170,18 @@ def train(
     ):  # <-- now it is a distributed dataset
         if args.train_federated:
             model.send(data.location)  # <-- NEW: send the model to the right location
+            opt = optimizer.get_optim(data.location.id)
             # print("data location: {:s}".format(str(data.location)))
             # print("target location: {:s}".format(str(target.location)))
             # print("model location: {:s}".format(str(model.location)))
             # model = model.to(device)
+
         data, target = data.to(device), target.to(device)
-        optimizer.zero_grad()
+        opt.zero_grad()
         output = model(data)
         loss = loss_fn(output, target)
         loss.backward()
-        optimizer.step()
+        opt.step()
         if args.train_federated:
             model.get()  # <-- NEW: get the model back
         if batch_idx % args.log_interval == 0:
@@ -377,11 +381,17 @@ def test(
     return test_loss, objective
 
 
-def save_model(model, optim, path, args):
+def save_model(model, optim, path, args, epoch):
+    opt_state_dict = (
+        {name: optim.get_optim(name).state_dict() for name in optim.workers}
+        if args.train_federated
+        else optim.state_dict()
+    )
     torch.save(
         {
+            "epoch": epoch,
             "model_state_dict": model.state_dict(),
-            "optim_state_dict": optim.state_dict(),
+            "optim_state_dict": opt_state_dict,
             "args": args,
         },
         path,

@@ -53,12 +53,6 @@ if __name__ == "__main__":
         "--no_cuda", action="store_true", help="dont use a visdom server"
     )
     parser.add_argument(
-        "--start_at_epoch",
-        type=int,
-        default=1,
-        help="At which epoch should the training start?",
-    )
-    parser.add_argument(
         "--resume_checkpoint",
         type=str,
         default=None,
@@ -83,6 +77,7 @@ if __name__ == "__main__":
 
         hook = sy.TorchHook(torch)
         worker_dict = read_websocket_config("configs/websetting/config.csv")
+        worker_names = [id_dict["id"] for _, id_dict in worker_dict.items()]
         if cmd_args.websockets:
             kwargs_websocket = {
                 "hook": hook,
@@ -348,15 +343,25 @@ if __name__ == "__main__":
         )
     else:
         raise NotImplementedError("optimization not implemented")
+    if args.train_federated:
+        from syft.federated.floptimizer import Optims
+
+        optimizer = Optims(worker_names, optimizer)
     loss_fn = nn.CrossEntropyLoss(weight=cw, reduction="mean")
 
+    start_at_epoch = 1
     if cmd_args.resume_checkpoint:
+        print("resuming checkpoint - args will be overwritten")
         state = torch.load(cmd_args.resume_checkpoint, map_location=device)
-        if "optim_state_dict" in state:
-            optimizer.load_state_dict(state["optim_state_dict"])
-            model.load_state_dict(state["model_state_dict"])
+        start_at_epoch = state["epoch"]
+        args = state["args"]
+        if args.train_federated:
+            opt_state_dict = state["optim_state_dict"]
+            for w in worker_names:
+                optimizer.get_optim(w).load_state_dict(opt_state_dict[w])
         else:
-            model.load_state_dict(state)
+            optimizer.load_state_dict(state["optim_state_dict"])
+        model.load_state_dict(state["model_state_dict"])
     model.to(device)
 
     test(
@@ -364,7 +369,7 @@ if __name__ == "__main__":
         model,
         device,
         val_loader,
-        cmd_args.start_at_epoch - 1,
+        start_at_epoch - 1,
         loss_fn,
         num_classes,
         vis_params=vis_params,
@@ -372,8 +377,14 @@ if __name__ == "__main__":
     )
     accuracies = []
     model_paths = []
-    for epoch in range(cmd_args.start_at_epoch, args.epochs + 1):
-        new_lr = scheduler.adjust_learning_rate(optimizer, epoch - 1)
+    for epoch in range(start_at_epoch, args.epochs + 1):
+        if args.train_federated:
+            for w in worker_names:
+                new_lr = scheduler.adjust_learning_rate(
+                    optimizer.get_optim(w), epoch - 1
+                )
+        else:
+            new_lr = scheduler.adjust_learning_rate(optimizer, epoch - 1)
         if args.visdom:
             vis.line(
                 X=np.asarray([epoch - 1]),
@@ -407,7 +418,7 @@ if __name__ == "__main__":
             )
             model_path = "model_weights/{:s}_epoch_{:03d}.pt".format(exp_name, epoch,)
 
-            save_model(model, optimizer, model_path, args)
+            save_model(model, optimizer, model_path, args, epoch)
             accuracies.append(acc)
             model_paths.append(model_path)
     # reversal and formula because we want last occurance of highest value
