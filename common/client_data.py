@@ -1,6 +1,7 @@
 import abc
 import argparse
 import functools
+import logging
 import os
 import pathlib
 import shutil
@@ -47,8 +48,7 @@ def allocate_samples_on_disk(
   
   for client_id, sample in client_samples.items():
     # e.g. 4P/data/train_clients/03/
-    client_dir_name = "{:2d}".format(client_id)
-    client_path = clients_root / client_dir_name
+    client_path = clients_root / client_id
 
     for label in ["0", "1", "2"]:
       (client_path / label).mkdir(parents=True, exist_ok=True)
@@ -60,6 +60,7 @@ def allocate_samples_on_disk(
 def main(args):
   np.random.seed(args.seed)
   data_root = pathlib.Path(args.data_root)
+
   df = pd.read_csv(data_root.joinpath("Labels.csv"))
 
   train_df = split_dataframe(df, 'train')
@@ -71,13 +72,17 @@ def main(args):
   train_splits = split_dataframe_for_clients(train_df, train_ids)
   test_splits = split_dataframe_for_clients(test_df, test_ids)
 
+  logging.info("Allocating client images on disk...")
   allocate_samples_on_disk(
       train_splits, data_root, 'train', args.train_clients_subdir)
   allocate_samples_on_disk(
       test_splits, data_root, 'test', args.test_clients_subdir)
+  
+  logging.info("Finished.")
 
 
 if __name__ == '__main__':
+  logging.basicConfig(level=logging.INFO)
   args = parse_args()
   main(args)
   
