@@ -3,10 +3,10 @@ import syft as sy
 from pandas import read_csv
 
 
-def start_webserver(id: int, port: str, host: str):
+def start_webserver(id: int, port: str):
     hook = sy.TorchHook(torch)
     server = sy.workers.websocket_server.WebsocketServerWorker(
-        id=id, host=host, port=port, hook=hook, verbose=False
+        id=id, host=None, port=port, hook=hook, verbose=False
     )
     server.start()
     return server
@@ -25,8 +25,7 @@ if __name__ == "__main__":
 
     parser = ArgumentParser()
     parser.add_argument("--id", type=str, required=True, help="id of worker")
-    parser.add_argument("--host", type=str, required=True, default="localhost")
     parser.add_argument("--port", type=int, required=True)
     args = parser.parse_args()
 
-    start_webserver(args.id, args.port, args.host)
+    start_webserver(args.id, args.port)

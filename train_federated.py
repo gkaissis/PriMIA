@@ -268,6 +268,7 @@ if __name__ == "__main__":
     )
 
     ## visdom
+    vis_params = None
     if args.visdom:
         vis = visdom.Visdom()
         assert vis.check_connection(

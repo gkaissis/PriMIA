@@ -22,8 +22,6 @@ if __name__ == "__main__":
             str(id_dict["port"]),
             "--id",
             id_dict["id"],
-            "--host",
-            id_dict["host"],
         ]
         for row, id_dict in worker_dict.items()
     ]
