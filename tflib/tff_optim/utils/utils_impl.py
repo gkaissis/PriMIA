@@ -557,7 +557,7 @@ def launch_experiment(executable: str,
     param_str = hparams_to_str(idx, param_dict, short_names)
 
     param_list.append('--root_output_dir={}'.format(root_output_dir))
-    param_list.append('--exp_name={}'.format(param_str))
+    param_list.append('--experiment_name={}'.format(param_str))
     command = '{} {}'.format(executable, ' '.join(param_list))
     command_list.append(command)
 
