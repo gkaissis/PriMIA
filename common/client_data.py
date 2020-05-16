@@ -47,7 +47,7 @@ def allocate_samples_on_disk(
   clients_root = data_root / clients_subdir  # e.g. 4P/data/train_clients
   
   for client_id, sample in client_samples.items():
-    # e.g. 4P/data/train_clients/03/
+    # e.g. 4P/data/train_clients/client-03/
     client_path = clients_root / client_id
 
     for label in ["0", "1", "2"]:
