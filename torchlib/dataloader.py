@@ -22,13 +22,10 @@ class PPPP(sy.BaseDataset):
         train=False,
         transform=None,
         seed = 1,
-        # val=False, val_split=10,
     ):
         random.seed(seed)
         manual_seed(seed)
         self.train = train
-        # self.val = val
-        # self.val_split = val_split
         self.labels = pd.read_csv(label_path)
         self.labels = self.labels[
             self.labels["Dataset_type"] == ("TRAIN" if train else "TEST")

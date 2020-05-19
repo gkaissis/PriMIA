@@ -1,6 +1,6 @@
+import argparse
 import sys
 import os.path
-import argparse
 
 sys.path.append(
     os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
@@ -42,7 +42,8 @@ if __name__ == "__main__":
                 "--id",
                 id_dict["id"],
                 "--data_directory",
-                "/home/alex/worker_emulation/worker{:d}/".format(i + 1),
+                "/home/alex/worker_emulation/all_samples",
+                #"/home/alex/worker_emulation/worker{:d}/".format(i + 1),
             ]
             for i, (row, id_dict) in enumerate(worker_dict.items())
         ]

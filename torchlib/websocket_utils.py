@@ -4,6 +4,15 @@ import numpy as np
 from pandas import read_csv
 from torchvision.datasets import MNIST
 from torchvision import transforms
+import sys
+import os.path
+from random import seed
+
+sys.path.append(
+    os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
+)
+from torchlib.dataloader import PPPP
+
 
 KEEP_LABELS_DICT = {
     "alice": [0, 1, 2, 3],
@@ -18,9 +27,14 @@ def start_webserver(id: str, port: int, data_dir=None):
     server = sy.workers.websocket_server.WebsocketServerWorker(
         id=id, host=None, port=port, hook=hook, verbose=True
     )
+    torch.manual_seed(1)
+    seed(1)
+    np.random.seed(1)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
     if data_dir:
         if "mnist" in data_dir:
-            mnist_dataset = MNIST(
+            dataset = MNIST(
                 root="./data",
                 train=True,
                 download=True,
@@ -29,59 +43,66 @@ def start_webserver(id: str, port: int, data_dir=None):
                 ),
             )
             if id in KEEP_LABELS_DICT:
-                indices = np.isin(mnist_dataset.targets, KEEP_LABELS_DICT[id]).astype(
-                    "uint8"
-                )
+                indices = np.isin(dataset.targets, KEEP_LABELS_DICT[id]).astype("uint8")
                 selected_data = (
                     torch.native_masked_select(  # pylint:disable=no-member
-                        mnist_dataset.data.transpose(0, 2),
+                        dataset.data.transpose(0, 2),
                         torch.tensor(indices),  # pylint:disable=not-callable
                     )
                     .view(28, 28, -1)
                     .transpose(2, 0)
                 )
                 selected_targets = torch.native_masked_select(  # pylint:disable=no-member
-                    mnist_dataset.targets,
+                    dataset.targets,
                     torch.tensor(indices),  # pylint:disable=not-callable
                 )
-                mnist_dataset = sy.BaseDataset(
+                dataset = sy.BaseDataset(
                     data=selected_data,
                     targets=selected_targets,
-                    transform=mnist_dataset.transform,
+                    transform=dataset.transform,
                 )
-
-            server.add_dataset(mnist_dataset, key="mnist")
+            dataset_name = "mnist"
         else:
             from torchvision.datasets import ImageFolder
             from utils import AddGaussianNoise  # pylint: disable=import-error
 
             train_tf = [
-                transforms.RandomVerticalFlip(p=0.5),
-                transforms.RandomAffine(
-                    degrees=30,
-                    translate=(0, 0),
-                    scale=(0.85, 1.15),
-                    shear=10,
-                    fillcolor=0.0,
-                ),
+                # transforms.RandomVerticalFlip(p=0.5),
+                # transforms.RandomAffine(
+                #    degrees=30,
+                #    translate=(0, 0),
+                #    scale=(0.85, 1.15),
+                #    shear=10,
+                #    fillcolor=0.0,
+                # ),
                 transforms.Resize(224),
                 transforms.RandomCrop(224),
                 transforms.ToTensor(),
                 transforms.Normalize((0.57282609,), (0.17427578,)),
-                transforms.RandomApply([AddGaussianNoise(mean=0.0, std=0.05)], p=0.5),
+                # transforms.RandomApply([AddGaussianNoise(mean=0.0, std=0.05)], p=0.5),
             ]
-            """transforms.Lambda(
+            train_tf.append(
+                transforms.Lambda(
                     lambda x: torch.repeat_interleave(  # pylint: disable=no-member
                         x, 3, dim=0
                     )
-            ),"""
-            target_dict_pneumonia = {0: 1, 1: 0, 2: 2}
+                )
+            )
+            """target_dict_pneumonia = {0: 1, 1: 0, 2: 2}
             dataset = ImageFolder(
                 data_dir,
                 transform=transforms.Compose(train_tf),
                 target_transform=lambda x: target_dict_pneumonia[x],
+            )"""
+            dataset = PPPP(
+                "data/Labels.csv",
+                train=True,
+                transform=transforms.Compose(train_tf),
+                seed=1,
             )
-            server.add_dataset(dataset, key="pneumonia")
+            dataset_name = "pneumonia"
+        server.add_dataset(dataset, key=dataset_name)
+        print("added {:s} dataset".format(dataset_name))
     server.start()
     return server
 

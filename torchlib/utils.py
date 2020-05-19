@@ -118,6 +118,17 @@ class Arguments:
         self.encrypted_inference = cmd_args.encrypted_inference
         self.no_cuda = cmd_args.no_cuda
 
+    def __str__(self):
+        members = [
+            attr
+            for attr in dir(self)
+            if not callable(getattr(self, attr)) and not attr.startswith("__")
+        ]
+        rows = []
+        for x in members:
+            rows.append([str(x), str(getattr(self, x))])
+        return tabulate(rows)
+
 
 class AddGaussianNoise(object):
     def __init__(self, mean=0.0, std=1.0):
@@ -200,12 +211,7 @@ def train(
             else:
                 avg_loss.append(loss.item())
     if not args.visdom:
-        print(
-            "Train Epoch: {} \tLoss: {:.6f}".format(
-                epoch,
-                np.mean(avg_loss),
-            )
-        )
+        print("Train Epoch: {} \tLoss: {:.6f}".format(epoch, np.mean(avg_loss),))
 
 
 def test(
@@ -285,7 +291,7 @@ def test(
                 if tp + fp_per_class[i]
                 else float("NaN")
             )
-            f1_score = (2 * prec * rec) / (prec + rec) if prec+rec > 0 else 0
+            f1_score = (2 * prec * rec) / (prec + rec) if prec + rec > 0 else 0
             accs.append(acc)
             recs.append(rec)
             precs.append(prec)

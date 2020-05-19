@@ -100,7 +100,8 @@ async def fit_model_on_worker(
     curr_round: int,
     max_nr_batches: int,
     lr: float,
-    args,
+    args: Arguments,
+    device: str,
 ):
     """Send the model to the worker and fit the model on the worker's training data.
 
@@ -126,13 +127,15 @@ async def fit_model_on_worker(
         loss_fn=loss_fn,
         batch_size=batch_size,
         shuffle=True,
-        max_nr_batches=max_nr_batches,
+        max_nr_batches=-1,
         epochs=1,
         optimizer=args.optimizer,
         optimizer_args=opt_args,
     )
     train_config.send(worker)
-    loss = await worker.async_fit(dataset_key=args.dataset, return_ids=[0])
+    loss = await worker.async_fit(
+        dataset_key=args.dataset, return_ids=[0], device=device
+    )
     model = train_config.model_ptr.get().obj
     return worker.id, model, loss
 
@@ -160,7 +163,7 @@ async def main():
     for wcw in worker_instances:
         wcw.clear_objects_remote()
 
-    #worker_instances = [alice, bob, charlie]
+    # worker_instances = [alice, bob, charlie]
 
     use_cuda = not args.no_cuda and torch.cuda.is_available()
     device = torch.device("cuda" if use_cuda else "cpu")  # pylint:disable=no-member
@@ -199,6 +202,10 @@ async def main():
         testset = datasets.MNIST(
             "../data", train=False, transform=transforms.Compose(test_tf),
         )
+
+        data_shape = torch.zeros(  # pylint:disable=no-member
+            [1, 1, 28, 28], dtype=torch.float  # pylint:disable=no-member
+        ).to(device)
     elif args.dataset == "pneumonia":
         num_classes = 3
 
@@ -225,6 +232,10 @@ async def main():
             seed=args.seed,
         )
         class_names = {0: "normal", 1: "bacterial pneumonia", 2: "viral pneumonia"}
+        data_shape = torch.zeros(  # pylint:disable=no-member
+            [1, 3, args.train_resolution, args.train_resolution,],
+            dtype=torch.float,  # pylint:disable=no-member
+        ).to(device)
     else:
         raise NotImplementedError("dataset not implemented")
 
@@ -294,19 +305,19 @@ async def main():
     else:
         raise NotImplementedError("model unknown")
     model.to(device)
-    # model = Net().to(device)
-    if args.dataset == "mnist":
-        data_shape = torch.zeros(  # pylint:disable=no-member
-            [1, 1, 28, 28], dtype=torch.float  # pylint:disable=no-member
-        ).to(device)
-    elif args.dataset == "pneumonia":
-        data_shape = torch.zeros(  # pylint:disable=no-member
-            [1, 3, args.train_resolution, args.train_resolution,],
-            dtype=torch.float,  # pylint:disable=no-member
-        ).to(device)
-    else:
-        raise NotImplementedError("dataset unknown")
-    traced_model = torch.jit.trace(model, data_shape,)
+    traced_model = torch.jit.trace(model, data_shape.to(device),)
+
+    _, acc = test(
+        args,
+        traced_model,
+        device,
+        test_loader,
+        0,
+        loss_fn,
+        num_classes=num_classes,
+        vis_params=vis_params,
+        class_names=class_names,
+    )
 
     learning_rate = args.lr
     for curr_round in range(1, args.epochs + 1):
@@ -319,14 +330,14 @@ async def main():
                     traced_model=traced_model,
                     batch_size=args.batch_size,
                     curr_round=curr_round,
-                    max_nr_batches=10,
+                    max_nr_batches=0,
                     lr=learning_rate,
                     args=args,
+                    device=device,
                 )
                 for worker in worker_instances
             ]
         )
-        learning_rate = scheduler.get_lr(curr_round - 1)
         if args.visdom:
             vis.line(
                 X=np.asarray([curr_round - 1]),
@@ -336,31 +347,15 @@ async def main():
                 update="append",
                 env=vis_env,
             )
+        learning_rate = scheduler.get_lr(curr_round - 1)
         models = {}
         loss_values = {}
 
-        test_models = curr_round % args.test_interval == 0 or curr_round == args.epochs
-        """if test_models:
-            logger.info("Evaluating models")
-            np.set_printoptions(formatter={"float": "{: .0f}".format})
-            for worker_id, worker_model, _ in results:
-                evaluate_model_on_worker(
-                    model_identifier="Model update " + worker_id,
-                    worker=testing,
-                    dataset_key="mnist_testing",
-                    model=worker_model,
-                    nr_bins=10,
-                    batch_size=128,
-                    device=device,
-                    print_target_hist=False,
-                )
-        """
         # Federate models (note that this will also change the model in models[0]
         for worker_id, worker_model, worker_loss in results:
             if worker_model is not None:
                 models[worker_id] = worker_model
                 loss_values[worker_id] = worker_loss
-
         traced_model = utils.federated_avg(models)
         if args.visdom:
             loss = torch.mean(  # pylint:disable=no-member
@@ -375,6 +370,7 @@ async def main():
                 env=vis_params["vis_env"],
             )
 
+        test_models = curr_round % args.test_interval == 0 or curr_round == args.epochs
         if test_models:
             _, acc = test(
                 args,
@@ -387,9 +383,6 @@ async def main():
                 vis_params=vis_params,
                 class_names=class_names,
             )
-
-        # decay learning rate
-        learning_rate = max(0.98 * learning_rate, args.lr * 0.01)
 
     # torch.save(model.state_dict(), "mnist_cnn.pt")
 

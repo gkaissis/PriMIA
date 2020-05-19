@@ -136,3 +136,4 @@ model_weights/*
 4P.ipynb
 temp.py
 data/MNIST/
+configs/websetting/config_copy.csv
