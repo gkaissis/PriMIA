@@ -58,11 +58,6 @@ if __name__ == "__main__":
         default=None,
         help="Start training from older model checkpoint",
     )
-    parser.add_argument(
-        "--websockets",
-        action="store_true",
-        help="Use websockets instead of virtual workers",
-    )
     cmd_args = parser.parse_args()
 
     config = configparser.ConfigParser()
@@ -78,26 +73,11 @@ if __name__ == "__main__":
         hook = sy.TorchHook(torch)
         worker_dict = read_websocket_config("configs/websetting/config.csv")
         worker_names = [id_dict["id"] for _, id_dict in worker_dict.items()]
-        if cmd_args.websockets:
-            kwargs_websocket = {
-                "hook": hook,
-                "verbose": False,
-            }
-            workers = [
-                sy.WebsocketClientWorker(
-                    id=id_dict["id"],
-                    port=id_dict["port"],
-                    host=id_dict["host"],
-                    **kwargs_websocket,
-                )
-                for row, id_dict in worker_dict.items()
-            ]
-
-        else:
-            workers = [
-                sy.VirtualWorker(hook, id=id_dict["id"])
-                for row, id_dict in worker_dict.items()
-            ]
+        
+        workers = [
+            sy.VirtualWorker(hook, id=id_dict["id"])
+            for row, id_dict in worker_dict.items()
+        ]
 
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 

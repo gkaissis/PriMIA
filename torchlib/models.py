@@ -150,7 +150,16 @@ def make_layers(cfg, batch_norm=False, in_channels=3):
     return nn.Sequential(*layers)
 
 
-def _vgg(arch, cfg, batch_norm, pretrained, progress, in_channels=3, num_classes=1000, **kwargs):
+def _vgg(
+    arch,
+    cfg,
+    batch_norm,
+    pretrained,
+    progress,
+    in_channels=3,
+    num_classes=1000,
+    **kwargs
+):
     if pretrained:
         kwargs["init_weights"] = False
     assert not (pretrained and in_channels != 3), "If pretrained you need 3 in channels"
@@ -161,7 +170,7 @@ def _vgg(arch, cfg, batch_norm, pretrained, progress, in_channels=3, num_classes
     if pretrained:
         state_dict = load_state_dict_from_url(model_urls[arch], progress=progress)
         model.load_state_dict(state_dict)
-        model.classifier =  nn.Sequential(
+        model.classifier = nn.Sequential(
             nn.Linear(512, 512),
             nn.ReLU(),  # inplace=True),  # changed for pysyft
             nn.Dropout(),
@@ -230,7 +239,7 @@ class BasicBlock(nn.Module):
         # Both self.conv1 and self.downsample layers downsample the input when stride != 1
         self.conv1 = conv3x3(inplanes, planes, stride)
         self.bn1 = norm_layer(planes)
-        self.relu = nn.ReLU(inplace=True)
+        self.relu = nn.ReLU()  # inplace=True)
         self.conv2 = conv3x3(planes, planes)
         self.bn2 = norm_layer(planes)
         self.downsample = downsample
@@ -286,7 +295,7 @@ class Bottleneck(nn.Module):
         self.bn2 = norm_layer(width)
         self.conv3 = conv1x1(width, planes * self.expansion)
         self.bn3 = norm_layer(planes * self.expansion)
-        self.relu = nn.ReLU(inplace=True)
+        self.relu = nn.ReLU()  # inplace=True)
         self.downsample = downsample
         self.stride = stride
 
@@ -350,7 +359,7 @@ class ResNet(nn.Module):
             in_channels, self.inplanes, kernel_size=7, stride=2, padding=3, bias=False
         )
         self.bn1 = norm_layer(self.inplanes)
-        self.relu = nn.ReLU(inplace=True)
+        self.relu = nn.ReLU()  # inplace=True)
         self.maxpool = nn.AvgPool2d(kernel_size=3, stride=2, padding=1)
         self.layer1 = self._make_layer(block, 64, layers[0])
         self.layer2 = self._make_layer(
@@ -544,15 +553,18 @@ class ConvNet224(nn.Module):
             nn.Conv2d(in_channels, 8, 3),
             nn.ReLU(),
             nn.AvgPool2d(2),
+            nn.BatchNorm2d(8),
             nn.Conv2d(8, 32, 3),
             nn.ReLU(),
             nn.AvgPool2d(2),
+            nn.BatchNorm2d(32),
             nn.Conv2d(32, 64, 3),
             nn.ReLU(),
             nn.AvgPool2d(2),
             nn.Conv2d(64, 128, 3),
             nn.ReLU(),
             nn.AvgPool2d(2),
+            nn.BatchNorm2d(128),
             nn.Conv2d(128, 256, 3),
             nn.ReLU(),
             nn.AvgPool2d(2),
@@ -581,10 +593,12 @@ class ConvNetMNIST(nn.Module):
         self.features = nn.Sequential(
             nn.Conv2d(in_channels, 8, 3),
             nn.ReLU(),
+            nn.BatchNorm2d(8),
             nn.Conv2d(8, 32, 3),
             nn.ReLU(),
             nn.Conv2d(32, 64, 3),
             nn.ReLU(),
+            nn.BatchNorm2d(64),
             nn.Conv2d(64, 128, 3),
             nn.ReLU(),
             nn.AvgPool2d(2),

@@ -198,15 +198,11 @@ def train(
                     env=vis_params["vis_env"],
                 )
             else:
-                avg_loss.append(loss.item)
+                avg_loss.append(loss.item())
     if not args.visdom:
         print(
-            "Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}".format(
+            "Train Epoch: {} \tLoss: {:.6f}".format(
                 epoch,
-                batch_idx * args.batch_size,
-                len(train_loader)
-                * args.batch_size,  # batch_idx * len(data), len(train_loader.dataset),
-                100.0 * batch_idx / len(train_loader),
                 np.mean(avg_loss),
             )
         )
@@ -289,7 +285,7 @@ def test(
                 if tp + fp_per_class[i]
                 else float("NaN")
             )
-            f1_score = (2 * prec * rec) / (prec + rec)
+            f1_score = (2 * prec * rec) / (prec + rec) if prec+rec > 0 else 0
             accs.append(acc)
             recs.append(rec)
             precs.append(prec)
