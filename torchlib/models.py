@@ -2,6 +2,9 @@ import torch
 from numpy import prod
 from torch import nn
 from torch.hub import load_state_dict_from_url
+from numpy.random import seed as npseed
+from random import seed as rseed
+
 
 model_urls = {
     "vgg11": "https://download.pytorch.org/models/vgg11-bbd30ac9.pth",
@@ -505,6 +508,24 @@ def resnet34(pretrained=False, progress=True, in_channels=3, **kwargs):
         **kwargs
     )
 
+def _initialize_weights(model):
+    torch.manual_seed(1)
+    rseed(1)
+    npseed(1)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    for m in model.modules():
+        if isinstance(m, nn.Conv2d):
+            nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.BatchNorm2d):
+            nn.init.constant_(m.weight, 1)
+            nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.Linear):
+            nn.init.normal_(m.weight, 0, 0.01)
+            nn.init.constant_(m.bias, 0)
+
 
 class ConvNet512(nn.Module):
     def __init__(self, num_classes=10, in_channels=1):
@@ -538,6 +559,7 @@ class ConvNet512(nn.Module):
             nn.ReLU(),
             nn.Linear(512, num_classes),
         )
+        _initialize_weights(self)
 
     def forward(self, x):
         x = self.features(x)
@@ -579,6 +601,7 @@ class ConvNet224(nn.Module):
             nn.ReLU(),
             nn.Linear(512, num_classes),
         )
+        _initialize_weights(self)
 
     def forward(self, x):
         x = self.features(x)
@@ -593,12 +616,12 @@ class ConvNetMNIST(nn.Module):
         self.features = nn.Sequential(
             nn.Conv2d(in_channels, 8, 3),
             nn.ReLU(),
-            nn.BatchNorm2d(8),
+            #nn.BatchNorm2d(8),
             nn.Conv2d(8, 32, 3),
             nn.ReLU(),
             nn.Conv2d(32, 64, 3),
             nn.ReLU(),
-            nn.BatchNorm2d(64),
+            #nn.BatchNorm2d(64),
             nn.Conv2d(64, 128, 3),
             nn.ReLU(),
             nn.AvgPool2d(2),
@@ -616,9 +639,13 @@ class ConvNetMNIST(nn.Module):
             nn.ReLU(),
             nn.Linear(512, num_classes),
         )
+        _initialize_weights(self)
 
     def forward(self, x):
         x = self.features(x)
+        #from numpy.linalg import norm
+        #print(norm(x.cpu().detach().numpy()))
+        #exit()
         x = x.view(-1, 512)
         x = self.classifier(x)
         return x

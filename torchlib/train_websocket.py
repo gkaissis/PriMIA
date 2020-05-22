@@ -126,7 +126,7 @@ async def fit_model_on_worker(
         model=traced_model,
         loss_fn=loss_fn,
         batch_size=batch_size,
-        shuffle=True,
+        shuffle=False,
         max_nr_batches=-1,
         epochs=1,
         optimizer=args.optimizer,
@@ -159,6 +159,12 @@ async def main():
         )
         for row, worker in worker_dict.items()
     ]
+    fed_datasets = sy.FederatedDataset([
+        sy.local_worker.request_search("mnist", location=worker)[0]
+        for worker in worker_instances
+    ])
+    dataloader = sy.FederatedDataLoader(fed_datasets)
+    exit()
 
     for wcw in worker_instances:
         wcw.clear_objects_remote()

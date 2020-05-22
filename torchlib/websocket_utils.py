@@ -1,6 +1,7 @@
 import torch
 import syft as sy
 import numpy as np
+from tqdm import tqdm
 from pandas import read_csv
 from torchvision.datasets import MNIST
 from torchvision import transforms
@@ -81,28 +82,35 @@ def start_webserver(id: str, port: int, data_dir=None):
                 transforms.Normalize((0.57282609,), (0.17427578,)),
                 # transforms.RandomApply([AddGaussianNoise(mean=0.0, std=0.05)], p=0.5),
             ]
-            train_tf.append(
+            """train_tf.append(
                 transforms.Lambda(
                     lambda x: torch.repeat_interleave(  # pylint: disable=no-member
                         x, 3, dim=0
                     )
                 )
-            )
-            """target_dict_pneumonia = {0: 1, 1: 0, 2: 2}
+            )"""
+            target_dict_pneumonia = {0: 1, 1: 0, 2: 2}
             dataset = ImageFolder(
                 data_dir,
                 transform=transforms.Compose(train_tf),
                 target_transform=lambda x: target_dict_pneumonia[x],
-            )"""
-            dataset = PPPP(
+            )
+            data, targets = [], []
+            for d, t in tqdm(dataset, total=len(dataset)):
+                data.append(d)
+                targets.append(t)
+            data = torch.stack(data)  # pylint:disable=no-member
+            targets = torch.from_numpy(np.array(targets))  # pylint:disable=no-member
+            dataset = sy.BaseDataset(data=data, targets=targets)
+            """dataset = PPPP(
                 "data/Labels.csv",
                 train=True,
                 transform=transforms.Compose(train_tf),
-                seed=1,
-            )
+                seed=1
+            )"""
             dataset_name = "pneumonia"
-        server.add_dataset(dataset, key=dataset_name)
         print("added {:s} dataset".format(dataset_name))
+        server.register_obj(dataset, obj_id=dataset_name)
     server.start()
     return server
 

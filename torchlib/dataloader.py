@@ -15,7 +15,7 @@ def single_channel_loader(filename):
         return img.copy()
 
 
-class PPPP(sy.BaseDataset):
+class PPPP(data.Dataset):
     def __init__(
         self,
         label_path="data/Labels.csv",
@@ -23,6 +23,7 @@ class PPPP(sy.BaseDataset):
         transform=None,
         seed = 1,
     ):
+        super().__init__()
         random.seed(seed)
         manual_seed(seed)
         self.train = train

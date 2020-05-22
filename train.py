@@ -58,6 +58,9 @@ if __name__ == "__main__":
         default=None,
         help="Start training from older model checkpoint",
     )
+    parser.add_argument(
+        "--websockets", action="store_true", help="train on websocket config"
+    )
     cmd_args = parser.parse_args()
 
     config = configparser.ConfigParser()
@@ -65,6 +68,7 @@ if __name__ == "__main__":
     config.read(cmd_args.config)
 
     args = Arguments(cmd_args, config, mode="train")
+    print(str(args))
 
     if args.train_federated:
         import syft as sy
@@ -73,11 +77,29 @@ if __name__ == "__main__":
         hook = sy.TorchHook(torch)
         worker_dict = read_websocket_config("configs/websetting/config.csv")
         worker_names = [id_dict["id"] for _, id_dict in worker_dict.items()]
-        
-        workers = [
-            sy.VirtualWorker(hook, id=id_dict["id"])
-            for row, id_dict in worker_dict.items()
-        ]
+
+        if args.websockets:
+            workers = [
+                sy.workers.websocket_client.WebsocketClientWorker(
+                    hook=hook,
+                    id=worker["id"],
+                    port=worker["port"],
+                    host=worker["host"],
+                )
+                for row, worker in worker_dict.items()
+            ]
+            fed_datasets = sy.FederatedDataset(
+                [
+                    sy.local_worker.request_search(args.dataset, location=worker)[0]
+                    for worker in workers
+                ]
+            )
+            train_loader = sy.FederatedDataLoader(fed_datasets)
+        else:
+            workers = [
+                sy.VirtualWorker(hook, id=id_dict["id"])
+                for row, id_dict in worker_dict.items()
+            ]
 
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
@@ -126,6 +148,7 @@ if __name__ == "__main__":
             download=True,
             transform=transforms.Compose(train_tf),
         )
+        
 
         testset = datasets.MNIST(
             "../data", train=False, transform=transforms.Compose(test_tf),
@@ -199,12 +222,13 @@ if __name__ == "__main__":
     del total_L, fraction
 
     if args.train_federated:
-        train_loader = sy.FederatedDataLoader(
-            dataset.federate(tuple(workers)),
-            batch_size=args.batch_size,
-            shuffle=True,
-            **kwargs,
-        )
+        if not args.websockets:
+            train_loader = sy.FederatedDataLoader(
+                dataset.federate(tuple(workers)),
+                batch_size=args.batch_size,
+                shuffle=True,
+                **kwargs,
+            )
         """val_loader = sy.FederatedDataLoader(
             valset.federate((bob, alice, charlie)),
             batch_size=args.test_batch_size,

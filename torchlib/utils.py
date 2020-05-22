@@ -112,6 +112,9 @@ class Arguments:
         )
         self.dataset = cmd_args.dataset  # options: ['pneumonia', 'mnist']
         self.no_cuda = cmd_args.no_cuda
+        self.websockets = cmd_args.websockets if mode == "train" else False
+        if self.websockets:
+            assert self.train_federated, "If you use websockets it must be federated"
 
     def from_previous_checkpoint(self, cmd_args):
         self.visdom = False
