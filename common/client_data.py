@@ -12,8 +12,8 @@ import pandas as pd
 
 def parse_args():
   parser = argparse.ArgumentParser(description="Client allocation")
-  parser.add_argument('-c', '--train-clients', default=100, type=int)
-  parser.add_argument('-t', '--test-clients', default=12, type=int)
+  parser.add_argument('-c', '--train-clients', default=5, type=int)
+  parser.add_argument('-t', '--test-clients', default=5, type=int)
   parser.add_argument('-s', '--seed', default=42, type=int)
   parser.add_argument('-d', '--data-root', default='./data')
   parser.add_argument('--train-clients-subdir', default='train_clients')
