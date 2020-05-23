@@ -26,14 +26,14 @@ with utils_impl.record_hparam_flags():
   # End of hyperparameter flags.
 
 # Data flags
-flags.DEFINE_string("data_root", default="./data",
-    help="Path to the root folder containing chest xray data")
-flags.DEFINE_string("train_clients_subdir", default="train_clients",
-    help="Subdirectory of `data_root` containing data allocated to the "
-         "training subset of clients.")
-flags.DEFINE_string("test_clients_subdir", default="test_clients",
-    help="Subdirectory of `data-root` containing data allocated to the "
-         "evaluation subset of clients.")
+flags.DEFINE_string('data_root', default='./data',
+    help='Path to the root folder containing chest xray data')
+flags.DEFINE_string('train_clients_subdir', default='train_clients',
+    help='Subdirectory of `data_root` containing data allocated to the '
+         'training subset of clients.')
+flags.DEFINE_string('test_clients_subdir', default='test_clients',
+    help='Subdirectory of `data-root` containing data allocated to the '
+         'evaluation subset of clients.')
 
 FLAGS = flags.FLAGS
 
