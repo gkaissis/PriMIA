@@ -40,6 +40,7 @@ def provide_client_data_fn(
       ds = ds.map(augment_fn, num_parallel_calls=AUTOTUNE)
     if batch_size is not None:
       ds = ds.batch(batch_size)
+    ds = ds.cache()
     return ds
 
   return create_tf_dataset_for_client
@@ -49,7 +50,7 @@ def _get_label(file_path):
   # convert the path to a list of path components
   parts = tf.strings.split(file_path, os.path.sep)
   # The second to last is the class-directory
-  return tf.cast(int(parts[-2]), tf.int64)
+  return tf.strings.to_number(parts[-2], tf.int64)
 
 
 def _decode_img(img, img_width, img_height, downscale):
