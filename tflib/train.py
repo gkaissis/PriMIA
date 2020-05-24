@@ -8,6 +8,7 @@ import tensorflow as tf
 import tensorflow_federated as tff
 
 import data_helpers as data
+import device_handling as device
 import model_helpers as model
 from tff_optim import fed_avg_schedule
 from tff_optim import iterative_process_builder
@@ -24,6 +25,13 @@ with utils_impl.record_hparam_flags():
                        'How many clients to sample per round.')
 
   # End of hyperparameter flags.
+
+# Environment flags
+flags.DEFINE_bool('match_client_devices', default=True,
+    help='generate one logical GPU per client')
+flags.DEFINE_integer('num_gpu_devices', default=5,
+    help='number of logical GPUs to make from gpu_device. ignored if '
+         'match_client_devices is True.')
 
 # Data flags
 flags.DEFINE_string('data_root', default='./data',
@@ -43,6 +51,13 @@ def main(argv):
   test_path = dataroot.joinpath(FLAGS.test_clients_subdir)
   train_client_ids = data.make_client_ids(train_path)
   test_client_ids = data.make_client_ids(test_path)
+
+  if FLAGS.use_gpu and tf.config.list_physical_devices('GPU'):
+    if FLAGS.match_client_devices:
+      num_devices = len(train_client_ids)
+    else:
+      num_devices = FLAGS.num_gpu_devices
+    device.configure_client_gpus(num_devices)
 
   train_client_fn = data.provide_client_data_fn(
       train_path, FLAGS.client_batch_size)

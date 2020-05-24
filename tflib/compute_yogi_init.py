@@ -35,13 +35,6 @@ flags.DEFINE_integer('num_clients', 10,
 
 # End of hyperparameter flags.
 
-FLAGS = flags.FLAGS
-
-CIFAR_SHAPE = (32, 32, 3)
-CROP_SHAPE = (24, 24, 3)
-NUM_CLASSES = 100
-
-
 # Data flags
 flags.DEFINE_string("data_root", default="./data",
     help="Path to the root folder containing chest xray data")
