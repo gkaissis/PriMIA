@@ -2,7 +2,7 @@
 
 In order for the final research product to include valuable
 benchmarks, we should use a shared common lib for tasks that
-are necessary for both PySyft & TFF/TFE stacks.
+are necessary for both PyTorch & TF stacks.
 
 #### What are good candidates for this common lib?
 - dataset processing/labeling code (e.g. numpy/pandas)
