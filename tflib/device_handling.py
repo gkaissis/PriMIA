@@ -1,5 +1,6 @@
 from absl import flags
 import tensorflow as tf
+import tensorflow_federated as tff
 
 # Device environment flags
 flags.DEFINE_bool('use_gpu', default=True,
@@ -21,3 +22,11 @@ def configure_client_gpus(num_devices):
   configs = [tf.config.LogicalDeviceConfiguration(
       memory_limit=FLAGS.memory_per_device) for _ in range(num_devices)]
   tf.config.set_logical_device_configuration(gpu_device, configs)
+
+
+def explicit_executor_factory(client_devices):
+  client_devices = tf.config.list_logical_devices('GPU')
+  num_executors = len(client_devices) if client_devices else 32
+  return tff.framework.local_executor_factory(
+      num_client_executors=num_executors,
+      client_tf_devices=client_devices)

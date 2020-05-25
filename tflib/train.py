@@ -52,12 +52,17 @@ def main(argv):
   train_client_ids = data.make_client_ids(train_path)
   test_client_ids = data.make_client_ids(test_path)
 
-  if FLAGS.use_gpu and tf.config.list_physical_devices('GPU'):
+  gpu_devices = tf.config.list_physical_devices('GPU')
+  if FLAGS.use_gpu and gpu_devices:
     if FLAGS.match_client_devices:
       num_devices = len(train_client_ids)
     else:
       num_devices = FLAGS.num_gpu_devices
     device.configure_client_gpus(num_devices)
+  
+  tff.framework.set_default_executor(
+      device.explicit_executor_factory(client_devices=gpu_devices))
+  
 
   train_client_fn = data.provide_client_data_fn(
       train_path, FLAGS.client_batch_size)
