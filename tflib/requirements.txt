@@ -1,2 +1,0 @@
-tensorflow~=2.2
-tensorflow_federated~=0.14
