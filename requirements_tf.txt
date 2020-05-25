@@ -1,0 +1,2 @@
+tensorflow_federated~=0.14
+pandas~=1.0
