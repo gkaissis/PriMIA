@@ -1,4 +1,5 @@
 import torch
+from syft import Plan
 from numpy import prod
 from torch import nn
 from torch.hub import load_state_dict_from_url
@@ -508,6 +509,7 @@ def resnet34(pretrained=False, progress=True, in_channels=3, **kwargs):
         **kwargs
     )
 
+
 def _initialize_weights(model):
     torch.manual_seed(1)
     rseed(1)
@@ -575,18 +577,18 @@ class ConvNet224(nn.Module):
             nn.Conv2d(in_channels, 8, 3),
             nn.ReLU(),
             nn.AvgPool2d(2),
-            #nn.BatchNorm2d(8),
+            nn.BatchNorm2d(8),
             nn.Conv2d(8, 32, 3),
             nn.ReLU(),
             nn.AvgPool2d(2),
-            #nn.BatchNorm2d(32),
+            nn.BatchNorm2d(32),
             nn.Conv2d(32, 64, 3),
             nn.ReLU(),
             nn.AvgPool2d(2),
             nn.Conv2d(64, 128, 3),
             nn.ReLU(),
             nn.AvgPool2d(2),
-            #nn.BatchNorm2d(128),
+            nn.BatchNorm2d(128),
             nn.Conv2d(128, 256, 3),
             nn.ReLU(),
             nn.AvgPool2d(2),
@@ -613,42 +615,70 @@ class ConvNet224(nn.Module):
 class ConvNetMNIST(nn.Module):
     def __init__(self, num_classes=10, in_channels=1):
         super(ConvNetMNIST, self).__init__()
-        self.features = nn.Sequential(
-            nn.Conv2d(in_channels, 8, 3),
-            nn.ReLU(),
-            #nn.BatchNorm2d(8),
-            nn.Conv2d(8, 32, 3),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, 3),
-            nn.ReLU(),
-            #nn.BatchNorm2d(64),
-            nn.Conv2d(64, 128, 3),
-            nn.ReLU(),
-            nn.AvgPool2d(2),
-            nn.Conv2d(128, 256, 3),
-            nn.ReLU(),
-            nn.AvgPool2d(2),
-            nn.Conv2d(256, 512, 3),
-            nn.ReLU(),
-            nn.AvgPool2d(2),
-        )
-        self.classifier = nn.Sequential(
-            nn.Linear(512, 512),
-            nn.ReLU(),
-            nn.Linear(512, 512),
-            nn.ReLU(),
-            nn.Linear(512, num_classes),
-        )
-        _initialize_weights(self)
+        # self.features = nn.Sequential(
+        self.conv1 = nn.Conv2d(in_channels, 8, 3)
+        self.relu1 = nn.ReLU()
+        # self.bn1 = nn.BatchNorm2d(8),
+        self.conv2 = nn.Conv2d(8, 32, 3)
+        # self.relu2 = nn.ReLU(),
+        self.conv3 = nn.Conv2d(32, 64, 3)
+        # self.relu3 = nn.ReLU(),
+        # self.bn3 = nn.BatchNorm2d(64),
+        self.conv4 = nn.Conv2d(64, 128, 3)
+        # self.relu4 = nn.ReLU(),
+        self.pool4 = nn.AvgPool2d(2)
+        self.conv5 = nn.Conv2d(128, 256, 3)
+        # self.relu5 = nn.ReLU(),
+        self.pool5 = nn.AvgPool2d(2)
+        self.conv6 = nn.Conv2d(256, 512, 3)
+        # self.relu6 = nn.ReLU(),
+        self.pool6 = nn.AvgPool2d(2)
+        # )
+        # self.classifier = nn.Sequential(
+        self.linear1 = nn.Linear(512, 512)
+        # nn.ReLU(),
+        self.linear2 = nn.Linear(512, 512)
+        # nn.ReLU(),
+        self.linear3 = nn.Linear(512, num_classes)
+        # )
+        # _initialize_weights(self)
 
-    def forward(self, x):
-        x = self.features(x)
-        #from numpy.linalg import norm
-        #print(norm(x.cpu().detach().numpy()))
-        #exit()
-        x = x.view(-1, 512)
-        x = self.classifier(x)
+    def forward(self, x):  # pylint: disable=method-hidden
+        # x = self.features(x)
+        x = self.conv1(x)
+        x = self.relu1(x)
+        x = self.conv2(x)
+        x = self.relu1(x)
+        x = self.conv3(x)
+        x = self.relu1(x)
+        x = self.conv4(x)
+        x = self.relu1(x)
+        x = self.pool4(x)
+        x = self.conv5(x)
+        x = self.relu1(x)
+        x = self.pool5(x)
+        x = self.conv6(x)
+        x = self.relu1(x)
+        x = self.pool6(x)
+        # print(x.size())
+
+        x = x.reshape(-1, 512)
+        # x = self.classifier(x)
+        x = self.linear1(x)
+        x = self.relu1(x)
+        x = self.linear2(x)
+        x = self.relu1(x)
+        x = self.linear3(x)
         return x
+
+    def to(self, device):
+        pass
+
+    def eval(self):
+        pass
+
+    def train(self):
+        pass
 
 
 conv_at_resolution = {28: ConvNetMNIST, 224: ConvNet224, 512: ConvNet512}

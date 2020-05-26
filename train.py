@@ -75,6 +75,8 @@ if __name__ == "__main__":
         from torchlib.websocket_utils import read_websocket_config
 
         hook = sy.TorchHook(torch)
+        hook.local_worker.is_client_worker = False
+        server = hook.local_worker
         worker_dict = read_websocket_config("configs/websetting/config.csv")
         worker_names = [id_dict["id"] for _, id_dict in worker_dict.items()]
 
@@ -148,7 +150,6 @@ if __name__ == "__main__":
             download=True,
             transform=transforms.Compose(train_tf),
         )
-        
 
         testset = datasets.MNIST(
             "../data", train=False, transform=transforms.Compose(test_tf),
@@ -187,7 +188,7 @@ if __name__ == "__main__":
         """
         Duplicate grayscale one channel image into 3 channels
         """
-        if args.pretrained:
+        if args.pretrained or args.websockets:
             repeat = transforms.Lambda(
                 lambda x: torch.repeat_interleave(  # pylint: disable=no-member
                     x, 3, dim=0
@@ -312,26 +313,41 @@ if __name__ == "__main__":
         model = vgg16(
             pretrained=args.pretrained,
             num_classes=num_classes,
-            in_channels=3 if args.pretrained else 1,
+            in_channels=3 if args.dataset == "pneumonia" else 1,
             adptpool=False,
             input_size=args.inference_resolution,
         )
     elif args.model == "simpleconv":
         if args.pretrained:
             warn("No pretrained version available")
+
         model = conv_at_resolution[args.train_resolution](
-            num_classes=num_classes, in_channels=3 if args.pretrained else 1
+            num_classes=num_classes, in_channels=3 if args.dataset == "pneumonia" else 1
         )
+        """if args.train_federated:
+            
+            data_shape = torch.ones(  # pylint: disable=no-member
+                (
+                    args.batch_size,
+                    3 if args.dataset == "pneumonia" else 1,
+                    args.train_resolution,
+                    args.train_resolution,
+                ),
+                device=device,
+            )
+            print(data_shape.size())
+            model.build(data_shape)"""
     elif args.model == "resnet-18":
         model = resnet18(
             pretrained=args.pretrained,
             num_classes=num_classes,
-            in_channels=3 if args.pretrained else 1,
+            in_channels=3 if args.dataset == "pneumonia" else 1,
             adptpool=False,
             input_size=args.inference_resolution,
         )
     else:
         raise NotImplementedError("model unknown")
+
     # model = resnet18(pretrained=False, num_classes=num_classes, in_channels=1)
     # model = models.vgg16(pretrained=False, num_classes=3)
     # model.classifier = vggclassifier()
