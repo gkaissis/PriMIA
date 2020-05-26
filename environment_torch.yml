@@ -1,0 +1,13 @@
+name: torch4p
+channels:
+  - pytorch
+  - conda-forge
+dependencies:
+  - python=3.7.1
+  - pytorch=1.4.0
+  - torchvision=0.5.0
+  - tqdm
+  - pip
+  - visdom
+  - tabulate
+  - pandas

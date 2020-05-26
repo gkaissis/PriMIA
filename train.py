@@ -167,7 +167,7 @@ if __name__ == "__main__":
                 translate=(args.translate, args.translate),
                 scale=(1.0 - args.scale, 1.0 + args.scale),
                 shear=args.shear,
-                fillcolor=0.0,
+            #    fillcolor=0,
             ),
             transforms.Resize(args.inference_resolution),
             transforms.RandomCrop(args.train_resolution),

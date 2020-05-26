@@ -68,14 +68,14 @@ def start_webserver(id: str, port: int, data_dir=None):
             from utils import AddGaussianNoise  # pylint: disable=import-error
 
             train_tf = [
-                # transforms.RandomVerticalFlip(p=0.5),
-                # transforms.RandomAffine(
-                #    degrees=30,
-                #    translate=(0, 0),
-                #    scale=(0.85, 1.15),
-                #    shear=10,
-                #    fillcolor=0.0,
-                # ),
+                transforms.RandomVerticalFlip(p=0.5),
+                transforms.RandomAffine(
+                    degrees=30,
+                    translate=(0, 0),
+                    scale=(0.85, 1.15),
+                    shear=10,
+                    #    fillcolor=0.0,
+                ),
                 transforms.Resize(224),
                 transforms.RandomCrop(224),
                 transforms.ToTensor(),
