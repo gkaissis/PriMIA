@@ -112,11 +112,25 @@ class Arguments:
         )
         self.dataset = cmd_args.dataset  # options: ['pneumonia', 'mnist']
         self.no_cuda = cmd_args.no_cuda
+        self.websockets = cmd_args.websockets if mode == "train" else False
+        if self.websockets:
+            assert self.train_federated, "If you use websockets it must be federated"
 
     def from_previous_checkpoint(self, cmd_args):
         self.visdom = False
         self.encrypted_inference = cmd_args.encrypted_inference
         self.no_cuda = cmd_args.no_cuda
+
+    def __str__(self):
+        members = [
+            attr
+            for attr in dir(self)
+            if not callable(getattr(self, attr)) and not attr.startswith("__")
+        ]
+        rows = []
+        for x in members:
+            rows.append([str(x), str(getattr(self, x))])
+        return tabulate(rows)
 
 
 class AddGaussianNoise(object):
@@ -198,18 +212,9 @@ def train(
                     env=vis_params["vis_env"],
                 )
             else:
-                avg_loss.append(loss.item)
+                avg_loss.append(loss.item())
     if not args.visdom:
-        print(
-            "Train Epoch: {} [{}/{} ({:.0f}%)]\tLoss: {:.6f}".format(
-                epoch,
-                batch_idx * args.batch_size,
-                len(train_loader)
-                * args.batch_size,  # batch_idx * len(data), len(train_loader.dataset),
-                100.0 * batch_idx / len(train_loader),
-                np.mean(avg_loss),
-            )
-        )
+        print("Train Epoch: {} \tLoss: {:.6f}".format(epoch, np.mean(avg_loss),))
 
 
 def test(
@@ -289,7 +294,7 @@ def test(
                 if tp + fp_per_class[i]
                 else float("NaN")
             )
-            f1_score = (2 * prec * rec) / (prec + rec)
+            f1_score = (2 * prec * rec) / (prec + rec) if prec + rec > 0 else 0
             accs.append(acc)
             recs.append(rec)
             precs.append(prec)

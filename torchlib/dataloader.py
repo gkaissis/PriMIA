@@ -15,20 +15,18 @@ def single_channel_loader(filename):
         return img.copy()
 
 
-class PPPP(sy.BaseDataset):
+class PPPP(data.Dataset):
     def __init__(
         self,
         label_path="data/Labels.csv",
         train=False,
         transform=None,
         seed = 1,
-        # val=False, val_split=10,
     ):
+        super().__init__()
         random.seed(seed)
         manual_seed(seed)
         self.train = train
-        # self.val = val
-        # self.val_split = val_split
         self.labels = pd.read_csv(label_path)
         self.labels = self.labels[
             self.labels["Dataset_type"] == ("TRAIN" if train else "TEST")

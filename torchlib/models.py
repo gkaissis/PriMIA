@@ -1,7 +1,11 @@
 import torch
+from syft import Plan
 from numpy import prod
 from torch import nn
 from torch.hub import load_state_dict_from_url
+from numpy.random import seed as npseed
+from random import seed as rseed
+
 
 model_urls = {
     "vgg11": "https://download.pytorch.org/models/vgg11-bbd30ac9.pth",
@@ -150,7 +154,16 @@ def make_layers(cfg, batch_norm=False, in_channels=3):
     return nn.Sequential(*layers)
 
 
-def _vgg(arch, cfg, batch_norm, pretrained, progress, in_channels=3, num_classes=1000, **kwargs):
+def _vgg(
+    arch,
+    cfg,
+    batch_norm,
+    pretrained,
+    progress,
+    in_channels=3,
+    num_classes=1000,
+    **kwargs
+):
     if pretrained:
         kwargs["init_weights"] = False
     assert not (pretrained and in_channels != 3), "If pretrained you need 3 in channels"
@@ -161,7 +174,7 @@ def _vgg(arch, cfg, batch_norm, pretrained, progress, in_channels=3, num_classes
     if pretrained:
         state_dict = load_state_dict_from_url(model_urls[arch], progress=progress)
         model.load_state_dict(state_dict)
-        model.classifier =  nn.Sequential(
+        model.classifier = nn.Sequential(
             nn.Linear(512, 512),
             nn.ReLU(),  # inplace=True),  # changed for pysyft
             nn.Dropout(),
@@ -230,7 +243,7 @@ class BasicBlock(nn.Module):
         # Both self.conv1 and self.downsample layers downsample the input when stride != 1
         self.conv1 = conv3x3(inplanes, planes, stride)
         self.bn1 = norm_layer(planes)
-        self.relu = nn.ReLU(inplace=True)
+        self.relu = nn.ReLU()  # inplace=True)
         self.conv2 = conv3x3(planes, planes)
         self.bn2 = norm_layer(planes)
         self.downsample = downsample
@@ -286,7 +299,7 @@ class Bottleneck(nn.Module):
         self.bn2 = norm_layer(width)
         self.conv3 = conv1x1(width, planes * self.expansion)
         self.bn3 = norm_layer(planes * self.expansion)
-        self.relu = nn.ReLU(inplace=True)
+        self.relu = nn.ReLU()  # inplace=True)
         self.downsample = downsample
         self.stride = stride
 
@@ -350,7 +363,7 @@ class ResNet(nn.Module):
             in_channels, self.inplanes, kernel_size=7, stride=2, padding=3, bias=False
         )
         self.bn1 = norm_layer(self.inplanes)
-        self.relu = nn.ReLU(inplace=True)
+        self.relu = nn.ReLU()  # inplace=True)
         self.maxpool = nn.AvgPool2d(kernel_size=3, stride=2, padding=1)
         self.layer1 = self._make_layer(block, 64, layers[0])
         self.layer2 = self._make_layer(
@@ -497,6 +510,25 @@ def resnet34(pretrained=False, progress=True, in_channels=3, **kwargs):
     )
 
 
+def _initialize_weights(model):
+    torch.manual_seed(1)
+    rseed(1)
+    npseed(1)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    for m in model.modules():
+        if isinstance(m, nn.Conv2d):
+            nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
+            if m.bias is not None:
+                nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.BatchNorm2d):
+            nn.init.constant_(m.weight, 1)
+            nn.init.constant_(m.bias, 0)
+        elif isinstance(m, nn.Linear):
+            nn.init.normal_(m.weight, 0, 0.01)
+            nn.init.constant_(m.bias, 0)
+
+
 class ConvNet512(nn.Module):
     def __init__(self, num_classes=10, in_channels=1):
         super(ConvNet512, self).__init__()
@@ -529,6 +561,7 @@ class ConvNet512(nn.Module):
             nn.ReLU(),
             nn.Linear(512, num_classes),
         )
+        _initialize_weights(self)
 
     def forward(self, x):
         x = self.features(x)
@@ -544,15 +577,18 @@ class ConvNet224(nn.Module):
             nn.Conv2d(in_channels, 8, 3),
             nn.ReLU(),
             nn.AvgPool2d(2),
+            nn.BatchNorm2d(8),
             nn.Conv2d(8, 32, 3),
             nn.ReLU(),
             nn.AvgPool2d(2),
+            nn.BatchNorm2d(32),
             nn.Conv2d(32, 64, 3),
             nn.ReLU(),
             nn.AvgPool2d(2),
             nn.Conv2d(64, 128, 3),
             nn.ReLU(),
             nn.AvgPool2d(2),
+            nn.BatchNorm2d(128),
             nn.Conv2d(128, 256, 3),
             nn.ReLU(),
             nn.AvgPool2d(2),
@@ -567,6 +603,7 @@ class ConvNet224(nn.Module):
             nn.ReLU(),
             nn.Linear(512, num_classes),
         )
+        _initialize_weights(self)
 
     def forward(self, x):
         x = self.features(x)
@@ -578,36 +615,70 @@ class ConvNet224(nn.Module):
 class ConvNetMNIST(nn.Module):
     def __init__(self, num_classes=10, in_channels=1):
         super(ConvNetMNIST, self).__init__()
-        self.features = nn.Sequential(
-            nn.Conv2d(in_channels, 8, 3),
-            nn.ReLU(),
-            nn.Conv2d(8, 32, 3),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, 3),
-            nn.ReLU(),
-            nn.Conv2d(64, 128, 3),
-            nn.ReLU(),
-            nn.AvgPool2d(2),
-            nn.Conv2d(128, 256, 3),
-            nn.ReLU(),
-            nn.AvgPool2d(2),
-            nn.Conv2d(256, 512, 3),
-            nn.ReLU(),
-            nn.AvgPool2d(2),
-        )
-        self.classifier = nn.Sequential(
-            nn.Linear(512, 512),
-            nn.ReLU(),
-            nn.Linear(512, 512),
-            nn.ReLU(),
-            nn.Linear(512, num_classes),
-        )
+        # self.features = nn.Sequential(
+        self.conv1 = nn.Conv2d(in_channels, 8, 3)
+        self.relu1 = nn.ReLU()
+        # self.bn1 = nn.BatchNorm2d(8),
+        self.conv2 = nn.Conv2d(8, 32, 3)
+        # self.relu2 = nn.ReLU(),
+        self.conv3 = nn.Conv2d(32, 64, 3)
+        # self.relu3 = nn.ReLU(),
+        # self.bn3 = nn.BatchNorm2d(64),
+        self.conv4 = nn.Conv2d(64, 128, 3)
+        # self.relu4 = nn.ReLU(),
+        self.pool4 = nn.AvgPool2d(2)
+        self.conv5 = nn.Conv2d(128, 256, 3)
+        # self.relu5 = nn.ReLU(),
+        self.pool5 = nn.AvgPool2d(2)
+        self.conv6 = nn.Conv2d(256, 512, 3)
+        # self.relu6 = nn.ReLU(),
+        self.pool6 = nn.AvgPool2d(2)
+        # )
+        # self.classifier = nn.Sequential(
+        self.linear1 = nn.Linear(512, 512)
+        # nn.ReLU(),
+        self.linear2 = nn.Linear(512, 512)
+        # nn.ReLU(),
+        self.linear3 = nn.Linear(512, num_classes)
+        # )
+        # _initialize_weights(self)
 
-    def forward(self, x):
-        x = self.features(x)
-        x = x.view(-1, 512)
-        x = self.classifier(x)
+    def forward(self, x):  # pylint: disable=method-hidden
+        # x = self.features(x)
+        x = self.conv1(x)
+        x = self.relu1(x)
+        x = self.conv2(x)
+        x = self.relu1(x)
+        x = self.conv3(x)
+        x = self.relu1(x)
+        x = self.conv4(x)
+        x = self.relu1(x)
+        x = self.pool4(x)
+        x = self.conv5(x)
+        x = self.relu1(x)
+        x = self.pool5(x)
+        x = self.conv6(x)
+        x = self.relu1(x)
+        x = self.pool6(x)
+        # print(x.size())
+
+        x = x.reshape(-1, 512)
+        # x = self.classifier(x)
+        x = self.linear1(x)
+        x = self.relu1(x)
+        x = self.linear2(x)
+        x = self.relu1(x)
+        x = self.linear3(x)
         return x
+
+    def to(self, device):
+        pass
+
+    def eval(self):
+        pass
+
+    def train(self):
+        pass
 
 
 conv_at_resolution = {28: ConvNetMNIST, 224: ConvNet224, 512: ConvNet512}

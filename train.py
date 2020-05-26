@@ -59,9 +59,7 @@ if __name__ == "__main__":
         help="Start training from older model checkpoint",
     )
     parser.add_argument(
-        "--websockets",
-        action="store_true",
-        help="Use websockets instead of virtual workers",
+        "--websockets", action="store_true", help="train on websocket config"
     )
     cmd_args = parser.parse_args()
 
@@ -70,29 +68,35 @@ if __name__ == "__main__":
     config.read(cmd_args.config)
 
     args = Arguments(cmd_args, config, mode="train")
+    print(str(args))
 
     if args.train_federated:
         import syft as sy
         from torchlib.websocket_utils import read_websocket_config
 
         hook = sy.TorchHook(torch)
+        hook.local_worker.is_client_worker = False
+        server = hook.local_worker
         worker_dict = read_websocket_config("configs/websetting/config.csv")
         worker_names = [id_dict["id"] for _, id_dict in worker_dict.items()]
-        if cmd_args.websockets:
-            kwargs_websocket = {
-                "hook": hook,
-                "verbose": False,
-            }
-            workers = [
-                sy.WebsocketClientWorker(
-                    id=id_dict["id"],
-                    port=id_dict["port"],
-                    host=id_dict["host"],
-                    **kwargs_websocket,
-                )
-                for row, id_dict in worker_dict.items()
-            ]
 
+        if args.websockets:
+            workers = [
+                sy.workers.websocket_client.WebsocketClientWorker(
+                    hook=hook,
+                    id=worker["id"],
+                    port=worker["port"],
+                    host=worker["host"],
+                )
+                for row, worker in worker_dict.items()
+            ]
+            fed_datasets = sy.FederatedDataset(
+                [
+                    sy.local_worker.request_search(args.dataset, location=worker)[0]
+                    for worker in workers
+                ]
+            )
+            train_loader = sy.FederatedDataLoader(fed_datasets)
         else:
             workers = [
                 sy.VirtualWorker(hook, id=id_dict["id"])
@@ -184,7 +188,7 @@ if __name__ == "__main__":
         """
         Duplicate grayscale one channel image into 3 channels
         """
-        if args.pretrained:
+        if args.pretrained or args.websockets:
             repeat = transforms.Lambda(
                 lambda x: torch.repeat_interleave(  # pylint: disable=no-member
                     x, 3, dim=0
@@ -219,12 +223,13 @@ if __name__ == "__main__":
     del total_L, fraction
 
     if args.train_federated:
-        train_loader = sy.FederatedDataLoader(
-            dataset.federate(tuple(workers)),
-            batch_size=args.batch_size,
-            shuffle=True,
-            **kwargs,
-        )
+        if not args.websockets:
+            train_loader = sy.FederatedDataLoader(
+                dataset.federate(tuple(workers)),
+                batch_size=args.batch_size,
+                shuffle=True,
+                **kwargs,
+            )
         """val_loader = sy.FederatedDataLoader(
             valset.federate((bob, alice, charlie)),
             batch_size=args.test_batch_size,
@@ -308,26 +313,41 @@ if __name__ == "__main__":
         model = vgg16(
             pretrained=args.pretrained,
             num_classes=num_classes,
-            in_channels=3 if args.pretrained else 1,
+            in_channels=3 if args.dataset == "pneumonia" else 1,
             adptpool=False,
             input_size=args.inference_resolution,
         )
     elif args.model == "simpleconv":
         if args.pretrained:
             warn("No pretrained version available")
+
         model = conv_at_resolution[args.train_resolution](
-            num_classes=num_classes, in_channels=3 if args.pretrained else 1
+            num_classes=num_classes, in_channels=3 if args.dataset == "pneumonia" else 1
         )
+        """if args.train_federated:
+            
+            data_shape = torch.ones(  # pylint: disable=no-member
+                (
+                    args.batch_size,
+                    3 if args.dataset == "pneumonia" else 1,
+                    args.train_resolution,
+                    args.train_resolution,
+                ),
+                device=device,
+            )
+            print(data_shape.size())
+            model.build(data_shape)"""
     elif args.model == "resnet-18":
         model = resnet18(
             pretrained=args.pretrained,
             num_classes=num_classes,
-            in_channels=3 if args.pretrained else 1,
+            in_channels=3 if args.dataset == "pneumonia" else 1,
             adptpool=False,
             input_size=args.inference_resolution,
         )
     else:
         raise NotImplementedError("model unknown")
+
     # model = resnet18(pretrained=False, num_classes=num_classes, in_channels=1)
     # model = models.vgg16(pretrained=False, num_classes=3)
     # model.classifier = vggclassifier()
