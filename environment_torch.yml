@@ -2,12 +2,15 @@ name: torch4p
 channels:
   - pytorch
   - conda-forge
+  - anaconda
 dependencies:
   - python=3.7.1
   - pytorch=1.4.0
   - torchvision=0.5.0
-  - tqdm
-  - pip
-  - visdom
-  - tabulate
-  - pandas
+  - mkl==2019.1
+  - mkl-include==2019.1
+  - tqdm==4.45.0
+  - visdom==0.1.8.9
+  - pandas==1.0.3
+  - tabulate==0.8.7
+  - pip==20.0.2

@@ -484,3 +484,6 @@ if __name__ == "__main__":
             "federated" if args.train_federated else "vanilla", args.dataset
         ),
     )"""
+    if args.train_federated:
+        for w in workers:
+            w.close()
