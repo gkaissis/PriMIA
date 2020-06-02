@@ -17,11 +17,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "--path",
         type=str,
-        required=True,
+        default=None,
         help="Path to data folder of pneumonia data. Each worker has its subfolder called workeri where i is its index and three subfolders with the classes.",
     )
     args = parser.parse_args()
-    assert os.path.isdir(args.path), 'given path is no directory'
     # worker_dict = {"alice": 8777, "bob": 8778, "charlie": 8779}
     worker_dict = read_websocket_config("configs/websetting/config.csv")
     print(worker_dict)
@@ -29,7 +28,7 @@ if __name__ == "__main__":
         worker_calls = [
             [
                 "python",
-                "torchlib/websocket_utils.py",
+                "GridNode/grid_node.py",
                 "--port",
                 str(id_dict["port"]),
                 "--id",
@@ -40,14 +39,16 @@ if __name__ == "__main__":
             for row, id_dict in worker_dict.items()
         ]
     elif args.dataset == "pneumonia":
+        assert os.path.isdir(args.path), 'given path is no directory'
         worker_calls = [
             [
                 "python",
-                "torchlib/websocket_utils.py",
+                "GridNode/grid_node.py",
                 "--port",
                 str(id_dict["port"]),
                 "--id",
                 id_dict["id"],
+                "--host", "127.0.0.1",
                 "--data_directory",
                 # "/home/alex/worker_emulation/all_samples",
                 os.path.join(args.path, "worker{:d}/".format(i + 1)),

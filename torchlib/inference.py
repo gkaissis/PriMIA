@@ -13,7 +13,7 @@ from warnings import warn
 from torchvision import datasets, transforms, models
 
 sys.path.insert(0, os.path.split(sys.path[0])[0])  # TODO: make prettier
-from train_federated import test, Arguments
+from utils import test, Arguments
 from torchlib.dataloader import PPPP
 from torchlib.models import vgg16, resnet18, conv_at_resolution
 

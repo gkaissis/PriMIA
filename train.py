@@ -14,9 +14,13 @@ from warnings import warn
 from datetime import datetime
 from tabulate import tabulate
 from torchvision import datasets, transforms, models
-from torchlib.dataloader import PPPP
-from torchlib.models import vgg16, resnet18, conv_at_resolution
-from torchlib.utils import (
+from torchlib.dataloader import PPPP  # pylint:disable=import-error
+from torchlib.models import (  # pylint:disable=import-error
+    vgg16,
+    resnet18,
+    conv_at_resolution,
+)
+from torchlib.utils import (  # pylint:disable=import-error
     LearningRateScheduler,
     Arguments,
     train,
@@ -49,9 +53,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--no_visdom", action="store_false", help="dont use a visdom server"
     )
-    parser.add_argument(
-        "--no_cuda", action="store_true", help="dont use a visdom server"
-    )
+    parser.add_argument("--no_cuda", action="store_true", help="dont use gpu")
     parser.add_argument(
         "--resume_checkpoint",
         type=str,
@@ -72,21 +74,23 @@ if __name__ == "__main__":
 
     if args.train_federated:
         import syft as sy
-        from torchlib.websocket_utils import read_websocket_config
+        from torchlib.websocket_utils import (  # pylint:disable=import-error
+            read_websocket_config,
+        )
 
         hook = sy.TorchHook(torch)
-        hook.local_worker.is_client_worker = False
-        server = hook.local_worker
+        torch.set_num_threads(1)
+        # hook.local_worker.is_client_worker = False
+        # server = hook.local_worker
         worker_dict = read_websocket_config("configs/websetting/config.csv")
         worker_names = [id_dict["id"] for _, id_dict in worker_dict.items()]
 
         if args.websockets:
             workers = [
-                sy.workers.websocket_client.WebsocketClientWorker(
-                    hook=hook,
+                sy.workers.node_client.NodeClient(
+                    hook,
+                    "http://{:s}:{:s}".format(worker["host"], worker["port"]),
                     id=worker["id"],
-                    port=worker["port"],
-                    host=worker["host"],
                 )
                 for row, worker in worker_dict.items()
             ]
@@ -167,7 +171,7 @@ if __name__ == "__main__":
                 translate=(args.translate, args.translate),
                 scale=(1.0 - args.scale, 1.0 + args.scale),
                 shear=args.shear,
-            #    fillcolor=0,
+                #    fillcolor=0,
             ),
             transforms.Resize(args.inference_resolution),
             transforms.RandomCrop(args.train_resolution),

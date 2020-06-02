@@ -1,19 +1,15 @@
-import torch
+from flask import Flask
+from flask_sockets import Sockets
+
 import syft as sy
 import numpy as np
-from tqdm import tqdm
-from pandas import read_csv
-from torchvision.datasets import MNIST
+import torch
 from torchvision import transforms
-import sys
-import os.path
-from random import seed
+from torchvision.datasets import MNIST
+from torchvision.datasets import ImageFolder
+from tqdm import tqdm
 
-sys.path.append(
-    os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
-)
-from torchlib.dataloader import PPPP
-
+# from utils import AddGaussianNoise  # pylint: disable=import-error
 
 KEEP_LABELS_DICT = {
     "alice": [0, 1, 2, 3],
@@ -23,19 +19,45 @@ KEEP_LABELS_DICT = {
 }
 
 
-def start_webserver(id: str, port: int, data_dir=None):
-    hook = sy.TorchHook(torch)
-    torch.set_num_threads(1)
-    server = sy.workers.websocket_server.WebsocketServerWorker(
-        id=id, host=None, port=port, hook=hook, verbose=True
-    )
-    torch.manual_seed(1)
-    seed(1)
-    np.random.seed(1)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+def create_app(node_id, debug=False, database_url=None, data_dir: str = None):
+    """ Create / Configure flask socket application instance.
+        
+        Args:
+            node_id (str) : ID of Grid Node.
+            debug (bool) : debug flag.
+            test_config (bool) : Mock database environment.
+        Returns:
+            app : Flask application instance.
+    """
+    app = Flask(__name__)
+    app.debug = debug
+
+    app.config["SECRET_KEY"] = "justasecretkeythatishouldputhere"
+
+    # Enable persistent mode
+    # Overwrite syft.object_storage methods to work in a persistent way
+    # Persist models / tensors
+    if database_url:
+        app.config["REDISCLOUD_URL"] = database_url
+        from .main.persistence import database, object_storage
+
+        db_instance = database.set_db_instance(database_url)
+        object_storage.set_persistent_mode(db_instance)
+
+    from .main import html, ws, hook, local_worker, auth
+
+    # Global socket handler
+    sockets = Sockets(app)
+
+    # set_node_id(id)
+    local_worker.id = node_id
+    hook.local_worker._known_workers[node_id] = local_worker
+    local_worker.add_worker(hook.local_worker)
+
+    # add data
     if data_dir:
-        if "mnist" in data_dir:
+        print("register data")
+        if "mnist" in data_dir.lower():
             dataset = MNIST(
                 root="./data",
                 train=True,
@@ -44,8 +66,10 @@ def start_webserver(id: str, port: int, data_dir=None):
                     [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
                 ),
             )
-            if id in KEEP_LABELS_DICT:
-                indices = np.isin(dataset.targets, KEEP_LABELS_DICT[id]).astype("uint8")
+            if node_id in KEEP_LABELS_DICT:
+                indices = np.isin(dataset.targets, KEEP_LABELS_DICT[node_id]).astype(
+                    "uint8"
+                )
                 selected_data = (
                     torch.native_masked_select(  # pylint:disable=no-member
                         dataset.data.transpose(0, 2),
@@ -64,9 +88,8 @@ def start_webserver(id: str, port: int, data_dir=None):
                     transform=dataset.transform,
                 )
             dataset_name = "mnist"
+
         else:
-            from torchvision.datasets import ImageFolder
-            from utils import AddGaussianNoise  # pylint: disable=import-error
 
             train_tf = [
                 transforms.RandomVerticalFlip(p=0.5),
@@ -100,9 +123,11 @@ def start_webserver(id: str, port: int, data_dir=None):
             for d, t in tqdm(dataset, total=len(dataset)):
                 data.append(d)
                 targets.append(t)
-            data = torch.stack(data)  # pylint:disable=no-member
-            targets = torch.from_numpy(np.array(targets))  # pylint:disable=no-member
-            dataset = sy.BaseDataset(data=data, targets=targets)
+            selected_data = torch.stack(data)  # pylint:disable=no-member
+            selected_targets = torch.from_numpy(
+                np.array(targets)
+            )  # pylint:disable=no-member
+            dataset = sy.BaseDataset(data=selected_data, targets=selected_targets)
             """dataset = PPPP(
                 "data/Labels.csv",
                 train=True,
@@ -110,30 +135,18 @@ def start_webserver(id: str, port: int, data_dir=None):
                 seed=1
             )"""
             dataset_name = "pneumonia"
-        print("added {:s} dataset".format(dataset_name))
-        server.register_obj(dataset, obj_id=dataset_name)
-    server.start()
-    return server
 
+        local_worker.register_obj(dataset, obj_id=dataset_name)
 
-def read_websocket_config(path: str):
-    df = read_csv(path, header=None, index_col=0)
-    return df.to_dict()
+        print("registered {:d} samples of {:s} data".format(len(dataset), dataset_name))
 
+        #print(local_worker.request_search(dataset, location=local_worker))
 
-if __name__ == "__main__":
-    from argparse import ArgumentParser
+    # Register app blueprints
+    app.register_blueprint(html, url_prefix=r"/")
+    sockets.register_blueprint(ws, url_prefix=r"/")
 
-    parser = ArgumentParser()
-    parser.add_argument("--id", type=str, required=True, help="id of worker")
-    parser.add_argument("--port", type=int, required=True, help="Port to be opened")
-    parser.add_argument(
-        "--data_directory",
-        type=str,
-        default=None,
-        required=True,
-        help="Directory where data is stored",
-    )
-    args = parser.parse_args()
+    # Set Authentication configs
+    app = auth.set_auth_configs(app)
 
-    start_webserver(args.id, args.port, args.data_directory)
+    return app

@@ -179,9 +179,9 @@ def train(
         opt = optimizer
 
     avg_loss = []
-    for batch_idx, (data, target) in tqdm.tqdm(
-        enumerate(train_loader), leave=False, desc="training", total=L
-    ):  # <-- now it is a distributed dataset
+    for batch_idx, (data, target) in enumerate(train_loader):  # tqdm.tqdm(
+        # enumerate(train_loader), leave=False, desc="training", total=L
+        # ):  # <-- now it is a distributed dataset
         if args.train_federated:
             model.send(data.location)  # <-- NEW: send the model to the right location
             opt = optimizer.get_optim(data.location.id)
@@ -197,7 +197,9 @@ def train(
         loss.backward()
         opt.step()
         if args.train_federated:
+            print('model location before get: {:s}'.format(str(model.location)))
             model.get()  # <-- NEW: get the model back
+            print('model location after get: {:s}'.format(str(model.location)))
         if batch_idx % args.log_interval == 0:
             if args.train_federated:
                 loss = loss.get()  # <-- NEW: get the loss back
