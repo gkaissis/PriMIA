@@ -94,13 +94,22 @@ if __name__ == "__main__":
                 )
                 for row, worker in worker_dict.items()
             ]
-            fed_datasets = sy.FederatedDataset(
-                [
-                    sy.local_worker.request_search(args.dataset, location=worker)[0]
-                    for worker in workers
-                ]
-            )
+            grid = sy.PrivateGridNetwork(*workers)
+
+
+            """print(sy.local_worker.request_search(args.dataset, location=workers[0])[0][0])
+            print(sy.local_worker.request_search(args.dataset, location=workers[1])[0])
+            print(sy.local_worker.request_search(args.dataset, location=workers[2])[0])
+
+            exit()"""
+
+            data = grid.search(args.dataset)
+            dss = [ds[0] for ds in data.values()]
+            fed_datasets = sy.FederatedDataset(dss)
             train_loader = sy.FederatedDataLoader(fed_datasets)
+
+
+
         else:
             workers = [
                 sy.VirtualWorker(hook, id=id_dict["id"])

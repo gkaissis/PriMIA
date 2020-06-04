@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 from os.path import isfile
 from tabulate import tabulate
+from sklearn.metrics import confusion_matrix
 
 
 """
@@ -183,9 +184,9 @@ def train(
         # enumerate(train_loader), leave=False, desc="training", total=L
         # ):  # <-- now it is a distributed dataset
         if args.train_federated:
+            print("data location: {:s}".format(str(data.location)))
             model.send(data.location)  # <-- NEW: send the model to the right location
             opt = optimizer.get_optim(data.location.id)
-            # print("data location: {:s}".format(str(data.location)))
             # print("target location: {:s}".format(str(target.location)))
             # print("model location: {:s}".format(str(model.location)))
             # model = model.to(device)
@@ -236,6 +237,7 @@ def test(
     tp_per_class = {}
     fn_per_class = {}
     fp_per_class = {}
+    total_pred, total_target = [], []
     for i in range(num_classes):
         tp_per_class[i] = 0
         fp_per_class[i] = 0
@@ -253,6 +255,8 @@ def test(
             test_loss += loss_fn(output, target).item()  # sum up batch loss
             pred = output.argmax(dim=1)
             tgts = target.view_as(pred)
+            total_pred.append(pred)
+            total_target.append(tgts)
             equal = pred.eq(tgts)
             if args.encrypted_inference:
                 TP += equal.sum().copy().get().float_precision().long().item()
@@ -368,6 +372,10 @@ def test(
                 tablefmt="fancy_grid",
             )
         )
+        total_pred = torch.cat(total_pred).cpu().numpy()
+        total_target = torch.cat(total_target).cpu().numpy()
+        conf_matrix = confusion_matrix(total_target, total_pred)
+        print(conf_matrix)
         if args.visdom:
             vis_params["vis"].line(
                 X=np.asarray([epoch]),

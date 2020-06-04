@@ -122,7 +122,9 @@ if __name__ == "__main__":
     from torchlib.utils import AddGaussianNoise
 
     sizes = []
-    ds = PPPP(train=True, transform=transforms.ToTensor())
+    ds = PPPP(train=False, transform=transforms.ToTensor())
+    print(ds.get_class_occurances())
+    exit()
     for data, _ in tqdm(ds, total=len(ds), leave=False):
         sizes.append(data.size()[1:])
     sizes = np.array(sizes)
@@ -132,7 +134,6 @@ if __name__ == "__main__":
     print(np.median(sizes, axis=0))
 
 
-    exit()
 
     # cj = transforms.ColorJitter(0, 0.5, 0.5, 0.5)
     ds = PPPP(
@@ -155,12 +156,11 @@ if __name__ == "__main__":
             ]
         )
     )
-    ds.get_class_occurances()
+    exit()
     L = len(ds)
     print("length test set: {:d}".format(L))
     img, label = ds[1]
     img.show()
-    #exit()
 
     tf = transforms.Compose(
         [transforms.Resize(224), transforms.CenterCrop(224), transforms.ToTensor(),]

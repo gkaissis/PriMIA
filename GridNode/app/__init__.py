@@ -9,6 +9,7 @@ from torchvision.datasets import MNIST
 from torchvision.datasets import ImageFolder
 from tqdm import tqdm
 
+
 # from utils import AddGaussianNoise  # pylint: disable=import-error
 
 KEEP_LABELS_DICT = {
@@ -66,6 +67,8 @@ def create_app(node_id, debug=False, database_url=None, data_dir: str = None):
                     [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
                 ),
             )
+            selected_data = dataset.data
+            selected_targets = dataset.targets
             if node_id in KEEP_LABELS_DICT:
                 indices = np.isin(dataset.targets, KEEP_LABELS_DICT[node_id]).astype(
                     "uint8"
@@ -127,6 +130,7 @@ def create_app(node_id, debug=False, database_url=None, data_dir: str = None):
             selected_targets = torch.from_numpy(
                 np.array(targets)
             )  # pylint:disable=no-member
+            del data, targets
             dataset = sy.BaseDataset(data=selected_data, targets=selected_targets)
             """dataset = PPPP(
                 "data/Labels.csv",
@@ -135,12 +139,19 @@ def create_app(node_id, debug=False, database_url=None, data_dir: str = None):
                 seed=1
             )"""
             dataset_name = "pneumonia"
+        #local_worker.register_obj(dataset, obj_id=dataset_name)
+        dataset.tag(dataset_name)
+        dataset.send(local_worker)
+        # local_worker.register_obj(selected_data, obj_id="{:s}_data".format(dataset_name))
+        # local_worker.register_obj(selected_targets, obj_id="{:s}_targets".format(dataset_name))
 
-        local_worker.register_obj(dataset, obj_id=dataset_name)
+        print(
+            "registered {:d} samples of {:s} data".format(
+                selected_data.size(0), dataset_name
+            )
+        )
 
-        print("registered {:d} samples of {:s} data".format(len(dataset), dataset_name))
-
-        #print(local_worker.request_search(dataset, location=local_worker))
+        # print(local_worker.request_search(dataset, location=local_worker))
 
     # Register app blueprints
     app.register_blueprint(html, url_prefix=r"/")
