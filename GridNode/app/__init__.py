@@ -67,9 +67,9 @@ def create_app(node_id, debug=False, database_url=None, data_dir: str = None):
                     [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
                 ),
             )
-            selected_data = dataset.data
-            selected_targets = dataset.targets
-            if node_id in KEEP_LABELS_DICT:
+            # selected_data = dataset.data.unsqueeze(1)
+            # selected_targets = dataset.targets
+            """if node_id in KEEP_LABELS_DICT:
                 indices = np.isin(dataset.targets, KEEP_LABELS_DICT[node_id]).astype(
                     "uint8"
                 )
@@ -89,7 +89,7 @@ def create_app(node_id, debug=False, database_url=None, data_dir: str = None):
                     data=selected_data,
                     targets=selected_targets,
                     transform=dataset.transform,
-                )
+                )"""
             dataset_name = "mnist"
 
         else:
@@ -122,28 +122,21 @@ def create_app(node_id, debug=False, database_url=None, data_dir: str = None):
                 transform=transforms.Compose(train_tf),
                 target_transform=lambda x: target_dict_pneumonia[x],
             )
-            data, targets = [], []
-            for d, t in tqdm(dataset, total=len(dataset)):
-                data.append(d)
-                targets.append(t)
-            selected_data = torch.stack(data)  # pylint:disable=no-member
-            selected_targets = torch.from_numpy(
-                np.array(targets)
-            )  # pylint:disable=no-member
-            del data, targets
-            dataset = sy.BaseDataset(data=selected_data, targets=selected_targets)
-            """dataset = PPPP(
-                "data/Labels.csv",
-                train=True,
-                transform=transforms.Compose(train_tf),
-                seed=1
-            )"""
             dataset_name = "pneumonia"
-        #local_worker.register_obj(dataset, obj_id=dataset_name)
-        dataset.tag(dataset_name)
-        dataset.send(local_worker)
-        # local_worker.register_obj(selected_data, obj_id="{:s}_data".format(dataset_name))
-        # local_worker.register_obj(selected_targets, obj_id="{:s}_targets".format(dataset_name))
+
+        data, targets = [], []
+        for d, t in tqdm(dataset, total=len(dataset)):
+            data.append(d)
+            targets.append(t)
+        selected_data = torch.stack(data)  # pylint:disable=no-member
+        selected_targets = torch.from_numpy(
+            np.array(targets)
+        )  # pylint:disable=no-member
+        del data, targets
+        selected_data.tag(dataset_name, "#data")
+        selected_targets.tag(dataset_name, "#target")
+        selected_data.send(local_worker)
+        selected_targets.send(local_worker)
 
         print(
             "registered {:d} samples of {:s} data".format(

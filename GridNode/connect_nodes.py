@@ -1,15 +1,15 @@
 import syft as sy
 import torch
 import os
-
 hook = sy.TorchHook(torch)
 client = sy.workers.node_client.NodeClient(hook, "http://127.0.0.1:8777", id="alice")
 print(client)
 grid = sy.PrivateGridNetwork(client,)
 print(grid)
-ds = grid.search('mnist')
-dss = [ds[0] for ds in ds.values()]
-fed_datasets = sy.FederatedDataset(dss)
+data = grid.search('#mnist', "#data")
+target = grid.search("#mnist", "#target")
+dataset = [sy.BaseDataset(data[worker][0],target[worker][0]) for worker in data.keys()]
+fed_datasets = sy.FederatedDataset(dataset)
 train_loader = sy.FederatedDataLoader(fed_datasets)
 print(train_loader)
 for i, d in enumerate(train_loader):

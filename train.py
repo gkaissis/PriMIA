@@ -72,50 +72,6 @@ if __name__ == "__main__":
     args = Arguments(cmd_args, config, mode="train")
     print(str(args))
 
-    if args.train_federated:
-        import syft as sy
-        from torchlib.websocket_utils import (  # pylint:disable=import-error
-            read_websocket_config,
-        )
-
-        hook = sy.TorchHook(torch)
-        torch.set_num_threads(1)
-        # hook.local_worker.is_client_worker = False
-        # server = hook.local_worker
-        worker_dict = read_websocket_config("configs/websetting/config.csv")
-        worker_names = [id_dict["id"] for _, id_dict in worker_dict.items()]
-
-        if args.websockets:
-            workers = [
-                sy.workers.node_client.NodeClient(
-                    hook,
-                    "http://{:s}:{:s}".format(worker["host"], worker["port"]),
-                    id=worker["id"],
-                )
-                for row, worker in worker_dict.items()
-            ]
-            grid = sy.PrivateGridNetwork(*workers)
-
-
-            """print(sy.local_worker.request_search(args.dataset, location=workers[0])[0][0])
-            print(sy.local_worker.request_search(args.dataset, location=workers[1])[0])
-            print(sy.local_worker.request_search(args.dataset, location=workers[2])[0])
-
-            exit()"""
-
-            data = grid.search(args.dataset)
-            dss = [ds[0] for ds in data.values()]
-            fed_datasets = sy.FederatedDataset(dss)
-            train_loader = sy.FederatedDataLoader(fed_datasets)
-
-
-
-        else:
-            workers = [
-                sy.VirtualWorker(hook, id=id_dict["id"])
-                for row, id_dict in worker_dict.items()
-            ]
-
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
     torch.manual_seed(args.seed)
@@ -157,16 +113,18 @@ if __name__ == "__main__":
             )
             train_tf.append(repeat)
             test_tf.append(repeat)
-        dataset = datasets.MNIST(
-            "../data",
-            train=True,
-            download=True,
-            transform=transforms.Compose(train_tf),
-        )
+        if args.train_federated:
+            testset = datasets.MNIST(
+                "../data", train=False, transform=transforms.Compose(test_tf),
+            )
+        else:
+            dataset = datasets.MNIST(
+                "../data",
+                train=True,
+                download=True,
+                transform=transforms.Compose(train_tf),
+            )
 
-        testset = datasets.MNIST(
-            "../data", train=False, transform=transforms.Compose(test_tf),
-        )
     elif args.dataset == "pneumonia":
         num_classes = 3
         """
@@ -190,7 +148,6 @@ if __name__ == "__main__":
                 [AddGaussianNoise(mean=0.0, std=args.noise_std)], p=args.noise_prob
             ),
         ]
-        # TODO: Add normalization
         test_tf = [
             transforms.Resize(args.inference_resolution),
             transforms.CenterCrop(args.inference_resolution),
@@ -207,32 +164,79 @@ if __name__ == "__main__":
                     x, 3, dim=0
                 )
             )
-            train_tf.append(repeat)
+            #train_tf.append(repeat)
             test_tf.append(repeat)
-        dataset = PPPP(
-            "data/Labels.csv",
-            train=True,
-            transform=transforms.Compose(train_tf),
-            seed=args.seed,
-        )
-        """ Removed because bad practice
-        testset = PPPP(
-            "data/Labels.csv",
-            train=False,
-            transform=transforms.Compose(test_tf),
-            seed=args.seed,
-        )"""
+        if args.train_federated:
+            testset = PPPP(
+                "data/Labels.csv",
+                train=False,
+                transform=transforms.Compose(test_tf),
+                seed=args.seed,
+            )
+        else:
+            dataset = PPPP(
+                "data/Labels.csv",
+                train=True,
+                transform=transforms.Compose(train_tf),
+                seed=args.seed,
+            )
+            occurances = dataset.get_class_occurances()
+
+
         class_names = {0: "normal", 1: "bacterial pneumonia", 2: "viral pneumonia"}
-        occurances = dataset.get_class_occurances()
     else:
         raise NotImplementedError("dataset not implemented")
 
-    total_L = len(dataset)
+    if args.train_federated:
+        import syft as sy
+        from torchlib.websocket_utils import (  # pylint:disable=import-error
+            read_websocket_config,
+        )
+
+        hook = sy.TorchHook(torch)
+        torch.set_num_threads(1)
+        # hook.local_worker.is_client_worker = False
+        # server = hook.local_worker
+        worker_dict = read_websocket_config("configs/websetting/config.csv")
+        worker_names = [id_dict["id"] for _, id_dict in worker_dict.items()]
+
+        if args.websockets:
+            workers = [
+                sy.workers.node_client.NodeClient(
+                    hook,
+                    "http://{:s}:{:s}".format(worker["host"], worker["port"]),
+                    id=worker["id"],
+                )
+                for row, worker in worker_dict.items()
+            ]
+            grid = sy.PrivateGridNetwork(*workers)
+            data = grid.search(args.dataset, "#data")
+            target = grid.search(args.dataset, "#target")
+            dist_dataset = [
+                sy.BaseDataset(data[worker][0], target[worker][0], #transform=train_tf
+                )
+                for worker in data.keys()
+            ]
+            fed_datasets = sy.FederatedDataset(dist_dataset)
+            train_loader = sy.FederatedDataLoader(
+                fed_datasets, batch_size=args.batch_size, shuffle=True
+            )
+
+        else:
+            workers = [
+                sy.VirtualWorker(hook, id=id_dict["id"])
+                for row, id_dict in worker_dict.items()
+            ]
+
+    total_L = len(fed_datasets) if args.websockets else len(dataset)
     fraction = 1.0 / args.val_split
-    dataset, valset = torch.utils.data.random_split(
-        dataset,
-        [int(round(total_L * (1.0 - fraction))), int(round(total_L * fraction))],
-    )
+    if args.train_federated:
+        pass  # TODO: implement valset for federated training
+    else:
+        dataset, valset = torch.utils.data.random_split(
+            dataset,
+            [int(round(total_L * (1.0 - fraction))), int(round(total_L * fraction))],
+        )
     del total_L, fraction
 
     if args.train_federated:
@@ -254,7 +258,10 @@ if __name__ == "__main__":
             dataset, batch_size=args.batch_size, shuffle=True, **kwargs
         )
     val_loader = torch.utils.data.DataLoader(
-        valset, batch_size=args.test_batch_size, shuffle=False, **kwargs
+        testset if args.train_federated else valset,
+        batch_size=args.test_batch_size,
+        shuffle=False,
+        **kwargs,
     )
 
     """ Removed because bad practice
@@ -262,8 +269,9 @@ if __name__ == "__main__":
         testset, batch_size=args.test_batch_size, shuffle=True, **kwargs
     )"""
     cw = None
-    if args.class_weights:
-        if not occurances:
+    #TODO: adapt to federated training
+    if args.class_weights and not args.train_federated:
+        if not "occurances" in locals():
             occurances = {}
             # if hasattr(dataset, "get_class_occurances"):
             #    occurances = dataset.get_class_occurances()
