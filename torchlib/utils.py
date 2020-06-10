@@ -121,6 +121,11 @@ class Arguments:
         self.visdom = False
         self.encrypted_inference = cmd_args.encrypted_inference
         self.no_cuda = cmd_args.no_cuda
+        self.websockets = (
+            cmd_args.websockets  # currently not implemented for inference
+            if self.encrypted_inference
+            else False
+        )
 
     def __str__(self):
         members = [
@@ -181,7 +186,7 @@ def train(
 
     avg_loss = []
     for batch_idx, (data, target) in tqdm.tqdm(
-        enumerate(train_loader), leave=False, desc="training", total=L+1
+        enumerate(train_loader), leave=False, desc="training", total=L + 1
     ):  # <-- now it is a distributed dataset
         if args.train_federated:
             # print("data location: {:s}".format(str(data.location)))

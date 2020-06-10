@@ -8,6 +8,12 @@ from torchvision import transforms
 from torchvision.datasets import MNIST
 from torchvision.datasets import ImageFolder
 from tqdm import tqdm
+import sys
+import os.path
+sys.path.append(
+    os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, os.path.pardir))
+)
+from torchlib.utils import AddGaussianNoise
 
 
 # from utils import AddGaussianNoise  # pylint: disable=import-error
@@ -104,10 +110,10 @@ def create_app(node_id, debug=False, database_url=None, data_dir: str = None):
                     #    fillcolor=0.0,
                 ),
                 transforms.Resize(224),
-                transforms.RandomCrop(224),
+                transforms.CenterCrop(224),
                 transforms.ToTensor(),
                 transforms.Normalize((0.57282609,), (0.17427578,)),
-                # transforms.RandomApply([AddGaussianNoise(mean=0.0, std=0.05)], p=0.5),
+                transforms.RandomApply([AddGaussianNoise(mean=0.0, std=0.05)], p=0.5),
             ]
             """train_tf.append(
                 transforms.Lambda(

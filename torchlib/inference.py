@@ -46,7 +46,7 @@ if __name__ == "__main__":
         "--encrypted_inference", action="store_true", help="Perform encrypted inference"
     )
     parser.add_argument(
-        "--no_cuda", action="store_true", help="dont use a visdom server"
+        "--no_cuda", action="store_true", help="dont use gpu"
     )
     cmd_args = parser.parse_args()
 
