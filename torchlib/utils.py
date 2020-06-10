@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 from os.path import isfile
 from tabulate import tabulate
+from sklearn.metrics import confusion_matrix
 
 
 """
@@ -120,6 +121,11 @@ class Arguments:
         self.visdom = False
         self.encrypted_inference = cmd_args.encrypted_inference
         self.no_cuda = cmd_args.no_cuda
+        self.websockets = (
+            cmd_args.websockets  # currently not implemented for inference
+            if self.encrypted_inference
+            else False
+        )
 
     def __str__(self):
         members = [
@@ -180,12 +186,12 @@ def train(
 
     avg_loss = []
     for batch_idx, (data, target) in tqdm.tqdm(
-        enumerate(train_loader), leave=False, desc="training", total=L
+        enumerate(train_loader), leave=False, desc="training", total=L + 1
     ):  # <-- now it is a distributed dataset
         if args.train_federated:
+            # print("data location: {:s}".format(str(data.location)))
             model.send(data.location)  # <-- NEW: send the model to the right location
             opt = optimizer.get_optim(data.location.id)
-            # print("data location: {:s}".format(str(data.location)))
             # print("target location: {:s}".format(str(target.location)))
             # print("model location: {:s}".format(str(model.location)))
             # model = model.to(device)
@@ -197,7 +203,9 @@ def train(
         loss.backward()
         opt.step()
         if args.train_federated:
+            # print('model location before get: {:s}'.format(str(model.location)))
             model.get()  # <-- NEW: get the model back
+            # print('model location after get: {:s}'.format(str(model.location)))
         if batch_idx % args.log_interval == 0:
             if args.train_federated:
                 loss = loss.get()  # <-- NEW: get the loss back
@@ -234,6 +242,7 @@ def test(
     tp_per_class = {}
     fn_per_class = {}
     fp_per_class = {}
+    total_pred, total_target = [], []
     for i in range(num_classes):
         tp_per_class[i] = 0
         fp_per_class[i] = 0
@@ -251,6 +260,8 @@ def test(
             test_loss += loss_fn(output, target).item()  # sum up batch loss
             pred = output.argmax(dim=1)
             tgts = target.view_as(pred)
+            total_pred.append(pred)
+            total_target.append(tgts)
             equal = pred.eq(tgts)
             if args.encrypted_inference:
                 TP += equal.sum().copy().get().float_precision().long().item()
@@ -366,6 +377,10 @@ def test(
                 tablefmt="fancy_grid",
             )
         )
+        total_pred = torch.cat(total_pred).cpu().numpy()
+        total_target = torch.cat(total_target).cpu().numpy()
+        conf_matrix = confusion_matrix(total_target, total_pred)
+        print(conf_matrix)
         if args.visdom:
             vis_params["vis"].line(
                 X=np.asarray([epoch]),

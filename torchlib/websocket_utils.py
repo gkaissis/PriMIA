@@ -25,6 +25,7 @@ KEEP_LABELS_DICT = {
 
 def start_webserver(id: str, port: int, data_dir=None):
     hook = sy.TorchHook(torch)
+    torch.set_num_threads(1)
     server = sy.workers.websocket_server.WebsocketServerWorker(
         id=id, host=None, port=port, hook=hook, verbose=True
     )

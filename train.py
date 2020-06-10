@@ -14,9 +14,13 @@ from warnings import warn
 from datetime import datetime
 from tabulate import tabulate
 from torchvision import datasets, transforms, models
-from torchlib.dataloader import PPPP
-from torchlib.models import vgg16, resnet18, conv_at_resolution
-from torchlib.utils import (
+from torchlib.dataloader import PPPP  # pylint:disable=import-error
+from torchlib.models import (  # pylint:disable=import-error
+    vgg16,
+    resnet18,
+    conv_at_resolution,
+)
+from torchlib.utils import (  # pylint:disable=import-error
     LearningRateScheduler,
     Arguments,
     train,
@@ -25,6 +29,49 @@ from torchlib.utils import (
     save_config_results,
     AddGaussianNoise,
 )
+
+
+def setup_pysyft(args):
+    from torchlib.websocket_utils import (  # pylint:disable=import-error
+        read_websocket_config,
+    )
+
+    torch.set_num_threads(1)
+    # hook.local_worker.is_client_worker = False
+    # server = hook.local_worker
+    worker_dict = read_websocket_config("configs/websetting/config.csv")
+    worker_names = [id_dict["id"] for _, id_dict in worker_dict.items()]
+
+    if args.websockets:
+        workers = [
+            sy.workers.node_client.NodeClient(
+                hook,
+                "http://{:s}:{:s}".format(worker["host"], worker["port"]),
+                id=worker["id"],
+            )
+            for row, worker in worker_dict.items()
+        ]
+        grid = sy.PrivateGridNetwork(*workers)
+        data = grid.search(args.dataset, "#data")
+        target = grid.search(args.dataset, "#target")
+        dist_dataset = [  # TODO: in the future transform here would be nice but currently raise errors
+            sy.BaseDataset(
+                data[worker][0], target[worker][0],  # transform=federated_tf
+            )
+            for worker in data.keys()
+        ]
+        fed_datasets = sy.FederatedDataset(dist_dataset)
+        train_loader = sy.FederatedDataLoader(
+            fed_datasets, batch_size=args.batch_size, shuffle=True
+        )
+
+    else:
+        workers = [
+            sy.VirtualWorker(hook, id=id_dict["id"])
+            for row, id_dict in worker_dict.items()
+        ]
+        train_loader, fed_datasets = None, None
+    return train_loader, fed_datasets, workers, worker_names
 
 
 if __name__ == "__main__":
@@ -49,9 +96,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--no_visdom", action="store_false", help="dont use a visdom server"
     )
-    parser.add_argument(
-        "--no_cuda", action="store_true", help="dont use a visdom server"
-    )
+    parser.add_argument("--no_cuda", action="store_true", help="dont use gpu")
     parser.add_argument(
         "--resume_checkpoint",
         type=str,
@@ -69,39 +114,6 @@ if __name__ == "__main__":
 
     args = Arguments(cmd_args, config, mode="train")
     print(str(args))
-
-    if args.train_federated:
-        import syft as sy
-        from torchlib.websocket_utils import read_websocket_config
-
-        hook = sy.TorchHook(torch)
-        hook.local_worker.is_client_worker = False
-        server = hook.local_worker
-        worker_dict = read_websocket_config("configs/websetting/config.csv")
-        worker_names = [id_dict["id"] for _, id_dict in worker_dict.items()]
-
-        if args.websockets:
-            workers = [
-                sy.workers.websocket_client.WebsocketClientWorker(
-                    hook=hook,
-                    id=worker["id"],
-                    port=worker["port"],
-                    host=worker["host"],
-                )
-                for row, worker in worker_dict.items()
-            ]
-            fed_datasets = sy.FederatedDataset(
-                [
-                    sy.local_worker.request_search(args.dataset, location=worker)[0]
-                    for worker in workers
-                ]
-            )
-            train_loader = sy.FederatedDataLoader(fed_datasets)
-        else:
-            workers = [
-                sy.VirtualWorker(hook, id=id_dict["id"])
-                for row, id_dict in worker_dict.items()
-            ]
 
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
@@ -131,6 +143,7 @@ if __name__ == "__main__":
             transforms.ToTensor(),
             transforms.Normalize((0.1307,), (0.3081,)),
         ]
+        # federated_tf = [transforms.Normalize((0.1307,), (0.3081,))]
         test_tf = [
             transforms.Resize(args.inference_resolution),
             transforms.ToTensor(),
@@ -144,16 +157,18 @@ if __name__ == "__main__":
             )
             train_tf.append(repeat)
             test_tf.append(repeat)
-        dataset = datasets.MNIST(
-            "../data",
-            train=True,
-            download=True,
-            transform=transforms.Compose(train_tf),
-        )
+        if args.websockets:
+            testset = datasets.MNIST(
+                "../data", train=False, transform=transforms.Compose(test_tf),
+            )
+        else:
+            dataset = datasets.MNIST(
+                "../data",
+                train=True,
+                download=True,
+                transform=transforms.Compose(train_tf),
+            )
 
-        testset = datasets.MNIST(
-            "../data", train=False, transform=transforms.Compose(test_tf),
-        )
     elif args.dataset == "pneumonia":
         num_classes = 3
         """
@@ -167,7 +182,7 @@ if __name__ == "__main__":
                 translate=(args.translate, args.translate),
                 scale=(1.0 - args.scale, 1.0 + args.scale),
                 shear=args.shear,
-            #    fillcolor=0,
+                #    fillcolor=0,
             ),
             transforms.Resize(args.inference_resolution),
             transforms.RandomCrop(args.train_resolution),
@@ -177,7 +192,22 @@ if __name__ == "__main__":
                 [AddGaussianNoise(mean=0.0, std=args.noise_std)], p=args.noise_prob
             ),
         ]
-        # TODO: Add normalization
+        """federated_tf = [
+            transforms.ToPILImage(),
+            transforms.RandomVerticalFlip(p=args.vertical_flip_prob),
+            transforms.RandomAffine(
+                degrees=args.rotation,
+                translate=(args.translate, args.translate),
+                scale=(1.0 - args.scale, 1.0 + args.scale),
+                shear=args.shear,
+                #    fillcolor=0,
+            ),
+            transforms.ToTensor(),
+            transforms.Normalize((0.57282609,), (0.17427578,)),
+            transforms.RandomApply(
+                [AddGaussianNoise(mean=0.0, std=args.noise_std)], p=args.noise_prob
+            ),
+        ]"""
         test_tf = [
             transforms.Resize(args.inference_resolution),
             transforms.CenterCrop(args.inference_resolution),
@@ -196,30 +226,40 @@ if __name__ == "__main__":
             )
             train_tf.append(repeat)
             test_tf.append(repeat)
-        dataset = PPPP(
-            "data/Labels.csv",
-            train=True,
-            transform=transforms.Compose(train_tf),
-            seed=args.seed,
-        )
-        """ Removed because bad practice
-        testset = PPPP(
-            "data/Labels.csv",
-            train=False,
-            transform=transforms.Compose(test_tf),
-            seed=args.seed,
-        )"""
+        if args.websockets:
+            testset = PPPP(
+                "data/Labels.csv",
+                train=False,
+                transform=transforms.Compose(test_tf),
+                seed=args.seed,
+            )
+        else:
+            dataset = PPPP(
+                "data/Labels.csv",
+                train=True,
+                transform=transforms.Compose(train_tf),
+                seed=args.seed,
+            )
+            occurances = dataset.get_class_occurances()
+
         class_names = {0: "normal", 1: "bacterial pneumonia", 2: "viral pneumonia"}
-        occurances = dataset.get_class_occurances()
     else:
         raise NotImplementedError("dataset not implemented")
 
-    total_L = len(dataset)
+    if args.train_federated:
+        import syft as sy
+        hook = sy.TorchHook(torch)
+        train_loader, fed_datasets, workers, worker_names = setup_pysyft(args)
+
+    total_L = len(fed_datasets) if args.websockets else len(dataset)
     fraction = 1.0 / args.val_split
-    dataset, valset = torch.utils.data.random_split(
-        dataset,
-        [int(round(total_L * (1.0 - fraction))), int(round(total_L * fraction))],
-    )
+    if args.websockets:
+        pass  # TODO: implement valset for federated training
+    else:
+        dataset, valset = torch.utils.data.random_split(
+            dataset,
+            [int(round(total_L * (1.0 - fraction))), int(round(total_L * fraction))],
+        )
     del total_L, fraction
 
     if args.train_federated:
@@ -241,7 +281,10 @@ if __name__ == "__main__":
             dataset, batch_size=args.batch_size, shuffle=True, **kwargs
         )
     val_loader = torch.utils.data.DataLoader(
-        valset, batch_size=args.test_batch_size, shuffle=False, **kwargs
+        testset if args.websockets else valset,
+        batch_size=args.test_batch_size,
+        shuffle=False,
+        **kwargs,
     )
 
     """ Removed because bad practice
@@ -249,8 +292,9 @@ if __name__ == "__main__":
         testset, batch_size=args.test_batch_size, shuffle=True, **kwargs
     )"""
     cw = None
-    if args.class_weights:
-        if not occurances:
+    # TODO: adapt to federated training
+    if args.class_weights and not args.train_federated:
+        if not "occurances" in locals():
             occurances = {}
             # if hasattr(dataset, "get_class_occurances"):
             #    occurances = dataset.get_class_occurances()
@@ -415,16 +459,25 @@ if __name__ == "__main__":
                 update="append",
                 env=vis_env,
             )
-        train(
-            args,
-            model,
-            device,
-            train_loader,
-            optimizer,
-            epoch,
-            loss_fn,
-            vis_params=vis_params,
-        )
+        try:
+            train(
+                args,
+                model,
+                device,
+                train_loader,
+                optimizer,
+                epoch,
+                loss_fn,
+                vis_params=vis_params,
+            )
+        except Exception as e:
+            if args.websockets:
+                warn("An exception occured - restarting websockets")
+                train_loader, fed_datasets, workers, worker_names = setup_pysyft(args)
+            else:
+                raise e
+
+
         if (epoch % args.test_interval) == 0:
             _, acc = test(
                 args,
