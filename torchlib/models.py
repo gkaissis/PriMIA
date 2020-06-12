@@ -671,14 +671,7 @@ class ConvNetMNIST(nn.Module):
         x = self.linear3(x)
         return x
 
-    def to(self, device):
-        pass
-
-    def eval(self):
-        pass
-
-    def train(self):
-        pass
+    
 
 
 conv_at_resolution = {28: ConvNetMNIST, 224: ConvNet224, 512: ConvNet512}

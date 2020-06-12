@@ -10,8 +10,11 @@ from torchvision.datasets import ImageFolder
 from tqdm import tqdm
 import sys
 import os.path
+
 sys.path.append(
-    os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, os.path.pardir))
+    os.path.abspath(
+        os.path.join(os.path.dirname(__file__), os.path.pardir, os.path.pardir)
+    )
 )
 from torchlib.utils import AddGaussianNoise
 
@@ -24,6 +27,13 @@ KEEP_LABELS_DICT = {
     "charlie": [7, 8, 9],
     None: list(range(10)),
 }
+
+
+class LabelMNIST(MNIST):
+    def __init__(self, labels, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        indices = np.isin(self.targets, labels).astype("bool")
+        self.data = self.data[indices]
 
 
 def create_app(node_id, debug=False, database_url=None, data_dir: str = None):
@@ -65,37 +75,35 @@ def create_app(node_id, debug=False, database_url=None, data_dir: str = None):
     if data_dir:
         print("register data")
         if "mnist" in data_dir.lower():
-            dataset = MNIST(
-                root="./data",
-                train=True,
-                download=True,
-                transform=transforms.Compose(
-                    [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
-                ),
-            )
+
             # selected_data = dataset.data.unsqueeze(1)
             # selected_targets = dataset.targets
-            """if node_id in KEEP_LABELS_DICT:
-                indices = np.isin(dataset.targets, KEEP_LABELS_DICT[node_id]).astype(
-                    "uint8"
+            if node_id in KEEP_LABELS_DICT:
+                dataset = LabelMNIST(
+                    labels=KEEP_LABELS_DICT[node_id],
+                    root="./data",
+                    train=True,
+                    download=True,
+                    transform=transforms.Compose(
+                        [
+                            transforms.ToTensor(),
+                            transforms.Normalize((0.1307,), (0.3081,)),
+                        ]
+                    ),
                 )
-                selected_data = (
-                    torch.native_masked_select(  # pylint:disable=no-member
-                        dataset.data.transpose(0, 2),
-                        torch.tensor(indices),  # pylint:disable=not-callable
-                    )
-                    .view(28, 28, -1)
-                    .transpose(2, 0)
+            else:
+                dataset = MNIST(
+                    root="./data",
+                    train=True,
+                    download=True,
+                    transform=transforms.Compose(
+                        [
+                            transforms.ToTensor(),
+                            transforms.Normalize((0.1307,), (0.3081,)),
+                        ]
+                    ),
                 )
-                selected_targets = torch.native_masked_select(  # pylint:disable=no-member
-                    dataset.targets,
-                    torch.tensor(indices),  # pylint:disable=not-callable
-                )
-                dataset = sy.BaseDataset(
-                    data=selected_data,
-                    targets=selected_targets,
-                    transform=dataset.transform,
-                )"""
+
             dataset_name = "mnist"
 
         else:

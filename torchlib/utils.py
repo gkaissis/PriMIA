@@ -127,6 +127,15 @@ class Arguments:
             else False
         )
 
+    def incorporate_cmd_args(self, cmd_args):
+        for attr in dir(self):
+            if (
+                not callable(getattr(self, attr))
+                and not attr.startswith("__")
+                and attr in dir(cmd_args)
+            ):
+                setattr(self, attr, getattr(cmd_args, attr))
+
     def __str__(self):
         members = [
             attr

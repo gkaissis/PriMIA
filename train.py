@@ -91,6 +91,7 @@ if __name__ == "__main__":
         type=str,
         default="pneumonia",
         choices=["pneumonia", "mnist"],
+        required=True,
         help="which dataset?",
     )
     parser.add_argument(
@@ -248,6 +249,7 @@ if __name__ == "__main__":
 
     if args.train_federated:
         import syft as sy
+
         hook = sy.TorchHook(torch)
         train_loader, fed_datasets, workers, worker_names = setup_pysyft(args)
 
@@ -420,12 +422,15 @@ if __name__ == "__main__":
         state = torch.load(cmd_args.resume_checkpoint, map_location=device)
         start_at_epoch = state["epoch"]
         args = state["args"]
-        if args.train_federated:
+        if cmd_args.train_federated and args.train_federated:
             opt_state_dict = state["optim_state_dict"]
             for w in worker_names:
                 optimizer.get_optim(w).load_state_dict(opt_state_dict[w])
-        else:
+        elif not cmd_args.train_federated and not args.train_federated:
             optimizer.load_state_dict(state["optim_state_dict"])
+        else:
+            pass # not possible to load previous optimizer if setting changed
+        args.incorporate_cmd_args(cmd_args)
         model.load_state_dict(state["model_state_dict"])
     model.to(device)
 
@@ -476,7 +481,6 @@ if __name__ == "__main__":
                 train_loader, fed_datasets, workers, worker_names = setup_pysyft(args)
             else:
                 raise e
-
 
         if (epoch % args.test_interval) == 0:
             _, acc = test(
