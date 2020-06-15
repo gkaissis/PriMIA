@@ -2,9 +2,11 @@ import os
 import random
 import syft as sy
 import pandas as pd
+import numpy as np
 from PIL import Image
 from torch import manual_seed
 from torch.utils import data
+from torchvision.datasets import MNIST
 from torchvision import transforms
 from torchvision.datasets.folder import default_loader
 
@@ -13,6 +15,12 @@ def single_channel_loader(filename):
     with open(filename, "rb") as f:
         img = Image.open(f).convert("L")
         return img.copy()
+
+class LabelMNIST(MNIST):
+    def __init__(self, labels, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        indices = np.isin(self.targets, labels).astype("bool")
+        self.data = self.data[indices]
 
 
 class PPPP(data.Dataset):

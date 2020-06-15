@@ -14,7 +14,7 @@ from warnings import warn
 from datetime import datetime
 from tabulate import tabulate
 from torchvision import datasets, transforms, models
-from torchlib.dataloader import PPPP  # pylint:disable=import-error
+from torchlib.dataloader import PPPP, LabelMNIST  # pylint:disable=import-error
 from torchlib.models import (  # pylint:disable=import-error
     vgg16,
     resnet18,
@@ -31,12 +31,12 @@ from torchlib.utils import (  # pylint:disable=import-error
 )
 
 
-def setup_pysyft(args):
+def setup_pysyft(args, verbose=False):
     from torchlib.websocket_utils import (  # pylint:disable=import-error
         read_websocket_config,
     )
 
-    torch.set_num_threads(1)
+    torch.set_num_threads(1)  # pylint:disable=no-member
     # hook.local_worker.is_client_worker = False
     # server = hook.local_worker
     worker_dict = read_websocket_config("configs/websetting/config.csv")
@@ -48,76 +48,42 @@ def setup_pysyft(args):
                 hook,
                 "http://{:s}:{:s}".format(worker["host"], worker["port"]),
                 id=worker["id"],
+                verbose=verbose,
             )
             for row, worker in worker_dict.items()
         ]
-        grid = sy.PrivateGridNetwork(*workers)
-        data = grid.search(args.dataset, "#data")
-        target = grid.search(args.dataset, "#target")
-        dist_dataset = [  # TODO: in the future transform here would be nice but currently raise errors
-            sy.BaseDataset(
-                data[worker][0], target[worker][0],  # transform=federated_tf
-            )
-            for worker in data.keys()
-        ]
-        fed_datasets = sy.FederatedDataset(dist_dataset)
-        train_loader = sy.FederatedDataLoader(
-            fed_datasets, batch_size=args.batch_size, shuffle=True
-        )
 
     else:
         workers = [
-            sy.VirtualWorker(hook, id=id_dict["id"], verbose=True)
+            sy.VirtualWorker(hook, id=id_dict["id"], verbose=verbose)
             for row, id_dict in worker_dict.items()
         ]
         train_loader, fed_datasets = None, None
-        if args.dataset == "mnist":
-            dataset = datasets.MNIST(
-                root="./data",
-                train=True,
-                download=True,
-                transform=transforms.Compose(
-                    [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
-                ),
-            )
-            KEEP_LABELS_DICT = {
-                "alice": [0, 1, 2, 3],
-                "bob": [4, 5, 6],
-                "charlie": [7, 8, 9],
-                None: list(range(10)),
-            }
-            for worker in workers:
-                id = worker.id
-                if id in KEEP_LABELS_DICT:
-                    indices = np.isin(dataset.targets, KEEP_LABELS_DICT[id]).astype(
-                        "bool"
-                    )
-                    selected_data = (
-                        torch.native_masked_select(  # pylint:disable=no-member
-                            dataset.data.transpose(0, 2),
-                            torch.tensor(indices),  # pylint:disable=not-callable
-                        )
-                        .view(28, 28, -1)
-                        .transpose(2, 0)
-                    )
-                    selected_targets = torch.native_masked_select(  # pylint:disable=no-member
-                        dataset.targets,
-                        torch.tensor(indices),  # pylint:disable=not-callable
-                    )
-                    dataset = sy.BaseDataset(
-                        data=selected_data,
-                        targets=selected_targets,
-                        transform=dataset.transform,
-                    )
-                else:
-                    dataset = sy.BaseDataset(
-                        data=dataset.data,
-                        targets=dataset.targets,
-                        transform=dataset.transform,
-                    )
-                worker.register_obj(dataset, obj_id=args.dataset)
-        elif args.dataset == "pneumonia":
-            for i, worker in enumerate(workers):
+
+        for i, worker in enumerate(workers):
+            if args.dataset == "mnist":
+                node_id = worker.id
+                KEEP_LABELS_DICT = {
+                    "alice": [0, 1, 2, 3],
+                    "bob": [4, 5, 6],
+                    "charlie": [7, 8, 9],
+                    None: list(range(10)),
+                }
+                dataset = LabelMNIST(
+                    labels=KEEP_LABELS_DICT[node_id]
+                    if node_id in KEEP_LABELS_DICT
+                    else KEEP_LABELS_DICT[None],
+                    root="./data",
+                    train=True,
+                    download=True,
+                    transform=transforms.Compose(
+                        [
+                            transforms.ToTensor(),
+                            transforms.Normalize((0.1307,), (0.3081,)),
+                        ]
+                    ),
+                )
+            elif args.dataset == "pneumonia":
                 train_tf = [
                     transforms.RandomVerticalFlip(p=0.5),
                     transforms.RandomAffine(
@@ -134,40 +100,52 @@ def setup_pysyft(args):
                     # transforms.RandomApply([AddGaussianNoise(mean=0.0, std=0.05)], p=0.5),
                 ]
                 """train_tf.append(
-                    transforms.Lambda(
-                        lambda x: torch.repeat_interleave(  # pylint: disable=no-member
-                            x, 3, dim=0
+                        transforms.Lambda(
+                            lambda x: torch.repeat_interleave(  # pylint: disable=no-member
+                                x, 3, dim=0
+                            )
                         )
-                    )
-                )"""
+                    )"""
                 target_dict_pneumonia = {0: 1, 1: 0, 2: 2}
                 dataset = datasets.ImageFolder(
                     path.join("~/worker_emulation/", "worker{:d}".format(i + 1)),
                     transform=transforms.Compose(train_tf),
                     target_transform=lambda x: target_dict_pneumonia[x],
                 )
-                data, targets = [], []
-                for d, t in tqdm.tqdm(
-                    dataset, total=len(dataset), leave=False, desc="register objects"
-                ):
-                    data.append(d)
-                    targets.append(t)
-                data = torch.stack(data)  # pylint:disable=no-member
-                targets = torch.from_numpy(
-                    np.array(targets)
-                )  # pylint:disable=no-member
-                dataset = sy.BaseDataset(data=data, targets=targets)
-                worker.register_obj(dataset, obj_id=args.dataset)
-        else:
-            raise NotImplementedError(
-                "federation for virtual workers for this dataset unknown"
-            )
 
-        grid = sy.PrivateGridNetwork(*workers)
-        data = grid.search(args.dataset)
-        dss = [ds[0] for ds in data.values()]
-        fed_datasets = sy.FederatedDataset(dss)
-        train_loader = sy.FederatedDataLoader(fed_datasets)
+            else:
+                raise NotImplementedError(
+                    "federation for virtual workers for this dataset unknown"
+                )
+            data, targets = [], []
+            for d, t in tqdm.tqdm(
+                dataset,
+                total=len(dataset),
+                leave=False,
+                desc="register data on {:s}".format(worker.id),
+            ):
+                data.append(d)
+                targets.append(t)
+            selected_data = torch.stack(data)  # pylint:disable=no-member
+            selected_targets = torch.from_numpy(  # pylint:disable=no-member
+                np.array(targets)
+            )
+            del data, targets
+            selected_data.tag(args.dataset, "#data")
+            selected_targets.tag(args.dataset, "#target")
+            worker.load_data([selected_data, selected_targets])
+
+    grid: sy.PrivateGridNetwork = sy.PrivateGridNetwork(*workers)
+    data = grid.search(args.dataset, "#data")
+    target = grid.search(args.dataset, "#target")
+    dist_dataset = [  # TODO: in the future transform here would be nice but currently raise errors
+        sy.BaseDataset(data[worker][0], target[worker][0],)  # transform=federated_tf
+        for worker in data.keys()
+    ]
+    fed_datasets = sy.FederatedDataset(dist_dataset)
+    train_loader = sy.FederatedDataLoader(
+        fed_datasets, batch_size=args.batch_size, shuffle=True
+    )
     return train_loader, fed_datasets, workers, worker_names
 
 
@@ -203,6 +181,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--websockets", action="store_true", help="train on websocket config"
+    )
+    parser.add_argument(
+        "--verbose", action="store_true", help="set syft workers to verbose"
     )
     cmd_args = parser.parse_args()
 
@@ -331,6 +312,13 @@ if __name__ == "__main__":
                 transform=transforms.Compose(test_tf),
                 seed=args.seed,
             )
+        else:
+            dataset = PPPP(
+                "data/Labels.csv",
+                train=True,
+                transform=transforms.Compose(train_tf),
+                seed=args.seed,
+            )
         occurances = (
             dataset.get_class_occurances()
             if not args.train_federated
@@ -345,7 +333,9 @@ if __name__ == "__main__":
         import syft as sy
 
         hook = sy.TorchHook(torch)
-        train_loader, fed_datasets, workers, worker_names = setup_pysyft(args)
+        train_loader, fed_datasets, workers, worker_names = setup_pysyft(
+            args, verbose=cmd_args.verbose
+        )
 
     total_L = len(fed_datasets) if args.train_federated else len(dataset)
     fraction = 1.0 / args.val_split
@@ -572,7 +562,9 @@ if __name__ == "__main__":
         except Exception as e:
             if args.train_federated:
                 warn("An exception occured - restarting websockets")
-                train_loader, fed_datasets, workers, worker_names = setup_pysyft(args)
+                train_loader, fed_datasets, workers, worker_names = setup_pysyft(
+                    args, verbose=cmd_args.verbose
+                )
             else:
                 raise e
 

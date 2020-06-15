@@ -5,7 +5,7 @@ import syft as sy
 import numpy as np
 import torch
 from torchvision import transforms
-from torchvision.datasets import MNIST
+
 from torchvision.datasets import ImageFolder
 from tqdm import tqdm
 import sys
@@ -17,6 +17,7 @@ sys.path.append(
     )
 )
 from torchlib.utils import AddGaussianNoise
+from torchlib.dataloader import LabelMNIST
 
 
 # from utils import AddGaussianNoise  # pylint: disable=import-error
@@ -28,12 +29,6 @@ KEEP_LABELS_DICT = {
     None: list(range(10)),
 }
 
-
-class LabelMNIST(MNIST):
-    def __init__(self, labels, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        indices = np.isin(self.targets, labels).astype("bool")
-        self.data = self.data[indices]
 
 
 def create_app(node_id, debug=False, database_url=None, data_dir: str = None):
@@ -78,31 +73,17 @@ def create_app(node_id, debug=False, database_url=None, data_dir: str = None):
 
             # selected_data = dataset.data.unsqueeze(1)
             # selected_targets = dataset.targets
-            if node_id in KEEP_LABELS_DICT:
-                dataset = LabelMNIST(
-                    labels=KEEP_LABELS_DICT[node_id],
-                    root="./data",
-                    train=True,
-                    download=True,
-                    transform=transforms.Compose(
-                        [
-                            transforms.ToTensor(),
-                            transforms.Normalize((0.1307,), (0.3081,)),
-                        ]
-                    ),
-                )
-            else:
-                dataset = MNIST(
-                    root="./data",
-                    train=True,
-                    download=True,
-                    transform=transforms.Compose(
-                        [
-                            transforms.ToTensor(),
-                            transforms.Normalize((0.1307,), (0.3081,)),
-                        ]
-                    ),
-                )
+            dataset = LabelMNIST(
+                labels=KEEP_LABELS_DICT[node_id]
+                if node_id in KEEP_LABELS_DICT
+                else KEEP_LABELS_DICT[None],
+                root="./data",
+                train=True,
+                download=True,
+                transform=transforms.Compose(
+                    [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,)),]
+                ),
+            )
 
             dataset_name = "mnist"
 
@@ -143,9 +124,9 @@ def create_app(node_id, debug=False, database_url=None, data_dir: str = None):
             data.append(d)
             targets.append(t)
         selected_data = torch.stack(data)  # pylint:disable=no-member
-        selected_targets = torch.from_numpy(
+        selected_targets = torch.from_numpy(  # pylint:disable=no-member
             np.array(targets)
-        )  # pylint:disable=no-member
+        )
         del data, targets
         selected_data.tag(dataset_name, "#data")
         selected_targets.tag(dataset_name, "#target")

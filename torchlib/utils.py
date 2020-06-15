@@ -128,7 +128,7 @@ class Arguments:
         )
 
     def incorporate_cmd_args(self, cmd_args):
-        exceptions = ['train_federated']
+        exceptions = ["train_federated"]
         for attr in dir(self):
             if (
                 not callable(getattr(self, attr))
@@ -197,7 +197,10 @@ def train(
 
     avg_loss = []
     for batch_idx, (data, target) in tqdm.tqdm(
-        enumerate(train_loader), leave=False, desc="training", total=L + 1
+        enumerate(train_loader),
+        leave=False,
+        desc="training epoch {:d}".format(epoch),
+        total=L + 1,
     ):  # <-- now it is a distributed dataset
         if args.train_federated:
             # print("data location: {:s}".format(str(data.location)))
@@ -260,7 +263,10 @@ def test(
         fn_per_class[i] = 0
     with torch.no_grad():
         for data, target in tqdm.tqdm(
-            test_loader, total=len(test_loader), desc="testing", leave=False
+            test_loader,
+            total=len(test_loader),
+            desc="testing epoch {:d}".format(epoch),
+            leave=False,
         ):
             if not args.encrypted_inference:
                 data = data.to(device)
@@ -388,8 +394,10 @@ def test(
                 tablefmt="fancy_grid",
             )
         )
-        total_pred = torch.cat(total_pred).cpu().numpy()
-        total_target = torch.cat(total_target).cpu().numpy()
+        total_pred = torch.cat(total_pred).cpu().numpy()  # pylint: disable=no-member
+        total_target = (
+            torch.cat(total_target).cpu().numpy()  # pylint: disable=no-member
+        )
         conf_matrix = confusion_matrix(total_target, total_pred)
         print(conf_matrix)
         if args.visdom:

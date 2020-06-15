@@ -14,7 +14,7 @@ from syft.generic.pointers.pointer_tensor import PointerTensor
 
 # Global variables must be initialized here.
 hook = sy.TorchHook(th)
-local_worker = sy.VirtualWorker(hook, auto_add=False)
+local_worker = sy.VirtualWorker(hook, auto_add=False, verbose=True)
 hook.local_worker.is_client_worker = False
 
 html = Blueprint(r"html", __name__)
