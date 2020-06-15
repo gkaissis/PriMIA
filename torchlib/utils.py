@@ -128,11 +128,13 @@ class Arguments:
         )
 
     def incorporate_cmd_args(self, cmd_args):
+        exceptions = ['train_federated']
         for attr in dir(self):
             if (
                 not callable(getattr(self, attr))
                 and not attr.startswith("__")
                 and attr in dir(cmd_args)
+                and attr not in exceptions
             ):
                 setattr(self, attr, getattr(cmd_args, attr))
 
