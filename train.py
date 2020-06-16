@@ -9,6 +9,7 @@ import tqdm
 import shutil
 import random
 import numpy as np
+import multiprocessing as mp
 from os import path, remove
 from warnings import warn
 from datetime import datetime
@@ -24,11 +25,15 @@ from torchlib.utils import (  # pylint:disable=import-error
     LearningRateScheduler,
     Arguments,
     train,
+    train_federated,
     test,
     save_model,
     save_config_results,
     AddGaussianNoise,
 )
+
+
+
 
 
 def setup_pysyft(args, verbose=False):
@@ -43,24 +48,29 @@ def setup_pysyft(args, verbose=False):
     worker_names = [id_dict["id"] for _, id_dict in worker_dict.items()]
 
     if args.websockets:
-        workers = [
-            sy.workers.node_client.NodeClient(
+        workers = {
+            worker["id"]: sy.workers.node_client.NodeClient(
                 hook,
                 "http://{:s}:{:s}".format(worker["host"], worker["port"]),
                 id=worker["id"],
                 verbose=verbose,
             )
             for row, worker in worker_dict.items()
-        ]
+        }
 
     else:
-        workers = [
-            sy.VirtualWorker(hook, id=id_dict["id"], verbose=verbose)
-            for row, id_dict in worker_dict.items()
-        ]
-        train_loader, fed_datasets = None, None
-
-        for i, worker in enumerate(workers):
+        workers = {}
+        for row, id_dict in worker_dict.items():
+            workers[id_dict["id"]] = sy.VirtualWorker(
+                hook, id=id_dict["id"], verbose=verbose
+            )
+        train_loader = None
+        for i, worker in tqdm.tqdm(
+            enumerate(workers.values()),
+            total=len(workers.keys()),
+            leave=False,
+            desc="load data",
+        ):
             if args.dataset == "mnist":
                 node_id = worker.id
                 KEEP_LABELS_DICT = {
@@ -108,7 +118,7 @@ def setup_pysyft(args, verbose=False):
                     )"""
                 target_dict_pneumonia = {0: 1, 1: 0, 2: 2}
                 dataset = datasets.ImageFolder(
-                    path.join("~/worker_emulation/", "worker{:d}".format(i + 1)),
+                    path.join("data/server_simulation/", "worker{:d}".format(i + 1)),
                     transform=transforms.Compose(train_tf),
                     target_transform=lambda x: target_dict_pneumonia[x],
                 )
@@ -121,32 +131,41 @@ def setup_pysyft(args, verbose=False):
             for d, t in tqdm.tqdm(
                 dataset,
                 total=len(dataset),
-                leave=False,
                 desc="register data on {:s}".format(worker.id),
+                leave=False,
             ):
                 data.append(d)
                 targets.append(t)
             selected_data = torch.stack(data)  # pylint:disable=no-member
-            selected_targets = torch.from_numpy(  # pylint:disable=no-member
+            selected_targets = torch.from_numpy(
                 np.array(targets)
-            )
+            )  # pylint:disable=no-member
             del data, targets
             selected_data.tag(args.dataset, "#data")
             selected_targets.tag(args.dataset, "#target")
             worker.load_data([selected_data, selected_targets])
 
-    grid: sy.PrivateGridNetwork = sy.PrivateGridNetwork(*workers)
+    grid: sy.PrivateGridNetwork = sy.PrivateGridNetwork(*workers.values())
     data = grid.search(args.dataset, "#data")
     target = grid.search(args.dataset, "#target")
-    dist_dataset = [  # TODO: in the future transform here would be nice but currently raise errors
-        sy.BaseDataset(data[worker][0], target[worker][0],)  # transform=federated_tf
-        for worker in data.keys()
-    ]
-    fed_datasets = sy.FederatedDataset(dist_dataset)
-    train_loader = sy.FederatedDataLoader(
-        fed_datasets, batch_size=args.batch_size, shuffle=True
-    )
-    return train_loader, fed_datasets, workers, worker_names
+    train_loader = {}
+    total_L = 0
+    for worker in data.keys():
+        dist_dataset = [  # TODO: in the future transform here would be nice but currently raise errors
+            sy.BaseDataset(
+                data[worker][0], target[worker][0],
+            )  # transform=federated_tf
+        ]
+        fed_dataset = sy.FederatedDataset(dist_dataset)
+        total_L += len(fed_dataset)
+        tl = sy.FederatedDataLoader(
+            fed_dataset, batch_size=args.batch_size, shuffle=True
+        )
+        train_loader[workers[worker]] = tl
+    assert len(train_loader.keys()) == len(
+        workers.keys()
+    ), "Somethings wrong here, I can feel it"
+    return train_loader, total_L, workers, worker_names
 
 
 if __name__ == "__main__":
@@ -240,13 +259,13 @@ if __name__ == "__main__":
             testset = datasets.MNIST(
                 "../data", train=False, transform=transforms.Compose(test_tf),
             )
-        """else:
+        else:
             dataset = datasets.MNIST(
                 "../data",
                 train=True,
                 download=True,
                 transform=transforms.Compose(train_tf),
-            )"""
+            )
 
     elif args.dataset == "pneumonia":
         num_classes = 3
@@ -333,11 +352,11 @@ if __name__ == "__main__":
         import syft as sy
 
         hook = sy.TorchHook(torch)
-        train_loader, fed_datasets, workers, worker_names = setup_pysyft(
+        train_loader, total_L, workers, worker_names = setup_pysyft(
             args, verbose=cmd_args.verbose
         )
 
-    total_L = len(fed_datasets) if args.train_federated else len(dataset)
+    total_L = total_L if args.train_federated else len(dataset)
     fraction = 1.0 / args.val_split
     if args.train_federated:
         pass  # TODO: implement valset for federated training
@@ -548,23 +567,41 @@ if __name__ == "__main__":
                 update="append",
                 env=vis_env,
             )
+
         try:
-            train(
-                args,
-                model,
-                device,
-                train_loader,
-                optimizer,
-                epoch,
-                loss_fn,
-                vis_params=vis_params,
-            )
-        except Exception as e:
             if args.train_federated:
-                warn("An exception occured - restarting websockets")
-                train_loader, fed_datasets, workers, worker_names = setup_pysyft(
-                    args, verbose=cmd_args.verbose
+                model = train_federated(
+                    args,
+                    model,
+                    device,
+                    train_loader,
+                    optimizer,
+                    epoch,
+                    loss_fn,
+                    vis_params=vis_params,
                 )
+
+            else:
+                model = train(
+                    args,
+                    model,
+                    device,
+                    train_loader,
+                    optimizer,
+                    epoch,
+                    loss_fn,
+                    vis_params=vis_params,
+                )
+        except Exception as e:
+            if args.websockets:
+                warn("An exception occured - restarting websockets")
+                try:
+                    train_loader, total_L, workers, worker_names = setup_pysyft(
+                        args, verbose=cmd_args.verbose
+                    )
+                except Exception as e:
+                    print("restarting failed")
+                    raise e
             else:
                 raise e
 
@@ -620,13 +657,4 @@ if __name__ == "__main__":
     # delete old model weights
     for model_file in model_paths:
         remove(model_file)
-    """save_model(
-        model,
-        optimizer,
-        "model_weights/{:s}_{:s}_final.pt".format(
-            "federated" if args.train_federated else "vanilla", args.dataset
-        ),
-    )"""
-    if args.train_federated:
-        for w in workers:
-            w.close()
+    

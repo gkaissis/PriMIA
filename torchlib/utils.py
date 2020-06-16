@@ -2,6 +2,8 @@ import torch
 import tqdm
 import numpy as np
 import pandas as pd
+import multiprocessing as mp
+from syft.frameworks.torch.fl import utils
 from os.path import isfile
 from tabulate import tabulate
 from sklearn.metrics import confusion_matrix
@@ -186,6 +188,97 @@ def save_config_results(args, accuracy, timestamp, table):
     df.to_csv(table, index=False)
 
 
+"""
+Assuming train loader is dictionary with {worker : train_loader}
+"""
+
+
+def train_federated(
+    args, model, device, train_loaders, optimizer, epoch, loss_fn, vis_params=None
+):
+    model.train()
+    mng = mp.Manager()
+    result_dict = mng.dict()
+    result_dict["total_workers"] = len(train_loaders)
+    global pbar
+    total_L = sum([len(tl) for tl in train_loaders.values()])
+    pbar = tqdm.tqdm(
+        total=total_L, leave=False, desc="training epoch {:d}".format(epoch),
+    )
+    jobs = [
+        mp.Process(
+            target=train_on_server,
+            args=(
+                args,
+                model.copy(),
+                worker,
+                device,
+                train_loader,
+                optimizer.get_optim(worker.id),
+                epoch,
+                loss_fn,
+                result_dict,
+            ),
+        )
+        for worker, train_loader in train_loaders.items()
+    ]
+    for j in jobs:
+        j.start()
+    for j in jobs:
+        j.join()
+    pbar.close()
+
+    models, avg_loss = {}, []
+    for id, value in result_dict.items():
+        if id == "total_workers":
+            continue
+        model, loss = value
+        models[id] = model
+        avg_loss.append(loss)
+    avg_loss = np.mean(avg_loss)
+    if args.visdom:
+        vis_params["vis"].line(
+            X=np.asarray([epoch + 1]),
+            Y=np.asarray([avg_loss]),
+            win="loss_win",
+            name="train_loss",
+            update="append",
+            env=vis_params["vis_env"],
+        )
+    else:
+        print("Train Epoch: {} \tLoss: {:.6f}".format(epoch, avg_loss,))
+    model = utils.federated_avg(models)
+    return model
+
+
+def train_on_server(
+    args, model, worker, device, train_loader, optimizer, epoch, loss_fn, result_dict
+):
+    avg_loss = []
+    model.send(worker)
+    for data, target in train_loader:
+        data, target = data.to(device), target.to(device)
+        optimizer.zero_grad()
+        output = model(data)
+        loss = loss_fn(output, target)
+        loss.backward()
+        optimizer.step()
+        loss = loss.get()
+        avg_loss.append(loss.detach().cpu().item())
+        # there are race conditions here
+        # but locks didn't solve them
+        # update(1) just updates once and not on every worker
+        lock = pbar.get_lock()
+        lock.acquire()
+        pbar.update(
+            result_dict["total_workers"]
+        )  ## somehow this works best although its bullshit
+        lock.release()
+        pbar.refresh()
+    model.get()
+    result_dict[worker.id] = (model, np.mean(avg_loss))
+
+
 def train(
     args, model, device, train_loader, optimizer, epoch, loss_fn, vis_params=None
 ):
@@ -237,6 +330,7 @@ def train(
                 avg_loss.append(loss.item())
     if not args.visdom:
         print("Train Epoch: {} \tLoss: {:.6f}".format(epoch, np.mean(avg_loss),))
+    return model
 
 
 def test(
