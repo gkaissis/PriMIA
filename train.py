@@ -33,15 +33,12 @@ from torchlib.utils import (  # pylint:disable=import-error
 )
 
 
-
-
-
 def setup_pysyft(args, verbose=False):
     from torchlib.websocket_utils import (  # pylint:disable=import-error
         read_websocket_config,
     )
 
-    torch.set_num_threads(1)  # pylint:disable=no-member
+    # torch.set_num_threads(1)  # pylint:disable=no-member
     # hook.local_worker.is_client_worker = False
     # server = hook.local_worker
     worker_dict = read_websocket_config("configs/websetting/config.csv")
@@ -55,15 +52,16 @@ def setup_pysyft(args, verbose=False):
                 id=worker["id"],
                 verbose=verbose,
             )
-            for row, worker in worker_dict.items()
+            for _, worker in worker_dict.items()
         }
 
     else:
-        workers = {}
-        for row, id_dict in worker_dict.items():
-            workers[id_dict["id"]] = sy.VirtualWorker(
-                hook, id=id_dict["id"], verbose=verbose
+        workers = {
+            worker["id"]: sy.VirtualWorker(
+                hook, id=worker["id"], verbose=verbose
             )
+            for _, worker in worker_dict.items()
+        }
         train_loader = None
         for i, worker in tqdm.tqdm(
             enumerate(workers.values()),
@@ -137,9 +135,7 @@ def setup_pysyft(args, verbose=False):
                 data.append(d)
                 targets.append(t)
             selected_data = torch.stack(data)  # pylint:disable=no-member
-            selected_targets = torch.from_numpy(
-                np.array(targets)
-            )  # pylint:disable=no-member
+            selected_targets = torch.from_numpy(np.array(targets))
             del data, targets
             selected_data.tag(args.dataset, "#data")
             selected_targets.tag(args.dataset, "#target")
@@ -164,7 +160,7 @@ def setup_pysyft(args, verbose=False):
         train_loader[workers[worker]] = tl
     assert len(train_loader.keys()) == len(
         workers.keys()
-    ), "Somethings wrong here, I can feel it"
+    ), "data was not correctly loaded"
     return train_loader, total_L, workers, worker_names
 
 
@@ -657,4 +653,4 @@ if __name__ == "__main__":
     # delete old model weights
     for model_file in model_paths:
         remove(model_file)
-    
+

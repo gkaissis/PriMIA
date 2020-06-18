@@ -3,6 +3,7 @@ import tqdm
 import numpy as np
 import pandas as pd
 import multiprocessing as mp
+from time import sleep
 from syft.frameworks.torch.fl import utils
 from os.path import isfile
 from tabulate import tabulate
@@ -130,7 +131,7 @@ class Arguments:
         )
 
     def incorporate_cmd_args(self, cmd_args):
-        exceptions = ["train_federated"]
+        exceptions = []  # just for future
         for attr in dir(self):
             if (
                 not callable(getattr(self, attr))
@@ -188,29 +189,42 @@ def save_config_results(args, accuracy, timestamp, table):
     df.to_csv(table, index=False)
 
 
-"""
-Assuming train loader is dictionary with {worker : train_loader}
-"""
+def training_animation(done):
+    i = 0
+    while not done.value:
+        if i % 4 == 0:
+            print("\r \033[K", end="training ", flush=True)
+            i = 1
+        else:
+            print(".", end="", flush=True)
+            i += 1
+        sleep(0.5)
+    print("\r \033[K")
 
 
+## Assuming train loaders is dictionary with {worker : train_loader}
 def train_federated(
-    args, model, device, train_loaders, optimizer, epoch, loss_fn, vis_params=None
+    args,
+    model,
+    device,
+    train_loaders,
+    optimizer,
+    epoch,
+    loss_fn,
+    vis_params=None,
 ):
     model.train()
     mng = mp.Manager()
     result_dict = mng.dict()
-    result_dict["total_workers"] = len(train_loaders)
-    global pbar
-    total_L = sum([len(tl) for tl in train_loaders.values()])
-    pbar = tqdm.tqdm(
-        total=total_L, leave=False, desc="training epoch {:d}".format(epoch),
-    )
+    num_workers = mng.Value("d", len(train_loaders.keys()))
+    for worker in train_loaders.keys():
+        result_dict[worker.id] = None
     jobs = [
         mp.Process(
             target=train_on_server,
             args=(
                 args,
-                model.copy(),
+                model,
                 worker,
                 device,
                 train_loader,
@@ -224,21 +238,28 @@ def train_federated(
     ]
     for j in jobs:
         j.start()
+    done = mng.Value("i", False)
+    animate = mp.Process(target=training_animation, args=(done,))
+    animate.start()
     for j in jobs:
         j.join()
-    pbar.close()
+    done.value = True
+    animate.join()
+
+    assert len(result_dict.keys()) == num_workers.value, "somethings went wrong"
 
     models, avg_loss = {}, []
     for id, value in result_dict.items():
-        if id == "total_workers":
-            continue
-        model, loss = value
-        models[id] = model
+        worker_model, loss = value
+        models[id] = worker_model
         avg_loss.append(loss)
     avg_loss = np.mean(avg_loss)
+    avg_model = utils.federated_avg(models)
+    model = avg_model
+
     if args.visdom:
         vis_params["vis"].line(
-            X=np.asarray([epoch + 1]),
+            X=np.asarray([epoch]),
             Y=np.asarray([avg_loss]),
             win="loss_win",
             name="train_loss",
@@ -247,16 +268,15 @@ def train_federated(
         )
     else:
         print("Train Epoch: {} \tLoss: {:.6f}".format(epoch, avg_loss,))
-    model = utils.federated_avg(models)
     return model
 
 
 def train_on_server(
-    args, model, worker, device, train_loader, optimizer, epoch, loss_fn, result_dict
+    args, model, worker, device, train_loader, optimizer, epoch, loss_fn, result_dict,
 ):
     avg_loss = []
     model.send(worker)
-    for data, target in train_loader:
+    for _, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
         output = model(data)
@@ -265,16 +285,6 @@ def train_on_server(
         optimizer.step()
         loss = loss.get()
         avg_loss.append(loss.detach().cpu().item())
-        # there are race conditions here
-        # but locks didn't solve them
-        # update(1) just updates once and not on every worker
-        lock = pbar.get_lock()
-        lock.acquire()
-        pbar.update(
-            result_dict["total_workers"]
-        )  ## somehow this works best although its bullshit
-        lock.release()
-        pbar.refresh()
     model.get()
     result_dict[worker.id] = (model, np.mean(avg_loss))
 
@@ -287,7 +297,6 @@ def train(
     div = 1.0 / float(L)
     if not args.train_federated:
         opt = optimizer
-
     avg_loss = []
     for batch_idx, (data, target) in tqdm.tqdm(
         enumerate(train_loader),

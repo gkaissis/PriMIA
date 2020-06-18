@@ -21,6 +21,8 @@ class LabelMNIST(MNIST):
         super().__init__(*args, **kwargs)
         indices = np.isin(self.targets, labels).astype("bool")
         self.data = self.data[indices]
+        self.targets = self.targets[indices]
+        
 
 
 class PPPP(data.Dataset):
