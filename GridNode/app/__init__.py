@@ -104,13 +104,6 @@ def create_app(node_id, debug=False, database_url=None, data_dir: str = None):
                 transforms.Normalize((0.57282609,), (0.17427578,)),
                 transforms.RandomApply([AddGaussianNoise(mean=0.0, std=0.05)], p=0.5),
             ]
-            """train_tf.append(
-                transforms.Lambda(
-                    lambda x: torch.repeat_interleave(  # pylint: disable=no-member
-                        x, 3, dim=0
-                    )
-                )
-            )"""
             target_dict_pneumonia = {0: 1, 1: 0, 2: 2}
             dataset = ImageFolder(
                 data_dir,
@@ -124,14 +117,13 @@ def create_app(node_id, debug=False, database_url=None, data_dir: str = None):
             data.append(d)
             targets.append(t)
         selected_data = torch.stack(data)  # pylint:disable=no-member
-        selected_targets = torch.from_numpy(  # pylint:disable=no-member
-            np.array(targets)
-        )
+        selected_targets = torch.tensor(targets) # pylint:disable=not-callable
         del data, targets
         selected_data.tag(dataset_name, "#data")
         selected_targets.tag(dataset_name, "#target")
-        selected_data.send(local_worker)
-        selected_targets.send(local_worker)
+        """selected_data.send(local_worker)
+        selected_targets.send(local_worker)"""
+        local_worker.load_data([selected_data, selected_targets])
 
         print(
             "registered {:d} samples of {:s} data".format(

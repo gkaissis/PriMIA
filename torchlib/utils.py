@@ -189,11 +189,11 @@ def save_config_results(args, accuracy, timestamp, table):
     df.to_csv(table, index=False)
 
 
-def training_animation(done):
+def training_animation(done, message="training"):
     i = 0
     while not done.value:
         if i % 4 == 0:
-            print("\r \033[K", end="training ", flush=True)
+            print("\r \033[K", end="{:s}".format(message), flush=True)
             i = 1
         else:
             print(".", end="", flush=True)
@@ -204,14 +204,7 @@ def training_animation(done):
 
 ## Assuming train loaders is dictionary with {worker : train_loader}
 def train_federated(
-    args,
-    model,
-    device,
-    train_loaders,
-    optimizer,
-    epoch,
-    loss_fn,
-    vis_params=None,
+    args, model, device, train_loaders, optimizer, epoch, loss_fn, vis_params=None,
 ):
     model.train()
     mng = mp.Manager()
@@ -276,7 +269,7 @@ def train_on_server(
 ):
     avg_loss = []
     model.send(worker)
-    for _, (data, target) in enumerate(train_loader):
+    for data, target in train_loader:
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
         output = model(data)

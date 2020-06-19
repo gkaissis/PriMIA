@@ -57,9 +57,7 @@ def setup_pysyft(args, verbose=False):
 
     else:
         workers = {
-            worker["id"]: sy.VirtualWorker(
-                hook, id=worker["id"], verbose=verbose
-            )
+            worker["id"]: sy.VirtualWorker(hook, id=worker["id"], verbose=verbose)
             for _, worker in worker_dict.items()
         }
         train_loader = None
@@ -107,13 +105,6 @@ def setup_pysyft(args, verbose=False):
                     transforms.Normalize((0.57282609,), (0.17427578,)),
                     # transforms.RandomApply([AddGaussianNoise(mean=0.0, std=0.05)], p=0.5),
                 ]
-                """train_tf.append(
-                        transforms.Lambda(
-                            lambda x: torch.repeat_interleave(  # pylint: disable=no-member
-                                x, 3, dim=0
-                            )
-                        )
-                    )"""
                 target_dict_pneumonia = {0: 1, 1: 0, 2: 2}
                 dataset = datasets.ImageFolder(
                     path.join("data/server_simulation/", "worker{:d}".format(i + 1)),
@@ -135,7 +126,7 @@ def setup_pysyft(args, verbose=False):
                 data.append(d)
                 targets.append(t)
             selected_data = torch.stack(data)  # pylint:disable=no-member
-            selected_targets = torch.from_numpy(np.array(targets))
+            selected_targets = torch.tensor(targets)  # pylint:disable=not-callable
             del data, targets
             selected_data.tag(args.dataset, "#data")
             selected_targets.tag(args.dataset, "#target")
@@ -161,6 +152,7 @@ def setup_pysyft(args, verbose=False):
     assert len(train_loader.keys()) == len(
         workers.keys()
     ), "data was not correctly loaded"
+    print("Found a total dataset with {:d} samples on remote workers".format(total_L))
     return train_loader, total_L, workers, worker_names
 
 
@@ -207,6 +199,8 @@ if __name__ == "__main__":
     config.read(cmd_args.config)
 
     args = Arguments(cmd_args, config, mode="train")
+    if args.websockets:
+        assert args.train_federated, "Websockets only work when it is federated"
     print(str(args))
 
     use_cuda = not args.no_cuda and torch.cuda.is_available()
@@ -334,6 +328,17 @@ if __name__ == "__main__":
                 transform=transforms.Compose(train_tf),
                 seed=args.seed,
             )
+            """d, t = [], []
+            for data, target in tqdm.tqdm(
+                dataset, total=len(dataset), desc="load data into memory", leave=False
+            ):
+                d.append(data)
+                t.append(target)
+            d = torch.stack(d)  # pylint:disable=no-member
+            t = torch.tensor(t)  # pylint:disable=not-callable
+            dataset = torch.utils.data.TensorDataset(d, t)"""
+        # occurances = testset.get_class_occurances()
+
         occurances = (
             dataset.get_class_occurances()
             if not args.train_federated
