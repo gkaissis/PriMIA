@@ -5,15 +5,19 @@ import syft as sy
 import numpy as np
 import torch
 from torchvision import transforms
-from torchvision.datasets import MNIST
+
 from torchvision.datasets import ImageFolder
 from tqdm import tqdm
 import sys
 import os.path
+
 sys.path.append(
-    os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir, os.path.pardir))
+    os.path.abspath(
+        os.path.join(os.path.dirname(__file__), os.path.pardir, os.path.pardir)
+    )
 )
 from torchlib.utils import AddGaussianNoise
+from torchlib.dataloader import LabelMNIST
 
 
 # from utils import AddGaussianNoise  # pylint: disable=import-error
@@ -24,6 +28,7 @@ KEEP_LABELS_DICT = {
     "charlie": [7, 8, 9],
     None: list(range(10)),
 }
+
 
 
 def create_app(node_id, debug=False, database_url=None, data_dir: str = None):
@@ -65,37 +70,21 @@ def create_app(node_id, debug=False, database_url=None, data_dir: str = None):
     if data_dir:
         print("register data")
         if "mnist" in data_dir.lower():
-            dataset = MNIST(
+
+            # selected_data = dataset.data.unsqueeze(1)
+            # selected_targets = dataset.targets
+            dataset = LabelMNIST(
+                labels=KEEP_LABELS_DICT[node_id]
+                if node_id in KEEP_LABELS_DICT
+                else KEEP_LABELS_DICT[None],
                 root="./data",
                 train=True,
                 download=True,
                 transform=transforms.Compose(
-                    [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,))]
+                    [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,)),]
                 ),
             )
-            # selected_data = dataset.data.unsqueeze(1)
-            # selected_targets = dataset.targets
-            """if node_id in KEEP_LABELS_DICT:
-                indices = np.isin(dataset.targets, KEEP_LABELS_DICT[node_id]).astype(
-                    "uint8"
-                )
-                selected_data = (
-                    torch.native_masked_select(  # pylint:disable=no-member
-                        dataset.data.transpose(0, 2),
-                        torch.tensor(indices),  # pylint:disable=not-callable
-                    )
-                    .view(28, 28, -1)
-                    .transpose(2, 0)
-                )
-                selected_targets = torch.native_masked_select(  # pylint:disable=no-member
-                    dataset.targets,
-                    torch.tensor(indices),  # pylint:disable=not-callable
-                )
-                dataset = sy.BaseDataset(
-                    data=selected_data,
-                    targets=selected_targets,
-                    transform=dataset.transform,
-                )"""
+
             dataset_name = "mnist"
 
         else:
@@ -115,13 +104,6 @@ def create_app(node_id, debug=False, database_url=None, data_dir: str = None):
                 transforms.Normalize((0.57282609,), (0.17427578,)),
                 transforms.RandomApply([AddGaussianNoise(mean=0.0, std=0.05)], p=0.5),
             ]
-            """train_tf.append(
-                transforms.Lambda(
-                    lambda x: torch.repeat_interleave(  # pylint: disable=no-member
-                        x, 3, dim=0
-                    )
-                )
-            )"""
             target_dict_pneumonia = {0: 1, 1: 0, 2: 2}
             dataset = ImageFolder(
                 data_dir,
@@ -135,14 +117,13 @@ def create_app(node_id, debug=False, database_url=None, data_dir: str = None):
             data.append(d)
             targets.append(t)
         selected_data = torch.stack(data)  # pylint:disable=no-member
-        selected_targets = torch.from_numpy(
-            np.array(targets)
-        )  # pylint:disable=no-member
+        selected_targets = torch.tensor(targets) # pylint:disable=not-callable
         del data, targets
         selected_data.tag(dataset_name, "#data")
         selected_targets.tag(dataset_name, "#target")
-        selected_data.send(local_worker)
-        selected_targets.send(local_worker)
+        """selected_data.send(local_worker)
+        selected_targets.send(local_worker)"""
+        local_worker.load_data([selected_data, selected_targets])
 
         print(
             "registered {:d} samples of {:s} data".format(

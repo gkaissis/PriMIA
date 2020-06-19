@@ -13,7 +13,7 @@ from warnings import warn
 from torchvision import datasets, transforms, models
 
 sys.path.insert(0, os.path.split(sys.path[0])[0])  # TODO: make prettier
-from utils import test, Arguments
+from utils import test, Arguments  # pylint:disable=import-error
 from torchlib.dataloader import PPPP
 from torchlib.models import vgg16, resnet18, conv_at_resolution
 
@@ -45,18 +45,15 @@ if __name__ == "__main__":
     parser.add_argument(
         "--encrypted_inference", action="store_true", help="Perform encrypted inference"
     )
-    parser.add_argument(
-        "--no_cuda", action="store_true", help="dont use gpu"
-    )
+    parser.add_argument("--no_cuda", action="store_true", help="dont use gpu")
     cmd_args = parser.parse_args()
 
     use_cuda = not cmd_args.no_cuda and torch.cuda.is_available()
 
-
     device = torch.device("cuda" if use_cuda else "cpu")  # pylint: disable=no-member
     state = torch.load(cmd_args.model_weights, map_location=device)
 
-    args = state['args']
+    args = state["args"]
     args.from_previous_checkpoint(cmd_args)
 
     torch.manual_seed(args.seed)
@@ -70,9 +67,8 @@ if __name__ == "__main__":
         alice = sy.VirtualWorker(hook, id="alice")
         crypto_provider = sy.VirtualWorker(hook, id="crypto_provider")
 
-
     kwargs = {"num_workers": 1, "pin_memory": True} if use_cuda else {}
-
+    class_names = None
     if args.dataset == "mnist":
         num_classes = 10
         testset = datasets.MNIST(
@@ -103,6 +99,7 @@ if __name__ == "__main__":
             )
             tf.append(repeat)
         testset = PPPP("data/Labels.csv", train=False, transform=transforms.Compose(tf))
+        class_names = {0: "normal", 1: "bacterial pneumonia", 2: "viral pneumonia"}
     else:
         raise NotImplementedError("dataset not implemented")
 
@@ -155,4 +152,13 @@ if __name__ == "__main__":
     if args.encrypted_inference:
         model.fix_precision().share(alice, bob, crypto_provider=crypto_provider)
     loss_fn = lambda x, y: torch.Tensor([0])
-    test(args, model, device, test_loader, 0, loss_fn, num_classes)
+    test(
+        args,
+        model,
+        device,
+        test_loader,
+        0,
+        loss_fn,
+        num_classes,
+        class_names=class_names,
+    )

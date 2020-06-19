@@ -2,6 +2,9 @@ import torch
 import tqdm
 import numpy as np
 import pandas as pd
+import multiprocessing as mp
+from time import sleep
+from syft.frameworks.torch.fl import utils
 from os.path import isfile
 from tabulate import tabulate
 from sklearn.metrics import confusion_matrix
@@ -127,6 +130,17 @@ class Arguments:
             else False
         )
 
+    def incorporate_cmd_args(self, cmd_args):
+        exceptions = []  # just for future
+        for attr in dir(self):
+            if (
+                not callable(getattr(self, attr))
+                and not attr.startswith("__")
+                and attr in dir(cmd_args)
+                and attr not in exceptions
+            ):
+                setattr(self, attr, getattr(cmd_args, attr))
+
     def __str__(self):
         members = [
             attr
@@ -175,6 +189,99 @@ def save_config_results(args, accuracy, timestamp, table):
     df.to_csv(table, index=False)
 
 
+def training_animation(done, message="training"):
+    i = 0
+    while not done.value:
+        if i % 4 == 0:
+            print("\r \033[K", end="{:s}".format(message), flush=True)
+            i = 1
+        else:
+            print(".", end="", flush=True)
+            i += 1
+        sleep(0.5)
+    print("\r \033[K")
+
+
+## Assuming train loaders is dictionary with {worker : train_loader}
+def train_federated(
+    args, model, device, train_loaders, optimizer, epoch, loss_fn, vis_params=None,
+):
+    model.train()
+    mng = mp.Manager()
+    result_dict = mng.dict()
+    num_workers = mng.Value("d", len(train_loaders.keys()))
+    for worker in train_loaders.keys():
+        result_dict[worker.id] = None
+    jobs = [
+        mp.Process(
+            target=train_on_server,
+            args=(
+                args,
+                model,
+                worker,
+                device,
+                train_loader,
+                optimizer.get_optim(worker.id),
+                epoch,
+                loss_fn,
+                result_dict,
+            ),
+        )
+        for worker, train_loader in train_loaders.items()
+    ]
+    for j in jobs:
+        j.start()
+    done = mng.Value("i", False)
+    animate = mp.Process(target=training_animation, args=(done,))
+    animate.start()
+    for j in jobs:
+        j.join()
+    done.value = True
+    animate.join()
+
+    assert len(result_dict.keys()) == num_workers.value, "somethings went wrong"
+
+    models, avg_loss = {}, []
+    for id, value in result_dict.items():
+        worker_model, loss = value
+        models[id] = worker_model
+        avg_loss.append(loss)
+    avg_loss = np.mean(avg_loss)
+    avg_model = utils.federated_avg(models)
+    model = avg_model
+
+    if args.visdom:
+        vis_params["vis"].line(
+            X=np.asarray([epoch]),
+            Y=np.asarray([avg_loss]),
+            win="loss_win",
+            name="train_loss",
+            update="append",
+            env=vis_params["vis_env"],
+        )
+    else:
+        print("Train Epoch: {} \tLoss: {:.6f}".format(epoch, avg_loss,))
+    return model
+
+
+def train_on_server(
+    args, model, worker, device, train_loader, optimizer, epoch, loss_fn, result_dict,
+):
+    avg_loss = []
+    model.send(worker)
+    for data, target in train_loader:
+        data, target = data.to(device), target.to(device)
+        optimizer.zero_grad()
+        output = model(data)
+        loss = loss_fn(output, target)
+        loss.backward()
+        optimizer.step()
+        loss = loss.get()
+        avg_loss.append(loss.detach().cpu().item())
+    model.get()
+    result_dict[worker.id] = (model, np.mean(avg_loss))
+
+
 def train(
     args, model, device, train_loader, optimizer, epoch, loss_fn, vis_params=None
 ):
@@ -183,10 +290,12 @@ def train(
     div = 1.0 / float(L)
     if not args.train_federated:
         opt = optimizer
-
     avg_loss = []
     for batch_idx, (data, target) in tqdm.tqdm(
-        enumerate(train_loader), leave=False, desc="training", total=L + 1
+        enumerate(train_loader),
+        leave=False,
+        desc="training epoch {:d}".format(epoch),
+        total=L + 1,
     ):  # <-- now it is a distributed dataset
         if args.train_federated:
             # print("data location: {:s}".format(str(data.location)))
@@ -223,6 +332,7 @@ def train(
                 avg_loss.append(loss.item())
     if not args.visdom:
         print("Train Epoch: {} \tLoss: {:.6f}".format(epoch, np.mean(avg_loss),))
+    return model
 
 
 def test(
@@ -249,7 +359,10 @@ def test(
         fn_per_class[i] = 0
     with torch.no_grad():
         for data, target in tqdm.tqdm(
-            test_loader, total=len(test_loader), desc="testing", leave=False
+            test_loader,
+            total=len(test_loader),
+            desc="testing epoch {:d}".format(epoch),
+            leave=False,
         ):
             if not args.encrypted_inference:
                 data = data.to(device)
@@ -377,8 +490,10 @@ def test(
                 tablefmt="fancy_grid",
             )
         )
-        total_pred = torch.cat(total_pred).cpu().numpy()
-        total_target = torch.cat(total_target).cpu().numpy()
+        total_pred = torch.cat(total_pred).cpu().numpy()  # pylint: disable=no-member
+        total_target = (
+            torch.cat(total_target).cpu().numpy()  # pylint: disable=no-member
+        )
         conf_matrix = confusion_matrix(total_target, total_pred)
         print(conf_matrix)
         if args.visdom:
