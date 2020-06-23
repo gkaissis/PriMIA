@@ -33,6 +33,50 @@ from torchlib.utils import (  # pylint:disable=import-error
 )
 
 
+def calc_class_weights(args, train_loader):
+    comparison = list(
+        torch.split(
+            torch.zeros((num_classes, args.batch_size)), 1  # pylint:disable=no-member
+        )
+    )
+    for i in range(num_classes):
+        comparison[i] += i
+    occurances = torch.zeros(num_classes)  # pylint:disable=no-member
+    for worker, tl in tqdm.tqdm(
+        train_loader.items(),
+        total=len(train_loader),
+        leave=False,
+        desc="calc class weights",
+    ):
+        if args.train_federated:
+            for i in range(num_classes):
+                comparison[i] = comparison[i].send(worker.id)
+        for _, target in tqdm.tqdm(
+            tl,
+            leave=False,
+            desc="calc class weights on {:s}".format(worker.id),
+            total=len(tl),
+        ):
+            if target.shape[0] < args.batch_size:
+                # the last batch is not considered
+                # TODO: find solution for this
+                continue
+            for i in range(num_classes):
+                n = target.eq(comparison[i]).sum().copy()
+                if args.train_federated:
+                    n = n.get()
+                occurances[i] += n.item()
+        if args.train_federated:
+            for i in range(num_classes):
+                comparison[i] = comparison[i].get()
+    if torch.sum(occurances).item() == 0:  # pylint:disable=no-member
+        warn("class weights could not be calculated - no weights are used")
+        return torch.ones((num_classes,))  # pylint:disable=no-member
+    cw = 1.0 / occurances
+    cw /= torch.sum(cw)  # pylint:disable=no-member
+    return cw
+
+
 def setup_pysyft(args, verbose=False):
     from torchlib.websocket_utils import (  # pylint:disable=import-error
         read_websocket_config,
@@ -398,24 +442,14 @@ if __name__ == "__main__":
         testset, batch_size=args.test_batch_size, shuffle=True, **kwargs
     )"""
     cw = None
-    # TODO: adapt to federated training
-    if args.class_weights and not args.train_federated:
-        if not "occurances" in locals():
-            occurances = {}
-            # if hasattr(dataset, "get_class_occurances"):
-            #    occurances = dataset.get_class_occurances()
-            # else:
-            for _, c in tqdm.tqdm(
-                dataset, total=len(dataset), leave=False, desc="calc class weights"
-            ):
-                if c.item() in occurances:
-                    occurances[c] += 1
-                else:
-                    occurances[c] = 1
-        cw = torch.zeros((len(occurances)))  # pylint: disable=no-member
-        for c, n in occurances.items():
-            cw[c] = 1.0 / float(n)
-        cw /= torch.sum(cw)  # pylint: disable=no-member
+    if args.class_weights:
+        if "occurances" in locals():
+            cw = torch.zeros((len(occurances)))  # pylint: disable=no-member
+            for c, n in occurances.items():
+                cw[c] = 1.0 / float(n)
+            cw /= torch.sum(cw)  # pylint: disable=no-member
+        else:
+            cw = calc_class_weights(args, train_loader)
         cw = cw.to(device)
 
     scheduler = LearningRateScheduler(

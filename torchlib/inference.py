@@ -55,6 +55,7 @@ if __name__ == "__main__":
 
     args = state["args"]
     args.from_previous_checkpoint(cmd_args)
+    print(str(args))
 
     torch.manual_seed(args.seed)
     torch.backends.cudnn.deterministic = True

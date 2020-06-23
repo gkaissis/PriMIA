@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import multiprocessing as mp
 from time import sleep
-from syft.frameworks.torch.fl import utils
+from syft.frameworks.torch.fl.utils import scale_model, add_model
 from os.path import isfile
 from tabulate import tabulate
 from sklearn.metrics import confusion_matrix
@@ -110,6 +110,16 @@ class Arguments:
         self.noise_std = config.getfloat("augmentation", "noise_std", fallback=1.0)
         self.noise_prob = config.getfloat("augmentation", "noise_prob", fallback=0.0)
         self.train_federated = cmd_args.train_federated if mode == "train" else False
+        if self.train_federated:
+            self.sync_every_n_batch = config.getint(
+                "federated", "sync_every_n_batch", fallback=10
+            )
+            self.wait_interval = config.getfloat(
+                "federated", "wait_interval", fallback=0.1
+            )
+            self.keep_optim_dict = config.getboolean(
+                "federated", "keep_optim_dict", fallback=False
+            )
         self.visdom = cmd_args.no_visdom if mode == "train" else False
         self.encrypted_inference = (
             cmd_args.encrypted_inference if mode == "inference" else False
@@ -189,6 +199,37 @@ def save_config_results(args, accuracy, timestamp, table):
     df.to_csv(table, index=False)
 
 
+## Adaption of federated averaging from syft with option of weights
+def federated_avg(models, weights: torch.Tensor = None):
+    """Calculate the federated average of a dictionary containing models.
+       The models are extracted from the dictionary
+       via the models.values() command.
+
+    Args:
+        models (Dict[Any, torch.nn.Module]): a dictionary of models
+        for which the federated average is calculated.
+
+    Returns:
+        torch.nn.Module: the module with averaged parameters.
+    """
+    if weights:
+        model = None
+        for id, partial_model in models.items():
+            scaled_model = scale_model(partial_model, weights[id])
+            if model:
+                model = add_model(model, scaled_model)
+            else:
+                model = scaled_model
+    else:
+        nr_models = len(models)
+        model_list = list(models.values())
+        model = model_list[0]
+        for i in range(1, nr_models):
+            model = add_model(model, model_list[i])
+        model = scale_model(model, (1.0 / nr_models))
+    return model
+
+
 def training_animation(done, message="training"):
     i = 0
     while not done.value:
@@ -202,16 +243,47 @@ def training_animation(done, message="training"):
     print("\r \033[K")
 
 
+def progress_animation(done, progress_dict):
+    while not done.value:
+        content, headers = [], []
+        for worker, (batch, total) in progress_dict.items():
+            headers.append(worker)
+            content.append("{:d}/{:d}".format(batch, total))
+        print(tabulate([content], headers=headers, tablefmt="plain"))
+        sleep(0.1)
+        print("\033[F" * 3)
+    print("\033[K \n \033[K \033[F \033[F")
+
+
 ## Assuming train loaders is dictionary with {worker : train_loader}
 def train_federated(
     args, model, device, train_loaders, optimizer, epoch, loss_fn, vis_params=None,
 ):
     model.train()
     mng = mp.Manager()
-    result_dict = mng.dict()
-    num_workers = mng.Value("d", len(train_loaders.keys()))
+    result_dict, waiting_for_sync_dict, sync_dict, progress_dict, loss_dict = (
+        mng.dict(),
+        mng.dict(),
+        mng.dict(),
+        mng.dict(),
+        mng.dict(),
+    )
+    stop_sync, sync_completed = mng.Value("i", False), mng.Value("i", False)
+    # num_workers = mng.Value("d", len(train_loaders.keys()))
     for worker in train_loaders.keys():
         result_dict[worker.id] = None
+        waiting_for_sync_dict[worker.id] = False
+        progress_dict[worker.id] = (0, len(train_loaders[worker]))
+
+    total_batches = 0
+    weights = []
+    w_dict = {}
+    for id, (_, batches) in progress_dict.items():
+        total_batches += batches
+        weights.append(batches)
+    weights = np.array(weights) / total_batches
+    for weight, id in zip(weights, progress_dict.keys()):
+        w_dict[id] = weight
     jobs = [
         mp.Process(
             target=train_on_server,
@@ -221,34 +293,46 @@ def train_federated(
                 worker,
                 device,
                 train_loader,
-                optimizer.get_optim(worker.id),
+                optimizer,
                 epoch,
                 loss_fn,
                 result_dict,
+                waiting_for_sync_dict,
+                sync_dict,
+                sync_completed,
+                progress_dict,
+                loss_dict,
             ),
         )
         for worker, train_loader in train_loaders.items()
     ]
     for j in jobs:
         j.start()
+    synchronize = mp.Process(
+        target=synchronizer,
+        args=(
+            result_dict,
+            waiting_for_sync_dict,
+            sync_dict,
+            stop_sync,
+            sync_completed,
+            w_dict,
+        ),
+        kwargs={"wait_interval": args.wait_interval},
+    )
+    synchronize.start()
     done = mng.Value("i", False)
-    animate = mp.Process(target=training_animation, args=(done,))
+    animate = mp.Process(target=progress_animation, args=(done, progress_dict))
     animate.start()
     for j in jobs:
         j.join()
+    stop_sync.value = True
+    synchronize.join()
     done.value = True
     animate.join()
 
-    assert len(result_dict.keys()) == num_workers.value, "somethings went wrong"
-
-    models, avg_loss = {}, []
-    for id, value in result_dict.items():
-        worker_model, loss = value
-        models[id] = worker_model
-        avg_loss.append(loss)
-    avg_loss = np.mean(avg_loss)
-    avg_model = utils.federated_avg(models)
-    model = avg_model
+    model = sync_dict["model"]
+    avg_loss = np.average(loss_dict.values(), weights=weights)
 
     if args.visdom:
         vis_params["vis"].line(
@@ -264,12 +348,99 @@ def train_federated(
     return model
 
 
-def train_on_server(
-    args, model, worker, device, train_loader, optimizer, epoch, loss_fn, result_dict,
+def synchronizer(
+    result_dict,
+    waiting_for_sync_dict,
+    sync_dict,
+    stop,
+    sync_completed,
+    weights,
+    wait_interval=0.1,
 ):
+    while not stop.value:
+        while not all(waiting_for_sync_dict.values()) and not stop.value:
+            sleep(0.1)
+        # print("synchronizing: models from {:s}".format(str(result_dict.keys())))
+        if len(result_dict) == 1:
+            for model in result_dict.values():
+                sync_dict["model"] = model
+        elif len(result_dict) == 0:
+            return None
+        else:
+            models = {}
+            for id, worker_model in result_dict.items():
+                models[id] = worker_model
+            ## could be weighted here
+            ## just add weights=weights
+            avg_model = federated_avg(models)
+            sync_dict["model"] = avg_model
+        for k in waiting_for_sync_dict.keys():
+            waiting_for_sync_dict[k] = False
+        ## In theory we should clear the models here
+        ## However, if one worker has more samples than any other worker,
+        ## but has imbalanced data this destroys our training.
+        ## By keeping the last model of each worker in the dict,
+        ## we still assure that it's training is not lost
+        # result_dict.clear()
+        sync_completed.value = True
+
+
+def train_on_server(
+    args,
+    model,
+    worker,
+    device,
+    train_loader,
+    optim,
+    epoch,
+    loss_fn,
+    result_dict,
+    waiting_for_sync_dict,
+    sync_dict,
+    sync_completed,
+    progress_dict,
+    loss_dict,
+):
+    optimizer = optim.get_optim(worker.id)
     avg_loss = []
     model.send(worker)
-    for data, target in train_loader:
+    L = len(train_loader)
+    for batch_idx, (data, target) in enumerate(train_loader):
+        progress_dict[worker.id] = (batch_idx, L)
+        if (
+            # batch_idx % int(0.1 * L) == 0 and batch_idx > 0
+            batch_idx % args.sync_every_n_batch == 0
+            and batch_idx > 0
+        ):  # synchronize models
+            model = model.get()
+            result_dict[worker.id] = model
+            sync_completed.value = False
+            waiting_for_sync_dict[worker.id] = True
+            while not sync_completed.value:
+                sleep(args.wait_interval)
+            model = sync_dict["model"]
+            if args.keep_optim_dict:
+                state_dict = optimizer.state_dict()
+                for k, v in state_dict["state"].items():
+                    for x, y in v.items():
+                        if torch.is_tensor(y):
+                            state_dict["state"][k][x] = y.get()
+            kwargs = {"lr": args.lr, "weight_decay": args.weight_decay}
+            if args.optimizer == "Adam":
+                kwargs["betas"] = (args.beta1, args.beta2)
+            optimizer.__init__(model.parameters(), **kwargs)
+            if args.keep_optim_dict:
+                optimizer.load_state_dict(state_dict)
+                for state in optimizer.state.values():
+                    for k, v in state.items():
+                        if torch.is_tensor(v):
+                            state[k] = v.send(worker)
+                        elif type(v) is dict:
+                            for x, y in v.items():
+                                if torch.is_tensor(y):
+                                    state[k][x] = y.send(worker)
+            model.train()
+            model.send(worker)
         data, target = data.to(device), target.to(device)
         optimizer.zero_grad()
         output = model(data)
@@ -279,7 +450,11 @@ def train_on_server(
         loss = loss.get()
         avg_loss.append(loss.detach().cpu().item())
     model.get()
-    result_dict[worker.id] = (model, np.mean(avg_loss))
+    result_dict[worker.id] = model
+    loss_dict[worker.id] = np.mean(avg_loss)
+    progress_dict[worker.id] = (batch_idx + 1, L)
+    del waiting_for_sync_dict[worker.id]
+    optim.optimizers[worker.id] = optimizer
 
 
 def train(
