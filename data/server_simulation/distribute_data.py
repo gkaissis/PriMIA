@@ -1,5 +1,6 @@
 import os
 import pandas as pd
+from random import shuffle, seed
 from tqdm import tqdm
 from shutil import copyfile
 
@@ -25,9 +26,15 @@ Only execute this from 4P/data/server_simulation"""
     worker_imgs = {name: [] for name in worker_dirs}
     L = len(labels)
     num_workers = len(worker_dirs)
-    for i in tqdm(range(L), total=L, leave=False):
+    shuffled_idcs = list(range(L))
+    seed(0)
+    shuffle(shuffled_idcs)
+    for i in range(num_workers):
+        idcs_worker = shuffled_idcs[i::num_workers]
+        worker_imgs[worker_dirs[i]] = [labels.iloc[j] for j in idcs_worker]
+    """for i in tqdm(range(L), total=L, leave=False):
         sample = labels.iloc[i]
-        worker_imgs[worker_dirs[i % num_workers]].append(sample)
+        worker_imgs[worker_dirs[i % num_workers]].append(sample)"""
     for c in class_names.values():
         p = os.path.join("all_samples", c)
         if not os.path.isdir(p):

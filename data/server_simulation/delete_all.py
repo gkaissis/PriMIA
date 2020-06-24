@@ -1,5 +1,6 @@
 import os
 
+
 if __name__ == "__main__":
     cur_path = os.path.abspath(os.getcwd())
 
@@ -19,7 +20,7 @@ if __name__ == "__main__":
     for dirpath, dirnames, filenames in os.walk("."):
         if not "all_samples" in dirpath:
             img_files = [f for f in filenames if f.endswith(".jpeg")]
-            for filename in img_files[1:]:
+            for filename in img_files:
                 os.remove(os.path.join(dirpath, filename))
                 i += 1
     print("Deleted {:d} images".format(i))
