@@ -30,8 +30,13 @@ KEEP_LABELS_DICT = {
 }
 
 
-
-def create_app(node_id, debug=False, database_url=None, data_dir: str = None):
+def create_app(
+    node_id,
+    debug=False,
+    database_url=None,
+    data_dir: str = None,
+    config_file: str = None,
+):
     """ Create / Configure flask socket application instance.
         
         Args:
@@ -68,11 +73,37 @@ def create_app(node_id, debug=False, database_url=None, data_dir: str = None):
 
     # add data
     if data_dir:
-        print("register data")
-        if "mnist" in data_dir.lower():
+        import configparser
+        from torchlib.utils import Arguments
+        from os import path
+        from argparse import Namespace
+        from random import seed as r_seed
 
-            # selected_data = dataset.data.unsqueeze(1)
-            # selected_targets = dataset.targets
+        config = configparser.ConfigParser()
+        assert path.isfile(config_file), "config file not found"
+        config.read(config_file)
+        cmd_args = Namespace(
+            dataset="mnist" if "mnist" in data_dir.lower() else "pneumonia",
+            no_visdom=False,
+            no_cuda=False,
+            train_federated=True,
+            websockets=True,
+            verbose=True,
+        )
+        args = Arguments(cmd_args, config, mode="train", verbose=False)
+        torch.manual_seed(args.seed)
+        r_seed(args.seed)
+        np.random.seed(args.seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+        if args.dataset == "mnist":
+            node_id = local_worker.id
+            KEEP_LABELS_DICT = {
+                "alice": [0, 1, 2, 3],
+                "bob": [4, 5, 6],
+                "charlie": [7, 8, 9],
+                None: list(range(10)),
+            }
             dataset = LabelMNIST(
                 labels=KEEP_LABELS_DICT[node_id]
                 if node_id in KEEP_LABELS_DICT
@@ -84,25 +115,21 @@ def create_app(node_id, debug=False, database_url=None, data_dir: str = None):
                     [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,)),]
                 ),
             )
-
-            dataset_name = "mnist"
-
         else:
-
             train_tf = [
-                transforms.RandomVerticalFlip(p=0.5),
+                transforms.RandomVerticalFlip(p=args.vertical_flip_prob),
                 transforms.RandomAffine(
-                    degrees=30,
-                    translate=(0, 0),
-                    scale=(0.85, 1.15),
-                    shear=10,
-                    #    fillcolor=0.0,
+                    degrees=args.rotation,
+                    translate=(args.translate, args.translate),
+                    scale=(1.0 - args.scale, 1.0 + args.scale),
+                    shear=args.shear,
+                    #    fillcolor=0,
                 ),
-                transforms.Resize(224),
-                transforms.CenterCrop(224),
+                transforms.Resize(args.inference_resolution),
+                transforms.RandomCrop(args.train_resolution),
                 transforms.ToTensor(),
                 transforms.Normalize((0.57282609,), (0.17427578,)),
-                transforms.RandomApply([AddGaussianNoise(mean=0.0, std=0.05)], p=0.5),
+                AddGaussianNoise(mean=0.0, std=args.noise_std, p=args.noise_prob),
             ]
             target_dict_pneumonia = {0: 1, 1: 0, 2: 2}
             dataset = ImageFolder(
@@ -110,26 +137,35 @@ def create_app(node_id, debug=False, database_url=None, data_dir: str = None):
                 transform=transforms.Compose(train_tf),
                 target_transform=lambda x: target_dict_pneumonia[x],
             )
-            dataset_name = "pneumonia"
 
         data, targets = [], []
-        for d, t in tqdm(dataset, total=len(dataset)):
-            data.append(d)
-            targets.append(t)
+        for j in tqdm(
+            range(args.repetitions_dataset),
+            total=args.repetitions_dataset,
+            leave=False,
+            desc="register data on {:s}".format(local_worker.id),
+        ):
+            for d, t in tqdm(
+                dataset,
+                total=len(dataset),
+                leave=False,
+                desc="register data {:d}. time".format(j),
+            ):
+                data.append(d)
+                targets.append(t)
         selected_data = torch.stack(data)  # pylint:disable=no-member
-        selected_targets = torch.tensor(targets) # pylint:disable=not-callable
+        selected_targets = torch.tensor(targets)  # pylint:disable=not-callable
         del data, targets
-        selected_data.tag(dataset_name, "#data")
-        selected_targets.tag(dataset_name, "#target")
-        """selected_data.send(local_worker)
-        selected_targets.send(local_worker)"""
+        selected_data.tag(args.dataset, "#data")
+        selected_targets.tag(args.dataset, "#target")
         local_worker.load_data([selected_data, selected_targets])
 
         print(
             "registered {:d} samples of {:s} data".format(
-                selected_data.size(0), dataset_name
+                selected_data.size(0), args.dataset
             )
         )
+        del selected_data, selected_targets
 
         # print(local_worker.request_search(dataset, location=local_worker))
 

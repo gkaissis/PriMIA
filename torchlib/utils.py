@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import multiprocessing as mp
 from time import sleep
+from random import random
 from syft.frameworks.torch.fl.utils import scale_model, add_model
 from os.path import isfile
 from tabulate import tabulate
@@ -67,7 +68,7 @@ class LearningRateScheduler:
 
 
 class Arguments:
-    def __init__(self, cmd_args, config, mode="train"):
+    def __init__(self, cmd_args, config, mode="train", verbose=True):
         assert mode in ["train", "inference"], "no other mode known"
         self.batch_size = config.getint("config", "batch_size", fallback=1)
         self.test_batch_size = config.getint("config", "test_batch_size", fallback=1)
@@ -120,6 +121,19 @@ class Arguments:
             self.keep_optim_dict = config.getboolean(
                 "federated", "keep_optim_dict", fallback=False
             )
+            self.repetitions_dataset = config.getint(
+                "federated", "repetitions_dataset", fallback=1
+            )
+            if self.repetitions_dataset > 1:
+                self.epochs = int(self.epochs / self.repetitions_dataset)
+                if verbose:
+                    print(
+                        "Number of epochs was decreased to "
+                        "{:d} because of {:d} repetitions of dataset".format(
+                            self.epochs, self.repetitions_dataset
+                        )
+                    )
+
         self.visdom = cmd_args.no_visdom if mode == "train" else False
         self.encrypted_inference = (
             cmd_args.encrypted_inference if mode == "inference" else False
@@ -163,12 +177,16 @@ class Arguments:
         return tabulate(rows)
 
 
-class AddGaussianNoise(object):
-    def __init__(self, mean=0.0, std=1.0):
+class AddGaussianNoise(torch.nn.Module):
+    def __init__(self, mean=0.0, std=1.0, p=None):
+        super(AddGaussianNoise, self).__init__()
         self.std = std
         self.mean = mean
+        self.p = p
 
-    def __call__(self, tensor):
+    def forward(self, tensor):
+        if self.p and self.p < random():
+            return tensor
         return (
             tensor
             + torch.randn(tensor.size()) * self.std  # pylint: disable=no-member
@@ -176,8 +194,8 @@ class AddGaussianNoise(object):
         )
 
     def __repr__(self):
-        return self.__class__.__name__ + "(mean={0}, std={1})".format(
-            self.mean, self.std
+        return self.__class__.__name__ + "(mean={0}, std={1}{:s})".format(
+            self.mean, self.std, ", apply prob={:f}".format(self.p) if self.p else ""
         )
 
 
@@ -418,27 +436,12 @@ def train_on_server(
             waiting_for_sync_dict[worker.id] = True
             while not sync_completed.value:
                 sleep(args.wait_interval)
-            model = sync_dict["model"]
-            if args.keep_optim_dict:
-                state_dict = optimizer.state_dict()
-                for k, v in state_dict["state"].items():
-                    for x, y in v.items():
-                        if torch.is_tensor(y):
-                            state_dict["state"][k][x] = y.get()
-            kwargs = {"lr": args.lr, "weight_decay": args.weight_decay}
-            if args.optimizer == "Adam":
-                kwargs["betas"] = (args.beta1, args.beta2)
-            optimizer.__init__(model.parameters(), **kwargs)
-            if args.keep_optim_dict:
-                optimizer.load_state_dict(state_dict)
-                for state in optimizer.state.values():
-                    for k, v in state.items():
-                        if torch.is_tensor(v):
-                            state[k] = v.send(worker)
-                        elif type(v) is dict:
-                            for x, y in v.items():
-                                if torch.is_tensor(y):
-                                    state[k][x] = y.send(worker)
+            model.load_state_dict(sync_dict["model"].state_dict())
+            if not args.keep_optim_dict:
+                kwargs = {"lr": args.lr, "weight_decay": args.weight_decay}
+                if args.optimizer == "Adam":
+                    kwargs["betas"] = (args.beta1, args.beta2)
+                optimizer.__init__(model.parameters(), **kwargs)
             model.train()
             model.send(worker)
         data, target = data.to(device), target.to(device)
@@ -514,7 +517,7 @@ def test(
     args,
     model,
     device,
-    test_loader,
+    val_loader,
     epoch,
     loss_fn,
     num_classes,
@@ -522,6 +525,13 @@ def test(
     class_names=None,
 ):
     model.eval()
+    """if args.train_federated:
+        assert (
+            type(val_loader) is tuple
+        ), "val loader should be tuple, was no validation loader specified?"
+        model.send(val_loader[0])
+        val_tuple = val_loader
+        val_loader = val_tuple[1]"""
     test_loss = 0
     TP = 0
     tp_per_class = {}
@@ -534,8 +544,8 @@ def test(
         fn_per_class[i] = 0
     with torch.no_grad():
         for data, target in tqdm.tqdm(
-            test_loader,
-            total=len(test_loader),
+            val_loader,
+            total=len(val_loader),
             desc="testing epoch {:d}".format(epoch),
             leave=False,
         ):
@@ -545,9 +555,15 @@ def test(
             # print(model)
             # exit()
             output = model(data)
-            test_loss += loss_fn(output, target).item()  # sum up batch loss
+            loss = loss_fn(output, target)
+            #if args.train_federated:
+            #    loss = loss.get()
+            test_loss += loss.item()  # sum up batch loss
             pred = output.argmax(dim=1)
             tgts = target.view_as(pred)
+            #if args.train_federated:
+            #    pred = pred.get()
+            #    tgts = tgts.get()
             total_pred.append(pred)
             total_target.append(tgts)
             equal = pred.eq(tgts)
@@ -565,12 +581,19 @@ def test(
                     if not equal[i]:
                         fp_per_class[p] += 1
                 TP += equal.sum().item()
-
-    test_loss /= len(test_loader)
-    objective = 100.0 * TP / (len(test_loader) * args.test_batch_size)
+    test_loss /= len(val_loader)
+    objective = 100.0 * TP / (len(val_loader) * args.test_batch_size)
+    #if args.train_federated:
+    #    model = model.get()
+    L = (
+        #len(val_loader.federated_dataset)
+        #if args.train_federated
+        #else 
+        len(val_loader.dataset)
+    )
     print(
         "Test set: Epoch: {:d} Average loss: {:.4f}, Recall: {}/{} ({:.0f}%)\n".format(
-            epoch, test_loss, TP, len(test_loader.dataset), objective,
+            epoch, test_loss, TP, L, objective,
         ),
         # end="",
     )
@@ -578,7 +601,7 @@ def test(
         rows = []
         tn_per_class = {}
         accs, recs, precs, f1s, total_per_class = [], [], [], [], []
-        total_items = len(test_loader.dataset)
+        total_items = L
         for i, fp in fp_per_class.items():
             total = tp_per_class[i] + fn_per_class[i]
             total_per_class.append(total)
@@ -688,6 +711,7 @@ def test(
                 update="append",
                 env=vis_params["vis_env"],
             )
+
     return test_loss, objective
 
 

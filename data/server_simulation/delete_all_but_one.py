@@ -5,8 +5,8 @@ if __name__ == "__main__":
 
     if os.path.split(cur_path)[1] != "server_simulation":
         print(
-            """Be very careful, this script creates folders and distributes data.
-    Only execute this from 4P/data/server_simulation"""
+            "Be very careful, this script creates folders and distributes data."
+            "Only execute this from 4P/data/server_simulation"
         )
         inpt = input("Do you really wish to proceed? [y/N]").lower()
         if inpt not in ["y", "yes"] or input(
@@ -17,7 +17,10 @@ if __name__ == "__main__":
 
     i = 0
     for dirpath, dirnames, filenames in os.walk("."):
-        if not "all_samples" in dirpath:
+        d = dirpath.split("/")
+        if len(d) == 3 and (
+            not any(exception in d[-2] for exception in ["all_samples", "validation"])
+        ):
             img_files = [f for f in filenames if f.endswith(".jpeg")]
             for filename in img_files[1:]:
                 os.remove(os.path.join(dirpath, filename))

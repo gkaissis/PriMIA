@@ -138,4 +138,5 @@ configs/websetting/config_copy.csv
 data/*_clients/*/
 data/LabelMNIST
 data/server_simulation/all_samples
+data/server_simulation/validation
 data/server_simulation/worker*

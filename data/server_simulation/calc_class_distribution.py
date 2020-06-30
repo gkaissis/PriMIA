@@ -5,7 +5,7 @@ if __name__ == "__main__":
     cur_path = os.path.abspath(os.getcwd())
 
     if os.path.split(cur_path)[1] != "server_simulation":
-        print("""This script only works one level above the folder structure""")
+        print("This script only works one level above the folder structure")
         inpt = input("Do you wish to proceed? [y/N]").lower()
         if inpt not in ["y", "yes"]:
             print("aborting")
@@ -28,11 +28,21 @@ if __name__ == "__main__":
     headers = set()
     for d in dist_per_worker.values():
         headers |= set(d.keys())
-    print(headers)
+    headers = list(headers)
+    total = {h: 0 for h in headers}
     for worker, class_dist_dict in dist_per_worker.items():
         row = [worker]
+        x = 0
         for h in headers:
-            row.append(class_dist_dict[h])
+            n = class_dist_dict[h]
+            total[h] += n
+            x += n
+            row.append(n)
+        row.append(x)
         rows.append(row)
-    print(dist_per_worker)
+    sum_row = ["sum"]
+    sum_row.extend([total[h] for h in headers])
+    sum_row.append(sum(total.values()))
+    rows.append(sum_row)
+    headers.append("total")
     print(tabulate(rows, headers=headers))

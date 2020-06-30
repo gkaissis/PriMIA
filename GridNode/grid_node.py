@@ -56,6 +56,10 @@ parser.add_argument(
     "--data_directory", default=None, help="Directory where pneumonia data is stored"
 )
 
+parser.add_argument(
+    "--config", type=str, required=True, help="Path to config",
+)
+
 parser.set_defaults(use_test_config=False)
 
 if __name__ == "__main__":
@@ -63,7 +67,11 @@ if __name__ == "__main__":
 
     # Create app
     app = create_app(
-        args.id, debug=False, database_url=args.db_url, data_dir=args.data_directory
+        args.id,
+        debug=False,
+        database_url=args.db_url,
+        data_dir=args.data_directory,
+        config_file=args.config,
     )
 
     # If using a Gateway URL start the connection
@@ -97,5 +105,9 @@ else:
             ),
         )
     app = create_app(
-        node_id, debug=False, database_url=db_address, data_dir=args.data_directory
+        node_id,
+        debug=False,
+        database_url=db_address,
+        data_dir=args.data_directory,
+        config_file=args.config,
     )
