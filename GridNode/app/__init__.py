@@ -156,8 +156,8 @@ def create_app(
         selected_data = torch.stack(data)  # pylint:disable=no-member
         selected_targets = torch.tensor(targets)  # pylint:disable=not-callable
         del data, targets
-        selected_data.tag(args.dataset, "#data")
-        selected_targets.tag(args.dataset, "#target")
+        selected_data.tag(args.dataset, "#traindata")
+        selected_targets.tag(args.dataset, "#traintargets")
         local_worker.load_data([selected_data, selected_targets])
 
         print(

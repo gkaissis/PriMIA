@@ -84,9 +84,6 @@ def setup_pysyft(args, verbose=False):
         read_websocket_config,
     )
 
-    # torch.set_num_threads(1)  # pylint:disable=no-member
-    # hook.local_worker.is_client_worker = False
-    # server = hook.local_worker
     worker_dict = read_websocket_config("configs/websetting/config.csv")
     worker_names = [id_dict["id"] for _, id_dict in worker_dict.items()]
     """if "validation" in worker_names:
@@ -138,31 +135,21 @@ def setup_pysyft(args, verbose=False):
                     ),
                 )
             elif args.dataset == "pneumonia":
-                if worker.id == "validation":
-                    train_tf = [
-                        transforms.Resize(args.inference_resolution),
-                        transforms.CenterCrop(args.train_resolution),
-                        transforms.ToTensor(),
-                        transforms.Normalize((0.57282609,), (0.17427578,)),
-                    ]
-                else:
-                    train_tf = [
-                        transforms.RandomVerticalFlip(p=args.vertical_flip_prob),
-                        transforms.RandomAffine(
-                            degrees=args.rotation,
-                            translate=(args.translate, args.translate),
-                            scale=(1.0 - args.scale, 1.0 + args.scale),
-                            shear=args.shear,
-                            #    fillcolor=0,
-                        ),
-                        transforms.Resize(args.inference_resolution),
-                        transforms.RandomCrop(args.train_resolution),
-                        transforms.ToTensor(),
-                        transforms.Normalize((0.57282609,), (0.17427578,)),
-                        AddGaussianNoise(
-                            mean=0.0, std=args.noise_std, p=args.noise_prob
-                        ),
-                    ]
+                train_tf = [
+                    transforms.RandomVerticalFlip(p=args.vertical_flip_prob),
+                    transforms.RandomAffine(
+                        degrees=args.rotation,
+                        translate=(args.translate, args.translate),
+                        scale=(1.0 - args.scale, 1.0 + args.scale),
+                        shear=args.shear,
+                        #    fillcolor=0,
+                    ),
+                    transforms.Resize(args.inference_resolution),
+                    transforms.RandomCrop(args.train_resolution),
+                    transforms.ToTensor(),
+                    transforms.Normalize((0.57282609,), (0.17427578,)),
+                    AddGaussianNoise(mean=0.0, std=args.noise_std, p=args.noise_prob),
+                ]
                 target_dict_pneumonia = {0: 1, 1: 0, 2: 2}
                 dataset = datasets.ImageFolder(
                     # path.join("data/server_simulation/", "validation")
@@ -178,12 +165,10 @@ def setup_pysyft(args, verbose=False):
                     "federation for virtual workers for this dataset unknown"
                 )
             data, targets = [], []
-            repetitions = (  # 1 if worker.id == "validation" else
-                args.repetitions_dataset
-            )
+            # repetitions = 1 if worker.id == "validation" else args.repetitions_dataset
             for j in tqdm.tqdm(
-                range(repetitions),
-                total=repetitions,
+                range(args.repetitions_dataset),
+                total=args.repetitions_dataset,
                 leave=False,
                 desc="register data on {:s}".format(worker.id),
             ):
@@ -227,19 +212,8 @@ def setup_pysyft(args, verbose=False):
         )
         train_loader[workers[worker]] = tl
 
-    """data = grid.search(args.dataset, "#valdata")
+    data = grid.search(args.dataset, "#valdata")
     target = grid.search(args.dataset, "#valtargets")
-    if "validation" in data.keys():
-        val_set = sy.FederatedDataset(
-            [sy.BaseDataset(data["validation"][0], target["validation"][0],)]
-        )
-        val_loader = (
-            workers["validation"],
-            sy.FederatedDataLoader(
-                val_set, batch_size=args.test_batch_size, shuffle=False
-            ),
-        )
-        print("Found {:d} validation images".format(len(val_set)))"""
     if args.dataset == "mnist":
         valset = LabelMNIST(
             labels=list(range(10)),
@@ -267,12 +241,16 @@ def setup_pysyft(args, verbose=False):
         valset, batch_size=args.test_batch_size, shuffle=False
     )
     assert len(train_loader.keys()) == (
-        # len(workers.keys()) - 1 if "validation" in workers.keys() else
         len(workers.keys())
     ), "data was not correctly loaded"
-    print("Found a total dataset with {:d} samples on remote workers".format(total_L))
+
     print(
-        "Found a total validation set with {:d} samples on remote workers".format(
+        "Found a total dataset with {:d} samples on remote workers".format(
+            sum([len(dl.federated_dataset) for dl in train_loader.values()])
+        )
+    )
+    print(
+        "Found a total validation set with {:d} samples (locally)".format(
             len(val_loader.dataset)
         )
     )
@@ -339,9 +317,7 @@ if __name__ == "__main__":
         "federated" if args.train_federated else "vanilla", args.dataset, timestamp
     )
 
-    """
-    Dataset creation and definition
-    """
+    # Dataset creation and definition
     dataset_classes = {"mnist": 10, "pneumonia": 3}
     num_classes = dataset_classes[args.dataset]
     class_name_dict = {
@@ -386,10 +362,8 @@ if __name__ == "__main__":
             )
 
         elif args.dataset == "pneumonia":
-            """
-            Different train and inference resolution only works with adaptive
-            pooling in model activated
-            """
+            # Different train and inference resolution only works with adaptive
+            # pooling in model activated
 
             train_tf = [
                 transforms.RandomVerticalFlip(p=args.vertical_flip_prob),
@@ -413,9 +387,7 @@ if __name__ == "__main__":
                 transforms.Normalize((0.57282609,), (0.17427578,)),
             ]
 
-            """
-            Duplicate grayscale one channel image into 3 channels
-            """
+            # Duplicate grayscale one channel image into 3 channels
             if args.pretrained:
                 repeat = transforms.Lambda(
                     lambda x: torch.repeat_interleave(  # pylint: disable=no-member
@@ -502,7 +474,6 @@ if __name__ == "__main__":
             env=vis_env,
         )
         vis_params = {"vis": vis, "vis_env": vis_env}
-    # model = Net().to(device)
     if args.model == "vgg16":
         model = vgg16(
             pretrained=args.pretrained,
@@ -518,19 +489,6 @@ if __name__ == "__main__":
         model = conv_at_resolution[args.train_resolution](
             num_classes=num_classes, in_channels=3 if args.dataset == "pneumonia" else 1
         )
-        """if args.train_federated:
-            
-            data_shape = torch.ones(  # pylint: disable=no-member
-                (
-                    args.batch_size,
-                    3 if args.dataset == "pneumonia" else 1,
-                    args.train_resolution,
-                    args.train_resolution,
-                ),
-                device=device,
-            )
-            print(data_shape.size())
-            model.build(data_shape)"""
     elif args.model == "resnet-18":
         model = resnet18(
             pretrained=args.pretrained,
@@ -542,9 +500,6 @@ if __name__ == "__main__":
     else:
         raise NotImplementedError("model unknown")
 
-    # model = resnet18(pretrained=False, num_classes=num_classes, in_channels=1)
-    # model = models.vgg16(pretrained=False, num_classes=3)
-    # model.classifier = vggclassifier()
     if args.optimizer == "SGD":
         optimizer = optim.SGD(
             model.parameters(), lr=args.lr, weight_decay=args.weight_decay,
@@ -684,18 +639,6 @@ if __name__ == "__main__":
     state = torch.load(best_model_file, map_location=device)
     model.load_state_dict(state["model_state_dict"])
 
-    """_, result = test(
-        args,
-        model,
-        device,
-        val_loader,
-        args.epochs + 1,
-        loss_fn,
-        num_classes=num_classes,
-        vis_params=vis_params,
-        class_names=class_names,
-    )
-    print('result: {:.1f} - best accuracy: {:.1f}'.format(result, accuracies[am]))"""
     shutil.copyfile(
         best_model_file, "model_weights/final_{:s}.pt".format(exp_name),
     )

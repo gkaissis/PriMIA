@@ -8,7 +8,7 @@ from random import random
 from syft.frameworks.torch.fl.utils import scale_model, add_model
 from os.path import isfile
 from tabulate import tabulate
-from sklearn.metrics import confusion_matrix
+from sklearn import metrics as mt
 
 
 """
@@ -466,37 +466,20 @@ def train(
     model.train()
     L = len(train_loader)
     div = 1.0 / float(L)
-    if not args.train_federated:
-        opt = optimizer
     avg_loss = []
     for batch_idx, (data, target) in tqdm.tqdm(
         enumerate(train_loader),
         leave=False,
         desc="training epoch {:d}".format(epoch),
         total=L + 1,
-    ):  # <-- now it is a distributed dataset
-        if args.train_federated:
-            # print("data location: {:s}".format(str(data.location)))
-            model.send(data.location)  # <-- NEW: send the model to the right location
-            opt = optimizer.get_optim(data.location.id)
-            # print("target location: {:s}".format(str(target.location)))
-            # print("model location: {:s}".format(str(model.location)))
-            # model = model.to(device)
-
+    ):
         data, target = data.to(device), target.to(device)
-        opt.zero_grad()
+        optimizer.zero_grad()
         output = model(data)
         loss = loss_fn(output, target)
         loss.backward()
-        opt.step()
-        if args.train_federated:
-            # print('model location before get: {:s}'.format(str(model.location)))
-            model.get()  # <-- NEW: get the model back
-            # print('model location after get: {:s}'.format(str(model.location)))
+        optimizer.step()
         if batch_idx % args.log_interval == 0:
-            if args.train_federated:
-                loss = loss.get()  # <-- NEW: get the loss back
-
             if args.visdom:
                 vis_params["vis"].line(
                     X=np.asarray([epoch + float(batch_idx) * div - 1]),
@@ -525,13 +508,6 @@ def test(
     class_names=None,
 ):
     model.eval()
-    """if args.train_federated:
-        assert (
-            type(val_loader) is tuple
-        ), "val loader should be tuple, was no validation loader specified?"
-        model.send(val_loader[0])
-        val_tuple = val_loader
-        val_loader = val_tuple[1]"""
     test_loss = 0
     TP = 0
     tp_per_class = {}
@@ -552,45 +528,22 @@ def test(
             if not args.encrypted_inference:
                 data = data.to(device)
                 target = target.to(device)
-            # print(model)
-            # exit()
             output = model(data)
             loss = loss_fn(output, target)
-            #if args.train_federated:
-            #    loss = loss.get()
             test_loss += loss.item()  # sum up batch loss
             pred = output.argmax(dim=1)
             tgts = target.view_as(pred)
-            #if args.train_federated:
-            #    pred = pred.get()
-            #    tgts = tgts.get()
             total_pred.append(pred)
             total_target.append(tgts)
             equal = pred.eq(tgts)
-            if args.encrypted_inference:
-                TP += equal.sum().copy().get().float_precision().long().item()
-            else:
-                for i, t in enumerate(tgts):
-                    t = t.item()
-                    if equal[i]:
-                        tp_per_class[t] += 1
-                    else:
-                        fn_per_class[t] += 1
-                for i, p in enumerate(pred):
-                    p = p.item()
-                    if not equal[i]:
-                        fp_per_class[p] += 1
-                TP += equal.sum().item()
+            TP += (
+                equal.sum().copy().get().float_precision().long().item()
+                if args.encrypted_inference
+                else equal.sum().item()
+            )
     test_loss /= len(val_loader)
     objective = 100.0 * TP / (len(val_loader) * args.test_batch_size)
-    #if args.train_federated:
-    #    model = model.get()
-    L = (
-        #len(val_loader.federated_dataset)
-        #if args.train_federated
-        #else 
-        len(val_loader.dataset)
-    )
+    L = len(val_loader.dataset)
     print(
         "Test set: Epoch: {:d} Average loss: {:.4f}, Recall: {}/{} ({:.0f}%)\n".format(
             epoch, test_loss, TP, L, objective,
@@ -598,102 +551,59 @@ def test(
         # end="",
     )
     if not args.encrypted_inference:
-        rows = []
-        tn_per_class = {}
-        accs, recs, precs, f1s, total_per_class = [], [], [], [], []
-        total_items = L
-        for i, fp in fp_per_class.items():
-            total = tp_per_class[i] + fn_per_class[i]
-            total_per_class.append(total)
-            tn_per_class[i] = total_items - total - fp
-        # dataset = test_loader.dataset
-        for i, tp in tp_per_class.items():
-            total = tp + fn_per_class[i]
-            acc = 100.0 * (tp + tn_per_class[i]) / float(total_items)
-            rec = 100.0 * (tp / float(total))
-            prec = (
-                100.0 * (tp / float(tp + fp_per_class[i]))
-                if tp + fp_per_class[i]
-                else float("NaN")
-            )
-            f1_score = (2 * prec * rec) / (prec + rec) if prec + rec > 0 else 0
-            accs.append(acc)
-            recs.append(rec)
-            precs.append(prec)
-            f1s.append(f1_score)
-            rows.append(
-                [
-                    class_names[i] if class_names else i,
-                    "{:.1f} %".format(acc),
-                    "{:.1f} %".format(rec),
-                    "{:.1f} %".format(prec),
-                    "{:.1f} %".format(f1_score),
-                    total,
-                    tp,
-                    tn_per_class[i],
-                    fp_per_class[i],
-                    fn_per_class[i],
-                ]
-            )
-        """
-        Measures can be weighted s.t. larger classes have higher impact.
-        It is currently not used as it makes sense to try to have all classes evenly good not depending on the class distribution
-        weights = np.array(total_per_class, dtype=np.float64)
-        weights *= 1./np.sum(weights)
-        """
-        precs = np.array(precs)
-        # indices = ~np.isnan(precs)
-        rec = np.average(recs)
-        prec = np.average(precs)  # [indices])
-        f1_score = np.average(f1s)
-        rows.append(
-            [
-                "Mean / Total",
-                "{:.1f} %".format(
-                    np.average(accs)  # , weights=weights)
-                ),  # "{:.1f} %".format(
-                # 100.0 * ((sum(tp_per_class.values()) + sum(tn_per_class.values()))
-                # / total_items)
-                # ),
-                "{:.1f} %".format(rec),  # weights=weights)),  # recall),
-                "{:.1f} %".format(prec),  # weights=weights[indices])),
-                # 100.0 * (TP / float(TP + sum(fp_per_class.values())))
-                # if TP + sum(fp_per_class.values())
-                # else float("NaN")
-                # ),"""
-                "{:.1f} %".format(f1_score),
-                total_items,
-                TP,
-                "N/A",  # "{:d}".format(sum(tn_per_class.values())),
-                "{:d}".format(sum(fp_per_class.values())),
-                "{:d}".format(sum(fn_per_class.values())),
-            ]
-        )
-        objective = np.average(accs)  # , weights=weights)
-        print(
-            tabulate(
-                rows,
-                headers=[
-                    "Class",
-                    "Accuracy",
-                    "Recall",
-                    "Precision",
-                    "F1 score",
-                    "n total",
-                    "TP",
-                    "TN",
-                    "FP",
-                    "FN",
-                ],
-                tablefmt="fancy_grid",
-            )
-        )
         total_pred = torch.cat(total_pred).cpu().numpy()  # pylint: disable=no-member
         total_target = (
             torch.cat(total_target).cpu().numpy()  # pylint: disable=no-member
         )
-        conf_matrix = confusion_matrix(total_target, total_pred)
-        print(conf_matrix)
+        conf_matrix = mt.confusion_matrix(total_target, total_pred)
+        report = mt.classification_report(
+            total_target, total_pred, output_dict=True, zero_division=0
+        )
+        rows = []
+        for i in range(conf_matrix.shape[0]):
+            report_entry = report[str(i)]
+            row = [
+                class_names[i] if class_names else i,
+                "{:.1f} %".format(report_entry["recall"] * 100.0),
+                "{:.1f} %".format(report_entry["precision"] * 100.0),
+                "{:.1f} %".format(report_entry["f1-score"] * 100.0),
+                report_entry["support"],
+            ]
+            row.extend([conf_matrix[i, j] for j in range(conf_matrix.shape[1])])
+            rows.append(row)
+        rows.append(
+            [
+                "Overall (macro)",
+                "{:.1f} %".format(report["macro avg"]["recall"] * 100.0),
+                "{:.1f} %".format(report["macro avg"]["precision"] * 100.0),
+                "{:.1f} %".format(report["macro avg"]["f1-score"] * 100.0),
+                report["macro avg"]["support"],
+            ]
+        )
+        rows.append(
+            [
+                "Overall (weighted)",
+                "{:.1f} %".format(report["weighted avg"]["recall"] * 100.0),
+                "{:.1f} %".format(report["weighted avg"]["precision"] * 100.0),
+                "{:.1f} %".format(report["weighted avg"]["f1-score"] * 100.0),
+                report["weighted avg"]["support"],
+            ]
+        )
+        rows.append(
+            ["Micro accuracy", "{:.1f} %".format(report["accuracy"] * 100.0),]
+        )
+        objective = report["accuracy"]
+        headers = [
+            "Class",
+            "Recall",
+            "Precision",
+            "F1 score",
+            "n total",
+        ]
+        headers.extend(
+            [class_names[i] if class_names else i for i in range(conf_matrix.shape[0])]
+        )
+        print(tabulate(rows, headers=headers, tablefmt="fancy_grid",))
         if args.visdom:
             vis_params["vis"].line(
                 X=np.asarray([epoch]),
