@@ -10,22 +10,23 @@ from os.path import isfile
 from tabulate import tabulate
 from sklearn import metrics as mt
 
-
-"""
-Available schedule plans:
-log_linear : Linear interpolation with log learning rate scale
-log_cosine : Cosine interpolation with log learning rate scale
-"""
+from typing import Optional
 
 
 class LearningRateScheduler:
+    """
+    Available schedule plans:
+    log_linear : Linear interpolation with log learning rate scale
+    log_cosine : Cosine interpolation with log learning rate scale
+    """
+
     def __init__(
         self,
-        total_epochs,
-        log_start_lr,
-        log_end_lr,
-        schedule_plan="log_linear",
-        restarts=None,
+        total_epochs: int,
+        log_start_lr: float,
+        log_end_lr: float,
+        schedule_plan: str = "log_linear",
+        restarts: Optional[int] = None,
     ):
         if restarts == 0:
             restarts = None
@@ -52,7 +53,7 @@ class LearningRateScheduler:
                 )
             )
 
-    def get_lr(self, epoch):
+    def get_lr(self, epoch: int):
         epoch = epoch % self.total_epochs
         if (type(epoch) is int and epoch > self.total_epochs) or (
             type(epoch) is np.ndarray and np.max(epoch) > self.total_epochs
@@ -60,7 +61,7 @@ class LearningRateScheduler:
             raise AssertionError("Requested epoch out of precalculated schedule")
         return self.calc_lr(epoch)
 
-    def adjust_learning_rate(self, optimizer, epoch):
+    def adjust_learning_rate(self, optimizer: torch.optim.Optimizer, epoch: int):
         new_lr = self.get_lr(epoch)
         for param_group in optimizer.param_groups:
             param_group["lr"] = new_lr
@@ -68,7 +69,7 @@ class LearningRateScheduler:
 
 
 class Arguments:
-    def __init__(self, cmd_args, config, mode="train", verbose=True):
+    def __init__(self, cmd_args, config, mode: str = "train", verbose: bool = True):
         assert mode in ["train", "inference"], "no other mode known"
         self.batch_size = config.getint("config", "batch_size", fallback=1)
         self.test_batch_size = config.getint("config", "test_batch_size", fallback=1)
@@ -78,7 +79,7 @@ class Arguments:
         self.inference_resolution = config.getint(
             "config", "inference_resolution", fallback=self.train_resolution
         )
-        self.val_split = config.getint("config", "validation_split", fallback=10)
+        self.validation_split = config.getint("config", "validation_split", fallback=10)
         self.epochs = config.getint("config", "epochs", fallback=1)
         self.lr = config.getfloat("config", "lr", fallback=1e-3)
         self.end_lr = config.getfloat("config", "end_lr", fallback=self.lr)
@@ -96,9 +97,10 @@ class Arguments:
             self.beta2 = config.getfloat("config", "beta2", fallback=0.999)
         self.model = config.get("config", "model", fallback="simpleconv")
         assert self.model in ["simpleconv", "resnet-18", "vgg16"]
+        self.pooling_type = config.get("config", "pooling_type", fallback="avg")
         self.pretrained = config.getboolean("config", "pretrained", fallback=False)
         self.weight_decay = config.getfloat("config", "weight_decay", fallback=0.0)
-        self.class_weights = config.getboolean(
+        self.weight_classes = config.getboolean(
             "config", "weight_classes", fallback=False
         )
         self.vertical_flip_prob = config.getfloat(
@@ -178,13 +180,13 @@ class Arguments:
 
 
 class AddGaussianNoise(torch.nn.Module):
-    def __init__(self, mean=0.0, std=1.0, p=None):
+    def __init__(self, mean: float = 0.0, std: float = 1.0, p: Optional[float] = None):
         super(AddGaussianNoise, self).__init__()
         self.std = std
         self.mean = mean
         self.p = p
 
-    def forward(self, tensor):
+    def forward(self, tensor: torch.Tensor):
         if self.p and self.p < random():
             return tensor
         return (
@@ -199,7 +201,7 @@ class AddGaussianNoise(torch.nn.Module):
         )
 
 
-def save_config_results(args, accuracy, timestamp, table):
+def save_config_results(args, roc_auc: float, timestamp: str, table: str):
     members = [
         attr
         for attr in dir(args)
@@ -212,13 +214,13 @@ def save_config_results(args, accuracy, timestamp, table):
         df = pd.read_csv(table)
     new_row = dict(zip(members, [getattr(args, x) for x in members]))
     new_row["timestamp"] = timestamp
-    new_row["best_validation_accuracy"] = accuracy
+    new_row["best_validation_roc_auc"] = roc_auc
     df = df.append(new_row, ignore_index=True)
     df.to_csv(table, index=False)
 
 
 ## Adaption of federated averaging from syft with option of weights
-def federated_avg(models, weights: torch.Tensor = None):
+def federated_avg(models: dict, weights: Optional[torch.Tensor] = None):
     """Calculate the federated average of a dictionary containing models.
        The models are extracted from the dictionary
        via the models.values() command.
@@ -248,7 +250,7 @@ def federated_avg(models, weights: torch.Tensor = None):
     return model
 
 
-def training_animation(done, message="training"):
+def training_animation(done: mp.Value, message: str = "training"):
     i = 0
     while not done.value:
         if i % 4 == 0:
@@ -508,16 +510,8 @@ def test(
     class_names=None,
 ):
     model.eval()
-    test_loss = 0
-    TP = 0
-    tp_per_class = {}
-    fn_per_class = {}
-    fp_per_class = {}
-    total_pred, total_target = [], []
-    for i in range(num_classes):
-        tp_per_class[i] = 0
-        fp_per_class[i] = 0
-        fn_per_class[i] = 0
+    test_loss, TP = 0, 0
+    total_pred, total_target, total_scores = [], [], []
     with torch.no_grad():
         for data, target in tqdm.tqdm(
             val_loader,
@@ -531,6 +525,7 @@ def test(
             output = model(data)
             loss = loss_fn(output, target)
             test_loss += loss.item()  # sum up batch loss
+            total_scores.append(output)
             pred = output.argmax(dim=1)
             tgts = target.view_as(pred)
             total_pred.append(pred)
@@ -542,23 +537,30 @@ def test(
                 else equal.sum().item()
             )
     test_loss /= len(val_loader)
-    objective = 100.0 * TP / (len(val_loader) * args.test_batch_size)
-    L = len(val_loader.dataset)
-    print(
-        "Test set: Epoch: {:d} Average loss: {:.4f}, Recall: {}/{} ({:.0f}%)\n".format(
-            epoch, test_loss, TP, L, objective,
-        ),
-        # end="",
-    )
-    if not args.encrypted_inference:
+    if args.encrypted_inference:
+        objective = 100.0 * TP / (len(val_loader) * args.test_batch_size)
+        L = len(val_loader.dataset)
+        print(
+            "Test set: Epoch: {:d} Average loss: {:.4f}, Recall: {}/{} ({:.0f}%)\n".format(
+                epoch, test_loss, TP, L, objective,
+            ),
+            # end="",
+        )
+    else:
         total_pred = torch.cat(total_pred).cpu().numpy()  # pylint: disable=no-member
         total_target = (
             torch.cat(total_target).cpu().numpy()  # pylint: disable=no-member
         )
+        total_scores = (
+            torch.cat(total_scores).cpu().numpy()  # pylint: disable=no-member
+        )
+        total_scores -= total_scores.min(axis=1)[:, np.newaxis]
+        total_scores = total_scores / total_scores.sum(axis=1)[:, np.newaxis]
         conf_matrix = mt.confusion_matrix(total_target, total_pred)
         report = mt.classification_report(
             total_target, total_pred, output_dict=True, zero_division=0
         )
+        roc_auc = mt.roc_auc_score(total_target, total_scores, multi_class="ovo")
         rows = []
         for i in range(conf_matrix.shape[0]):
             report_entry = report[str(i)]
@@ -590,11 +592,19 @@ def test(
             ]
         )
         rows.append(
-            ["Micro accuracy", "{:.1f} %".format(report["accuracy"] * 100.0),]
+            ["Overall stats", "micro recall", "matthews coeff", "AUC ROC score"]
         )
-        objective = report["accuracy"]
+        rows.append(
+            [
+                "",
+                "{:.1f} %".format(100.0 * report["accuracy"]),
+                "{:.3f}".format(mt.matthews_corrcoef(total_target, total_pred)),
+                "{:.3f}".format(roc_auc),
+            ]
+        )
+        objective = 100.0 * roc_auc
         headers = [
-            "Class",
+            "Epoch {:d}".format(epoch),
             "Recall",
             "Precision",
             "F1 score",
@@ -617,7 +627,7 @@ def test(
                 X=np.asarray([epoch]),
                 Y=np.asarray([objective / 100.0]),
                 win="loss_win",
-                name="accuracy",
+                name="ROC AUC",
                 update="append",
                 env=vis_params["vis_env"],
             )

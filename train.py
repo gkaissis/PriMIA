@@ -32,7 +32,6 @@ from torchlib.utils import (  # pylint:disable=import-error
     save_config_results,
     AddGaussianNoise,
 )
-import kornia.augmentation as aug
 
 
 def calc_class_weights(args, train_loader):
@@ -410,7 +409,7 @@ if __name__ == "__main__":
             raise NotImplementedError("dataset not implemented")
 
         total_L = total_L if args.train_federated else len(dataset)
-        fraction = 1.0 / args.val_split
+        fraction = 1.0 / args.validation_split
         dataset, valset = torch.utils.data.random_split(
             dataset,
             [int(round(total_L * (1.0 - fraction))), int(round(total_L * fraction))],
@@ -424,7 +423,7 @@ if __name__ == "__main__":
         del total_L, fraction
 
     cw = None
-    if args.class_weights:
+    if args.weight_classes:
         if "occurances" in locals():
             cw = torch.zeros((len(occurances)))  # pylint: disable=no-member
             for c, n in occurances.items():
@@ -460,9 +459,9 @@ if __name__ == "__main__":
             Y=np.zeros((1, 3)),
             win="loss_win",
             opts={
-                "legend": ["train_loss", "val_loss", "accuracy"],
+                "legend": ["train_loss", "val_loss", "ROC AUC"],
                 "xlabel": "epochs",
-                "ylabel": "loss / accuracy [%]",
+                "ylabel": "loss / m coeff [%]",
             },
             env=vis_env,
         )
@@ -481,13 +480,16 @@ if __name__ == "__main__":
             in_channels=3 if args.dataset == "pneumonia" else 1,
             adptpool=False,
             input_size=args.inference_resolution,
+            pooling=args.pooling_type,
         )
     elif args.model == "simpleconv":
         if args.pretrained:
             warn("No pretrained version available")
 
         model = conv_at_resolution[args.train_resolution](
-            num_classes=num_classes, in_channels=3 if args.dataset == "pneumonia" else 1
+            num_classes=num_classes,
+            in_channels=3 if args.dataset == "pneumonia" else 1,
+            pooling=args.pooling_type,
         )
     elif args.model == "resnet-18":
         model = resnet18(
@@ -496,6 +498,7 @@ if __name__ == "__main__":
             in_channels=3 if args.dataset == "pneumonia" else 1,
             adptpool=False,
             input_size=args.inference_resolution,
+            pooling=args.pooling_type,
         )
     else:
         raise NotImplementedError("model unknown")
@@ -548,7 +551,7 @@ if __name__ == "__main__":
         vis_params=vis_params,
         class_names=class_names,
     )
-    accuracies = []
+    roc_auc_scores = []
     model_paths = []
     for epoch in range(start_at_epoch, args.epochs + 1):
         if args.train_federated:
@@ -610,7 +613,7 @@ if __name__ == "__main__":
                 raise e
 
         if (epoch % args.test_interval) == 0:
-            _, acc = test(
+            _, roc_auc = test(
                 args,
                 model,
                 device,
@@ -624,16 +627,18 @@ if __name__ == "__main__":
             model_path = "model_weights/{:s}_epoch_{:03d}.pt".format(exp_name, epoch,)
 
             save_model(model, optimizer, model_path, args, epoch)
-            accuracies.append(acc)
+            roc_auc_scores.append(roc_auc)
             model_paths.append(model_path)
     # reversal and formula because we want last occurance of highest value
-    accuracies = np.array(accuracies)[::-1]
-    am = np.argmax(accuracies)
-    highest_acc = len(accuracies) - am - 1
+    roc_auc_scores = np.array(roc_auc_scores)[::-1]
+    best_auc_idx = np.argmax(roc_auc_scores)
+    highest_acc = len(roc_auc_scores) - best_auc_idx - 1
     best_epoch = highest_acc * args.test_interval
     best_model_file = model_paths[highest_acc]
     print(
-        "Highest accuracy was {:.1f}% in epoch {:d}".format(accuracies[am], best_epoch)
+        "Highest ROC AUC score was {:.1f}% in epoch {:d}".format(
+            roc_auc_scores[best_auc_idx], best_epoch
+        )
     )
     # load best model on val set
     state = torch.load(best_model_file, map_location=device)
@@ -643,7 +648,10 @@ if __name__ == "__main__":
         best_model_file, "model_weights/final_{:s}.pt".format(exp_name),
     )
     save_config_results(
-        args, accuracies[am], timestamp, "model_weights/completed_trainings.csv"
+        args,
+        roc_auc_scores[best_auc_idx],
+        timestamp,
+        "model_weights/completed_trainings.csv",
     )
 
     # delete old model weights

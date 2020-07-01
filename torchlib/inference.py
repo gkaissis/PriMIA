@@ -129,12 +129,15 @@ if __name__ == "__main__":
             in_channels=3 if args.pretrained else 1,
             adptpool=False,
             input_size=args.inference_resolution,
+            pooling=args.pooling_type,
         )
     elif args.model == "simpleconv":
         if args.pretrained:
             warn("No pretrained version available")
         model = conv_at_resolution[args.train_resolution](
-            num_classes=num_classes, in_channels=3 if args.pretrained else 1
+            num_classes=num_classes,
+            in_channels=3 if args.pretrained else 1,
+            pooling=args.pooling_type,
         )
     elif args.model == "resnet-18":
         model = resnet18(
@@ -143,6 +146,7 @@ if __name__ == "__main__":
             in_channels=3 if args.pretrained else 1,
             adptpool=False,
             input_size=args.inference_resolution,
+            pooling=args.pooling_type,
         )
     else:
         raise NotImplementedError("model unknown")
