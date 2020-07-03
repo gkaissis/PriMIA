@@ -180,6 +180,7 @@ def _vgg(
     if pretrained:
         state_dict = load_state_dict_from_url(model_urls[arch], progress=progress)
         model.load_state_dict(state_dict)
+    if num_classes != 1000:
         model.classifier = nn.Sequential(
             nn.Linear(512, 512),
             nn.ReLU(inplace=True),

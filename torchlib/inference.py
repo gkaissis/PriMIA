@@ -146,7 +146,7 @@ if __name__ == "__main__":
             in_channels=3 if args.pretrained else 1,
             adptpool=False,
             input_size=args.inference_resolution,
-            pooling=args.pooling_type,
+            pooling=args.pooling_type if hasattr(args, "pooling_type") else "avg",
         )
     else:
         raise NotImplementedError("model unknown")

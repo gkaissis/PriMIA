@@ -10,7 +10,7 @@ from os.path import isfile
 from tabulate import tabulate
 from sklearn import metrics as mt
 
-from typing import Optional
+from typing import Optional, Union, Tuple, List
 
 
 class LearningRateScheduler:
@@ -112,6 +112,8 @@ class Arguments:
         self.shear = config.getfloat("augmentation", "shear", fallback=0.0)
         self.noise_std = config.getfloat("augmentation", "noise_std", fallback=1.0)
         self.noise_prob = config.getfloat("augmentation", "noise_prob", fallback=0.0)
+        self.mixup = config.getboolean("augmentation", "mixup", fallback=False)
+        self.mixup_lambda = config.getfloat("augmentation", "mixup_lambda", fallback=None)
         self.train_federated = cmd_args.train_federated if mode == "train" else False
         if self.train_federated:
             self.sync_every_n_batch = config.getint(
@@ -199,6 +201,90 @@ class AddGaussianNoise(torch.nn.Module):
         return self.__class__.__name__ + "(mean={0}, std={1}{:s})".format(
             self.mean, self.std, ", apply prob={:f}".format(self.p) if self.p else ""
         )
+
+
+class MixUp(torch.nn.Module):
+    def __init__(self, λ: Optional[float] = None):  # p: float = 0.5,
+        super(MixUp, self).__init__()
+        # assert 0.0 <= p <= 1.0, "probability needs to be in [0,1]"
+        # self.p = p
+        if λ:
+            assert 0.0 <= λ <= 1.0, "mix factor needs to be in [0,1]"
+        self.λ = λ
+
+    def forward(
+        self, x: Tuple[Union[torch.tensor, Tuple[torch.tensor]], Tuple[torch.Tensor]],
+    ):
+        assert len(x) == 2, "need data and target"
+        x, y = x
+        if not (
+            (torch.is_tensor(x) and x.shape[0] == 2)
+            or (type(x) == tuple and len(x) == 2 and (x[0].shape == x[1].shape))
+        ):
+            raise ValueError(
+                "images need to be either list of equally shaped "
+                "tensors or batch of size 2"
+            )
+        if not (len(y) == 2 and (y[0].shape == y[1].shape)):
+            raise ValueError(
+                "targets need to be tuple of equally shaped one hot encoded tensors"
+            )
+        if self.λ:
+            λ = self.λ
+        else:
+            λ = random()
+        x = λ * x[0] + (1.0 - λ) * x[1]
+        y = λ * y[0] + (1.0 - λ) * y[1]
+        return x, y
+
+
+# adapted from https://discuss.pytorch.org/t/convert-int-into-one-hot-format/507/3
+class Cross_entropy_one_hot(torch.nn.Module):
+    def __init__(self, reduction="mean", weight=None):
+        # Cross entropy that accepts soft targets
+        super(Cross_entropy_one_hot, self).__init__()
+        self.weight = weight
+        self.logsoftmax = torch.nn.LogSoftmax(dim=1)
+        if self.weight:  # TODO
+            raise NotImplementedError("not implemented yet")
+        if reduction == "mean":
+            self.loss = lambda output, target: torch.mean(  # pylint:disable=no-member
+                torch.sum(  # pylint:disable=no-member
+                    -target * self.logsoftmax(output), dim=1
+                )
+            )
+        elif reduction == "sum":
+            self.loss = lambda output, target: torch.sum(  # pylint:disable=no-member
+                torch.sum(  # pylint:disable=no-member
+                    -target * self.logsoftmax(output), dim=1
+                )
+            )
+        else:
+            raise NotImplementedError("reduction method unknown")
+
+    def forward(self, output: torch.Tensor, target: torch.Tensor):
+        return self.loss(output, target)
+
+
+class To_one_hot(torch.nn.Module):
+    def __init__(self, num_labels):
+        super(To_one_hot, self).__init__()
+        self.num_labels = num_labels
+
+    def forward(self, x: Union[int, List[int], torch.Tensor]):
+        if type(x) == int:
+            x = torch.tensor(x)  # pylint:disable=not-callable
+        elif type(x) == list:
+            x = torch.tensor(x)  # pylint:disable=not-callable
+        if len(x.shape) == 0:
+            one_hot = torch.zeros((self.num_labels,))  # pylint:disable=no-member
+            one_hot.scatter_(0, x, 1)
+            return one_hot
+        elif len(x.shape) == 1:
+            x = x.unsqueeze(1)
+        one_hot = torch.zeros((x.shape[0], self.num_labels))  # pylint:disable=no-member
+        one_hot.scatter_(1, x, 1)
+        return one_hot
 
 
 def save_config_results(args, roc_auc: float, timestamp: str, table: str):

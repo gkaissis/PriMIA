@@ -133,6 +133,7 @@ dmypy.json
 model_weights/*
 4P.ipynb
 temp.py
+minimal_script.py
 data/MNIST/
 configs/websetting/config_copy.csv
 data/*_clients/*/

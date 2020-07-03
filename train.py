@@ -31,6 +31,9 @@ from torchlib.utils import (  # pylint:disable=import-error
     save_model,
     save_config_results,
     AddGaussianNoise,
+    MixUp,
+    To_one_hot,
+    Cross_entropy_one_hot,
 )
 
 
@@ -150,13 +153,19 @@ def setup_pysyft(args, verbose=False):
                     AddGaussianNoise(mean=0.0, std=args.noise_std, p=args.noise_prob),
                 ]
                 target_dict_pneumonia = {0: 1, 1: 0, 2: 2}
+                target_tf = [lambda x: target_dict_pneumonia[x]]
+                if args.mixup:
+                    target_tf.append(
+                        lambda x: torch.tensor(x)  # pylint:disable=not-callable
+                    )
+                    target_tf.append(To_one_hot(3))
                 dataset = datasets.ImageFolder(
                     # path.join("data/server_simulation/", "validation")
                     # if worker.id == "validation"
                     # else
                     path.join("data/server_simulation/", "worker{:d}".format(i + 1)),
                     transform=transforms.Compose(train_tf),
-                    target_transform=lambda x: target_dict_pneumonia[x],
+                    target_transform=transforms.Compose(target_tf),
                 )
 
             else:
@@ -165,6 +174,12 @@ def setup_pysyft(args, verbose=False):
                 )
             data, targets = [], []
             # repetitions = 1 if worker.id == "validation" else args.repetitions_dataset
+            if args.mixup:
+                dataset = torch.utils.data.DataLoader(
+                    dataset, batch_size=1, shuffle=True
+                )
+                mixup = MixUp(args.mixup_lambda)
+                last_set = None
             for j in tqdm.tqdm(
                 range(args.repetitions_dataset),
                 total=args.repetitions_dataset,
@@ -177,10 +192,23 @@ def setup_pysyft(args, verbose=False):
                     leave=False,
                     desc="register data {:d}. time".format(j + 1),
                 ):
+                    if args.mixup:
+                        original_set = (d, t)
+                        if last_set:
+                            # pylint:disable=unsubscriptable-object
+                            d, t = mixup(((d, last_set[0]), (t, last_set[1])))
+                        last_set = original_set
                     data.append(d)
                     targets.append(t)
             selected_data = torch.stack(data)  # pylint:disable=no-member
-            selected_targets = torch.tensor(targets)  # pylint:disable=not-callable
+            selected_targets = (
+                torch.stack(targets)  # pylint:disable=no-member
+                if args.mixup
+                else torch.tensor(targets)  # pylint:disable=not-callable
+            )
+            if args.mixup:
+                selected_data = selected_data.squeeze(1)
+                selected_targets = selected_targets.squeeze(1)
             del data, targets
             selected_data.tag(
                 args.dataset,  # "#valdata" if worker.id == "validation" else
@@ -520,7 +548,10 @@ if __name__ == "__main__":
         from syft.federated.floptimizer import Optims
 
         optimizer = Optims(worker_names, optimizer)
-    loss_fn = nn.CrossEntropyLoss(weight=cw, reduction="mean")
+    if args.mixup:
+        loss_fn = Cross_entropy_one_hot(reduction="mean")
+    else:
+        loss_fn = nn.CrossEntropyLoss(weight=cw, reduction="mean")
 
     start_at_epoch = 1
     if cmd_args.resume_checkpoint:
@@ -632,12 +663,15 @@ if __name__ == "__main__":
     # reversal and formula because we want last occurance of highest value
     roc_auc_scores = np.array(roc_auc_scores)[::-1]
     best_auc_idx = np.argmax(roc_auc_scores)
-    highest_acc = len(roc_auc_scores) - best_auc_idx - 1
+    highest_acc = (
+        len(roc_auc_scores) - best_auc_idx
+    )  # actually -1 but we're switching to 1 indexed here
     best_epoch = highest_acc * args.test_interval
     best_model_file = model_paths[highest_acc]
     print(
         "Highest ROC AUC score was {:.1f}% in epoch {:d}".format(
-            roc_auc_scores[best_auc_idx], best_epoch
+            roc_auc_scores[best_auc_idx],
+            best_epoch * (args.repetitions_dataset if args.train_federated else 1),
         )
     )
     # load best model on val set
