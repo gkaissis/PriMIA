@@ -1,16 +1,16 @@
-import torch
-import tqdm
+import multiprocessing as mp
+from os.path import isfile
+from random import random
+from time import sleep
+from typing import List, Optional, Tuple, Union
+
 import numpy as np
 import pandas as pd
-import multiprocessing as mp
-from time import sleep
-from random import random
-from syft.frameworks.torch.fl.utils import scale_model, add_model
-from os.path import isfile
-from tabulate import tabulate
+import torch
+import tqdm
 from sklearn import metrics as mt
-
-from typing import Optional, Union, Tuple, List
+from syft.frameworks.torch.fl.utils import add_model, scale_model
+from tabulate import tabulate
 
 
 class LearningRateScheduler:
@@ -113,7 +113,13 @@ class Arguments:
         self.noise_std = config.getfloat("augmentation", "noise_std", fallback=1.0)
         self.noise_prob = config.getfloat("augmentation", "noise_prob", fallback=0.0)
         self.mixup = config.getboolean("augmentation", "mixup", fallback=False)
-        self.mixup_lambda = config.getfloat("augmentation", "mixup_lambda", fallback=None)
+        self.mixup_prob = config.getfloat("augmentation", "mixup_prob", fallback=None)
+        self.mixup_lambda = config.getfloat(
+            "augmentation", "mixup_lambda", fallback=None
+        )
+        if self.mixup and self.mixup_prob == 1.0:
+            self.batch_size *= 2
+            print("Doubled batch size because of mixup")
         self.train_federated = cmd_args.train_federated if mode == "train" else False
         if self.train_federated:
             self.sync_every_n_batch = config.getint(
@@ -204,10 +210,10 @@ class AddGaussianNoise(torch.nn.Module):
 
 
 class MixUp(torch.nn.Module):
-    def __init__(self, λ: Optional[float] = None):  # p: float = 0.5,
+    def __init__(self, λ: Optional[float] = None, p: Optional[float] = None):
         super(MixUp, self).__init__()
-        # assert 0.0 <= p <= 1.0, "probability needs to be in [0,1]"
-        # self.p = p
+        assert 0.0 <= p <= 1.0, "probability needs to be in [0,1]"
+        self.p = p
         if λ:
             assert 0.0 <= λ <= 1.0, "mix factor needs to be in [0,1]"
         self.λ = λ
@@ -217,25 +223,65 @@ class MixUp(torch.nn.Module):
     ):
         assert len(x) == 2, "need data and target"
         x, y = x
-        if not (
-            (torch.is_tensor(x) and x.shape[0] == 2)
-            or (type(x) == tuple and len(x) == 2 and (x[0].shape == x[1].shape))
+        if self.p:
+            if random() > self.p:
+                if torch.is_tensor(x):
+                    return x, y
+                else:
+                    return x[0], y[0]
+        if torch.is_tensor(x):
+            L = x.shape[0]
+        elif type(x) == tuple and all(
+            [x[i].shape == x[i - 1].shape for i in range(1, len(x))]
         ):
+            L = len(x)
+        else:
             raise ValueError(
                 "images need to be either list of equally shaped "
                 "tensors or batch of size 2"
             )
-        if not (len(y) == 2 and (y[0].shape == y[1].shape)):
+        if not (
+            (torch.is_tensor(y) and y.shape[0] == L)
+            or (
+                len(y) == L
+                and all([y[i - 1].shape == y[i].shape for i in range(1, len(y))])
+            )
+        ):
             raise ValueError(
                 "targets need to be tuple of equally shaped one hot encoded tensors"
             )
+        if L == 1:
+            return x, y
         if self.λ:
             λ = self.λ
         else:
             λ = random()
-        x = λ * x[0] + (1.0 - λ) * x[1]
-        y = λ * y[0] + (1.0 - λ) * y[1]
-        return x, y
+        if L % 2 == 0:
+            h = L // 2
+            if not torch.is_tensor(x):
+                x = torch.stack(x).squeeze(1)  # pylint:disable=no-member
+            if not torch.is_tensor(y):
+                y = torch.stack(y).squeeze(1)  # pylint:disable=no-member
+            x = λ * x[:h] + (1.0 - λ) * x[h:]
+            y = λ * y[:h] + (1.0 - λ) * y[h:]
+            return x, y
+        else:
+            # Actually there should be another distinction
+            # between tensors and tuples
+            # but in our use case this only happens if tensors
+            # are used
+            h = (L - 1) // 2
+            out_x = torch.zeros(  # pylint:disable=no-member
+                (h + 1, *x.shape[1:]), device=x.device
+            )
+            out_y = torch.zeros(  # pylint:disable=no-member
+                (h + 1, *y.shape[1:]), device=y.device
+            )
+            out_x[-1] = x[-1]
+            out_y[-1] = y[-1]
+            out_x[:-1] = λ * x[:h] + (1.0 - λ) * x[h:-1]
+            out_y[:-1] = λ * y[:h] + (1.0 - λ) * y[h:-1]
+            return out_x, out_y
 
 
 # adapted from https://discuss.pytorch.org/t/convert-int-into-one-hot-format/507/3
@@ -243,19 +289,29 @@ class Cross_entropy_one_hot(torch.nn.Module):
     def __init__(self, reduction="mean", weight=None):
         # Cross entropy that accepts soft targets
         super(Cross_entropy_one_hot, self).__init__()
-        self.weight = weight
+        self.weight = (
+            torch.nn.Parameter(weight, requires_grad=False) if weight else None
+        )
         self.logsoftmax = torch.nn.LogSoftmax(dim=1)
-        if self.weight:  # TODO
-            raise NotImplementedError("not implemented yet")
         if reduction == "mean":
             self.loss = lambda output, target: torch.mean(  # pylint:disable=no-member
-                torch.sum(  # pylint:disable=no-member
+                (
+                    torch.sum(self.weight * target, dim=1)  # pylint:disable=no-member
+                    if self.weight
+                    else 1.0
+                )
+                * torch.sum(  # pylint:disable=no-member
                     -target * self.logsoftmax(output), dim=1
                 )
             )
         elif reduction == "sum":
             self.loss = lambda output, target: torch.sum(  # pylint:disable=no-member
-                torch.sum(  # pylint:disable=no-member
+                (
+                    torch.sum(self.weight * target, dim=1)  # pylint:disable=no-member
+                    if self.weight
+                    else 1.0
+                )
+                * torch.sum(  # pylint:disable=no-member
                     -target * self.logsoftmax(output), dim=1
                 )
             )
@@ -277,12 +333,16 @@ class To_one_hot(torch.nn.Module):
         elif type(x) == list:
             x = torch.tensor(x)  # pylint:disable=not-callable
         if len(x.shape) == 0:
-            one_hot = torch.zeros((self.num_labels,))  # pylint:disable=no-member
+            one_hot = torch.zeros(  # pylint:disable=no-member
+                (self.num_labels,), device=x.device
+            )
             one_hot.scatter_(0, x, 1)
             return one_hot
         elif len(x.shape) == 1:
             x = x.unsqueeze(1)
-        one_hot = torch.zeros((x.shape[0], self.num_labels))  # pylint:disable=no-member
+        one_hot = torch.zeros(  # pylint:disable=no-member
+            (x.shape[0], self.num_labels), device=x.device
+        )
         one_hot.scatter_(1, x, 1)
         return one_hot
 
@@ -510,6 +570,7 @@ def train_on_server(
     optimizer = optim.get_optim(worker.id)
     avg_loss = []
     model.send(worker)
+    loss_fn.send(worker)
     L = len(train_loader)
     for batch_idx, (data, target) in enumerate(train_loader):
         progress_dict[worker.id] = (batch_idx, L)
@@ -541,6 +602,7 @@ def train_on_server(
         loss = loss.get()
         avg_loss.append(loss.detach().cpu().item())
     model.get()
+    loss_fn.get()
     result_dict[worker.id] = model
     loss_dict[worker.id] = np.mean(avg_loss)
     progress_dict[worker.id] = (batch_idx + 1, L)
@@ -552,6 +614,11 @@ def train(
     args, model, device, train_loader, optimizer, epoch, loss_fn, vis_params=None
 ):
     model.train()
+    if args.mixup:
+        mixup = MixUp(λ=args.mixup_lambda, p=args.mixup_prob)
+        oh_converter = To_one_hot(3)
+        oh_converter.to(device)
+
     L = len(train_loader)
     div = 1.0 / float(L)
     avg_loss = []
@@ -562,6 +629,10 @@ def train(
         total=L + 1,
     ):
         data, target = data.to(device), target.to(device)
+        if args.mixup:
+            with torch.no_grad():
+                target = oh_converter(target)
+                data, target = mixup((data, target))
         optimizer.zero_grad()
         output = model(data)
         loss = loss_fn(output, target)
@@ -595,6 +666,9 @@ def test(
     vis_params=None,
     class_names=None,
 ):
+    if args.mixup:
+        oh_converter = To_one_hot(num_classes)
+        oh_converter.to(device)
     model.eval()
     test_loss, TP = 0, 0
     total_pred, total_target, total_scores = [], [], []
@@ -609,7 +683,7 @@ def test(
                 data = data.to(device)
                 target = target.to(device)
             output = model(data)
-            loss = loss_fn(output, target)
+            loss = loss_fn(output, oh_converter(target) if args.mixup else target)
             test_loss += loss.item()  # sum up batch loss
             total_scores.append(output)
             pred = output.argmax(dim=1)

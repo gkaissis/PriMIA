@@ -1,39 +1,41 @@
+import argparse
+import configparser
+import multiprocessing as mp
+import random
+import shutil
+from datetime import datetime
+from os import path, remove
+from warnings import warn
+
+import numpy as np
+import syft as sy
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-import syft as sy
-import configparser
-import argparse
-import visdom
 import tqdm
-import shutil
-import random
-import numpy as np
-import multiprocessing as mp
-from os import path, remove
-from warnings import warn
-from datetime import datetime
+import visdom
 from tabulate import tabulate
-from torchvision import datasets, transforms, models
+from torchvision import datasets, models, transforms
+
 from torchlib.dataloader import PPPP, LabelMNIST  # pylint:disable=import-error
-from torchlib.models import (  # pylint:disable=import-error
-    vgg16,
+from torchlib.models import (
+    conv_at_resolution,  # pylint:disable=import-error
     resnet18,
-    conv_at_resolution,
+    vgg16,
 )
-from torchlib.utils import (  # pylint:disable=import-error
-    LearningRateScheduler,
+from torchlib.utils import (
+    AddGaussianNoise,  # pylint:disable=import-error
     Arguments,
-    train,
-    train_federated,
-    test,
-    save_model,
-    save_config_results,
-    AddGaussianNoise,
+    Cross_entropy_one_hot,
+    LearningRateScheduler,
     MixUp,
     To_one_hot,
-    Cross_entropy_one_hot,
+    save_config_results,
+    save_model,
+    test,
+    train,
+    train_federated,
 )
 
 
@@ -46,6 +48,8 @@ def calc_class_weights(args, train_loader):
     for i in range(num_classes):
         comparison[i] += i
     occurances = torch.zeros(num_classes)  # pylint:disable=no-member
+    if not args.train_federated:
+        train_loader = {0: train_loader}
     for worker, tl in tqdm.tqdm(
         train_loader.items(),
         total=len(train_loader),
@@ -58,13 +62,23 @@ def calc_class_weights(args, train_loader):
         for _, target in tqdm.tqdm(
             tl,
             leave=False,
-            desc="calc class weights on {:s}".format(worker.id),
+            desc="calc class weights on {:s}".format(worker.id)
+            if args.train_federated
+            else "calc_class_weights",
             total=len(tl),
         ):
             if target.shape[0] < args.batch_size:
                 # the last batch is not considered
                 # TODO: find solution for this
                 continue
+            if args.train_federated and args.mixup:
+                if args.mixup_lambda == 0.5:
+                    raise ValueError(
+                        "it's currently not supported to weight classes "
+                        "while mixup has a lambda of 0.5"
+                    )
+                target = target.max(dim=1)
+                target = target[1]  # without pysyft it should be target.indices
             for i in range(num_classes):
                 n = target.eq(comparison[i]).sum().copy()
                 if args.train_federated:
@@ -178,7 +192,7 @@ def setup_pysyft(args, verbose=False):
                 dataset = torch.utils.data.DataLoader(
                     dataset, batch_size=1, shuffle=True
                 )
-                mixup = MixUp(args.mixup_lambda)
+                mixup = MixUp(λ=args.mixup_lambda, p=args.mixup_prob)
                 last_set = None
             for j in tqdm.tqdm(
                 range(args.repetitions_dataset),
@@ -239,8 +253,8 @@ def setup_pysyft(args, verbose=False):
         )
         train_loader[workers[worker]] = tl
 
-    data = grid.search(args.dataset, "#valdata")
-    target = grid.search(args.dataset, "#valtargets")
+    # data = grid.search(args.dataset, "#valdata")
+    # target = grid.search(args.dataset, "#valtargets")
     if args.dataset == "mnist":
         valset = LabelMNIST(
             labels=list(range(10)),
@@ -549,9 +563,10 @@ if __name__ == "__main__":
 
         optimizer = Optims(worker_names, optimizer)
     if args.mixup:
-        loss_fn = Cross_entropy_one_hot(reduction="mean")
+        loss_fn = Cross_entropy_one_hot(weight=cw, reduction="mean")
     else:
         loss_fn = nn.CrossEntropyLoss(weight=cw, reduction="mean")
+    loss_fn.to(device)
 
     start_at_epoch = 1
     if cmd_args.resume_checkpoint:
@@ -663,10 +678,10 @@ if __name__ == "__main__":
     # reversal and formula because we want last occurance of highest value
     roc_auc_scores = np.array(roc_auc_scores)[::-1]
     best_auc_idx = np.argmax(roc_auc_scores)
-    highest_acc = (
-        len(roc_auc_scores) - best_auc_idx
-    )  # actually -1 but we're switching to 1 indexed here
-    best_epoch = highest_acc * args.test_interval
+    highest_acc = len(roc_auc_scores) - best_auc_idx - 1
+    best_epoch = (
+        highest_acc + 1
+    ) * args.test_interval  # actually -1 but we're switching to 1 indexed here
     best_model_file = model_paths[highest_acc]
     print(
         "Highest ROC AUC score was {:.1f}% in epoch {:d}".format(
@@ -691,4 +706,3 @@ if __name__ == "__main__":
     # delete old model weights
     for model_file in model_paths:
         remove(model_file)
-
