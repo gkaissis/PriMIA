@@ -438,6 +438,7 @@ def train_federated(
     # num_workers = mng.Value("d", len(train_loaders.keys()))
     for worker in train_loaders.keys():
         result_dict[worker.id] = None
+        loss_dict[worker.id] = mng.dict()
         waiting_for_sync_dict[worker.id] = False
         progress_dict[worker.id] = (0, len(train_loaders[worker]))
 
@@ -452,6 +453,7 @@ def train_federated(
         w_dict[id] = weight
     jobs = [
         mp.Process(
+            name="{:s} training".format(worker.id),
             target=train_on_server,
             args=(
                 args,
@@ -460,7 +462,6 @@ def train_federated(
                 device,
                 train_loader,
                 optimizer,
-                epoch,
                 loss_fn,
                 result_dict,
                 waiting_for_sync_dict,
@@ -475,20 +476,24 @@ def train_federated(
     for j in jobs:
         j.start()
     synchronize = mp.Process(
+        name ="synchronization",
         target=synchronizer,
         args=(
             result_dict,
             waiting_for_sync_dict,
             sync_dict,
+            progress_dict,
+            loss_dict,
             stop_sync,
             sync_completed,
             w_dict,
+            epoch,
         ),
-        kwargs={"wait_interval": args.wait_interval},
+        kwargs={"wait_interval": args.wait_interval, "vis_params": vis_params},
     )
     synchronize.start()
     done = mng.Value("i", False)
-    animate = mp.Process(target=progress_animation, args=(done, progress_dict))
+    animate = mp.Process(name="animation", target=progress_animation, args=(done, progress_dict))
     animate.start()
     for j in jobs:
         j.join()
@@ -498,7 +503,8 @@ def train_federated(
     animate.join()
 
     model = sync_dict["model"]
-    avg_loss = np.average(loss_dict.values(), weights=weights)
+
+    avg_loss = np.average([l["final"] for l in loss_dict.values()], weights=weights)
 
     if args.visdom:
         vis_params["vis"].line(
@@ -518,10 +524,14 @@ def synchronizer(
     result_dict,
     waiting_for_sync_dict,
     sync_dict,
+    progress_dict,
+    loss_dict,
     stop,
     sync_completed,
     weights,
+    epoch,
     wait_interval=0.1,
+    vis_params=None,
 ):
     while not stop.value:
         while not all(waiting_for_sync_dict.values()) and not stop.value:
@@ -548,7 +558,24 @@ def synchronizer(
         ## By keeping the last model of each worker in the dict,
         ## we still assure that it's training is not lost
         # result_dict.clear()
-        sync_completed.value = True
+        if vis_params:
+            progress = progress_dict.values()
+            cur_batch = max([p[0] for p in progress])
+            progress = sum([p[0] / p[1] for p in progress]) / len(progress)
+            if progress >= 1.0:
+                sync_completed.value = True
+                continue
+            avg_loss = np.mean(
+                [l[cur_batch] for l in loss_dict.values() if cur_batch in l]
+            )
+            vis_params["vis"].line(
+                X=np.asarray([epoch - 1 + progress]),
+                Y=np.asarray([avg_loss]),
+                win="loss_win",
+                name="train_loss",
+                update="append",
+                env=vis_params["vis_env"],
+            )
 
 
 def train_on_server(
@@ -558,7 +585,6 @@ def train_on_server(
     device,
     train_loader,
     optim,
-    epoch,
     loss_fn,
     result_dict,
     waiting_for_sync_dict,
@@ -581,6 +607,7 @@ def train_on_server(
         ):  # synchronize models
             model = model.get()
             result_dict[worker.id] = model
+            loss_dict[worker.id][batch_idx] = avg_loss[-1]
             sync_completed.value = False
             waiting_for_sync_dict[worker.id] = True
             while not sync_completed.value:
@@ -604,7 +631,7 @@ def train_on_server(
     model.get()
     loss_fn.get()
     result_dict[worker.id] = model
-    loss_dict[worker.id] = np.mean(avg_loss)
+    loss_dict[worker.id]["final"] = np.mean(avg_loss)
     progress_dict[worker.id] = (batch_idx + 1, L)
     del waiting_for_sync_dict[worker.id]
     optim.optimizers[worker.id] = optimizer
