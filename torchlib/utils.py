@@ -423,7 +423,15 @@ def progress_animation(done, progress_dict):
 
 ## Assuming train loaders is dictionary with {worker : train_loader}
 def train_federated(
-    args, model, device, train_loaders, optimizer, epoch, loss_fn, vis_params=None,
+    args,
+    model,
+    device,
+    train_loaders,
+    optimizer,
+    epoch,
+    loss_fn,
+    test_params=None,
+    vis_params=None,
 ):
     model.train()
     mng = mp.Manager()
@@ -476,9 +484,10 @@ def train_federated(
     for j in jobs:
         j.start()
     synchronize = mp.Process(
-        name ="synchronization",
+        name="synchronization",
         target=synchronizer,
         args=(
+            args,
             result_dict,
             waiting_for_sync_dict,
             sync_dict,
@@ -489,11 +498,17 @@ def train_federated(
             w_dict,
             epoch,
         ),
-        kwargs={"wait_interval": args.wait_interval, "vis_params": vis_params},
+        kwargs={
+            "wait_interval": args.wait_interval,
+            "vis_params": vis_params,
+            "test_params": test_params,
+        },
     )
     synchronize.start()
     done = mng.Value("i", False)
-    animate = mp.Process(name="animation", target=progress_animation, args=(done, progress_dict))
+    animate = mp.Process(
+        name="animation", target=progress_animation, args=(done, progress_dict)
+    )
     animate.start()
     for j in jobs:
         j.join()
@@ -521,6 +536,7 @@ def train_federated(
 
 
 def synchronizer(
+    args,
     result_dict,
     waiting_for_sync_dict,
     sync_dict,
@@ -532,7 +548,10 @@ def synchronizer(
     epoch,
     wait_interval=0.1,
     vis_params=None,
+    test_params=None,
 ):
+    if test_params:
+        save_iter: int = 1
     while not stop.value:
         while not all(waiting_for_sync_dict.values()) and not stop.value:
             sleep(0.1)
@@ -541,7 +560,7 @@ def synchronizer(
             for model in result_dict.values():
                 sync_dict["model"] = model
         elif len(result_dict) == 0:
-            return None
+            pass
         else:
             models = {}
             for id, worker_model in result_dict.items():
@@ -558,10 +577,11 @@ def synchronizer(
         ## By keeping the last model of each worker in the dict,
         ## we still assure that it's training is not lost
         # result_dict.clear()
+        progress = progress_dict.values()
+        cur_batch = max([p[0] for p in progress])
+        save_after = max([p[1] for p in progress]) / args.repetitions_dataset
+        progress = sum([p[0] / p[1] for p in progress]) / len(progress)
         if vis_params:
-            progress = progress_dict.values()
-            cur_batch = max([p[0] for p in progress])
-            progress = sum([p[0] / p[1] for p in progress]) / len(progress)
             if progress >= 1.0:
                 sync_completed.value = True
                 continue
@@ -576,6 +596,32 @@ def synchronizer(
                 update="append",
                 env=vis_params["vis_env"],
             )
+        if test_params and cur_batch > (save_after * save_iter):
+            model = avg_model.copy()
+            _, roc_auc = test(
+                args,
+                model,
+                test_params["device"],
+                test_params["val_loader"],
+                epoch,
+                test_params["loss_fn"],
+                verbose=False,
+                num_classes=test_params["num_classes"],
+                vis_params=vis_params,
+                class_names=test_params["class_names"],
+            )
+            model_path = "model_weights/{:s}_epoch_{:03d}.pt".format(
+                test_params["exp_name"],
+                epoch * (args.repetitions_dataset if args.repetitions_dataset else 1)
+                + save_iter,
+            )
+
+            save_model(model, test_params["optimizer"], model_path, args, epoch)
+            test_params["roc_auc_scores"].append(roc_auc)
+            test_params["model_paths"].append(model_path)
+
+            save_iter += 1
+        sync_completed.value = True
 
 
 def train_on_server(
@@ -690,6 +736,7 @@ def test(
     epoch,
     loss_fn,
     num_classes,
+    verbose=True,
     vis_params=None,
     class_names=None,
 ):
@@ -700,11 +747,15 @@ def test(
     test_loss, TP = 0, 0
     total_pred, total_target, total_scores = [], [], []
     with torch.no_grad():
-        for data, target in tqdm.tqdm(
-            val_loader,
-            total=len(val_loader),
-            desc="testing epoch {:d}".format(epoch),
-            leave=False,
+        for data, target in (
+            tqdm.tqdm(
+                val_loader,
+                total=len(val_loader),
+                desc="testing epoch {:d}".format(epoch),
+                leave=False,
+            )
+            if verbose
+            else val_loader
         ):
             if not args.encrypted_inference:
                 data = data.to(device)
@@ -727,12 +778,13 @@ def test(
     if args.encrypted_inference:
         objective = 100.0 * TP / (len(val_loader) * args.test_batch_size)
         L = len(val_loader.dataset)
-        print(
-            "Test set: Epoch: {:d} Average loss: {:.4f}, Recall: {}/{} ({:.0f}%)\n".format(
-                epoch, test_loss, TP, L, objective,
-            ),
-            # end="",
-        )
+        if verbose:
+            print(
+                "Test set: Epoch: {:d} Average loss: {:.4f}, Recall: {}/{} ({:.0f}%)\n".format(
+                    epoch, test_loss, TP, L, objective,
+                ),
+                # end="",
+            )
     else:
         total_pred = torch.cat(total_pred).cpu().numpy()  # pylint: disable=no-member
         total_target = (
@@ -800,7 +852,8 @@ def test(
         headers.extend(
             [class_names[i] if class_names else i for i in range(conf_matrix.shape[0])]
         )
-        print(tabulate(rows, headers=headers, tablefmt="fancy_grid",))
+        if verbose:
+            print(tabulate(rows, headers=headers, tablefmt="fancy_grid",))
         if args.visdom:
             vis_params["vis"].line(
                 X=np.asarray([epoch]),

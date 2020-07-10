@@ -599,6 +599,19 @@ if __name__ == "__main__":
     )
     roc_auc_scores = []
     model_paths = []
+    if args.train_federated:
+        model_paths.append("test")
+        test_params = {
+            "device": device,
+            "val_loader": val_loader,
+            "loss_fn": loss_fn,
+            "num_classes": num_classes,
+            "class_names": class_names,
+            "exp_name": exp_name,
+            "optimizer": optimizer,
+            "roc_auc_scores": roc_auc_scores,
+            "model_paths": model_paths,
+        }
     for epoch in range(start_at_epoch, args.epochs + 1):
         if args.train_federated:
             for w in worker_names:
@@ -627,6 +640,7 @@ if __name__ == "__main__":
                     optimizer,
                     epoch,
                     loss_fn,
+                    test_params=test_params,
                     vis_params=vis_params,
                 )
 
@@ -670,7 +684,10 @@ if __name__ == "__main__":
                 vis_params=vis_params,
                 class_names=class_names,
             )
-            model_path = "model_weights/{:s}_epoch_{:03d}.pt".format(exp_name, epoch,)
+            model_path = "model_weights/{:s}_epoch_{:03d}.pt".format(
+                exp_name,
+                epoch * (args.repetitions_dataset if args.repetitions_dataset else 1),
+            )
 
             save_model(model, optimizer, model_path, args, epoch)
             roc_auc_scores.append(roc_auc)
