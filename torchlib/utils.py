@@ -163,6 +163,8 @@ class Arguments:
             if self.encrypted_inference
             else False
         )
+        if not "mixup" in dir(self):
+            self.mixup = False
 
     def incorporate_cmd_args(self, cmd_args):
         exceptions = []  # just for future
@@ -854,15 +856,7 @@ def test(
         )
         if verbose:
             print(tabulate(rows, headers=headers, tablefmt="fancy_grid",))
-        if args.visdom:
-            vis_params["vis"].line(
-                X=np.asarray([epoch]),
-                Y=np.asarray([test_loss]),
-                win="loss_win",
-                name="val_loss",
-                update="append",
-                env=vis_params["vis_env"],
-            )
+        if args.visdom and vis_params:
             vis_params["vis"].line(
                 X=np.asarray([epoch]),
                 Y=np.asarray([objective / 100.0]),

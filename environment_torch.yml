@@ -25,3 +25,4 @@ dependencies:
     - Flask-Sockets==0.2.1
     - flask_login==0.5.0
     - syft==0.2.6
+    - crypten==0.1
