@@ -8,7 +8,7 @@ from sklearn.metrics import classification_report
 
 import sys, os.path
 
-sys.path.insert(0, os.path.split(sys.path[0])[0])  # TODO: make prettier
+sys.path.insert(0, os.path.split(sys.path[0])[0])
 from torchlib.models import resnet18
 
 torch.set_num_threads(1)  # pylint:disable=no-member
@@ -34,29 +34,64 @@ def encrypt_model_and_data(
     private_model.encrypt(src=workers["ALICE"])
     print("Model successfully encrypted:", private_model.encrypted)
 
-    data = crypten.load(data_path, src=workers["BOB"])
+    data = torch.load(data_path)
+    data_encrypted = crypten.load(data_path, src=workers["BOB"])
     targets = torch.load(label_path)  # , src=workers["BOB"])
 
     if num_samples == None:
-        num_samples = data.shape[0]
+        num_samples = data_encrypted.shape[0]
     data = data[:num_samples]
+    data_encrypted = data_encrypted[:num_samples]
     targets = targets[:num_samples]
 
     # Classify the encrypted data
     private_model.eval()
+    model.eval()
     predictions = []
+    predictions_encrypted = []
     t = time()
     batch_num = ceil(num_samples / batch_size)
-    for i in tqdm(range(batch_num), total=batch_num, leave=False, desc="Testing"):
-        output_enc = private_model(data[i * batch_size : (i + 1) * batch_size])
-        output = output_enc.get_plain_text()
-        predictions.append(output.argmax(dim=1).flatten())
+    not_equal = 0
+    try:
+        with torch.no_grad():
+            for i in tqdm(range(batch_num), total=batch_num, leave=False, desc="Testing"):
+                output_enc = private_model(
+                    data_encrypted[i * batch_size : (i + 1) * batch_size]
+                )
+                output = output_enc.get_plain_text()
+                output = output.argmax(dim=1).flatten()
+                predictions_encrypted.append(output)
+                output_unencrypted = model(data[i * batch_size : (i + 1) * batch_size])
+                output_unencrypted = output_unencrypted.argmax(dim=1).flatten()
+                predictions.append(output_unencrypted)
+                if not torch.equal(output, output_unencrypted):  # pylint:disable=no-member
+                    not_equal += 1
+                    print("Prediction of encrypted model not equal to plaintext model")
+    except KeyboardInterrupt:
+        print("Interrupted - stopping inference")
     t = time() - t
     # Compute the accuracy
-    predictions = torch.cat(predictions)  # pylint:disable=no-member
-    print(classification_report(targets, predictions))
+    predictions_encrypted = torch.cat(predictions_encrypted)  # pylint:disable=no-member
+    print(
+        classification_report(
+            targets[: predictions_encrypted.shape[0]], predictions_encrypted
+        )
+    )
     # print("\tAccuracy: {0:.4f}".format(accuracy.item(),))
-    print("\tTotal time: {:.1f}\tTime per sample: {:.3f}".format(t, (t / num_samples)))
+    print(
+        "\tTotal time: {:.1f}\tTime per sample: {:.3f}".format(
+            t, (t / predictions_encrypted.shape[0])
+        )
+    )
+    print(
+        "\tHad {:s} deviating predictions to plaintext model".format(
+            "no" if not_equal == 0 else str(not_equal)
+        )
+    )
+    if not_equal > 0:
+        print("Stats of unencrypted model")
+        predictions = torch.cat(predictions)  # pylint:disable=no-member
+        print(classification_report(targets[: predictions.shape[0]], predictions))
 
 
 if __name__ == "__main__":
