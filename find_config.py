@@ -4,6 +4,7 @@ from argparse import Namespace
 
 
 def objective(trial: opt.trial):
+    lr = trial.suggest_loguniform("lr", 1e-5, 1e-3,)
     args = Namespace(
         config="optuna",
         train_federated=False,
@@ -18,9 +19,9 @@ def objective(trial: opt.trial):
         test_batch_size=1,
         test_interval=1,
         validation_split=10,
-        epochs=trial.suggest_int("epochs", 20, 50),
-        lr=trial.suggest_loguniform("lr", 1e-5, 1e-3,),
-        end_lr=trial.suggest_loguniform("lr", 1e-5, 1e-3,),
+        epochs=trial.suggest_int("epochs", 15, 40),
+        lr=lr,
+        end_lr=trial.suggest_loguniform("end_lr", 1e-6, lr),
         restarts=trial.suggest_int("restarts", 0, 2),
         beta1=trial.suggest_float("beta1", 0.25, 0.9),
         beta2=trial.suggest_float("beta2", 0.9, 1.0),
@@ -44,10 +45,9 @@ def objective(trial: opt.trial):
         mixup_prob=trial.suggest_float("mixup_prob", 0.0, 1.0),
         sync_every_n_batch=5,
         wait_interval=0.1,
-        keep_optim_dict=trial.suggest_categorical("keep_optim_dict", [True, False]),
         repetitions_dataset=5,
     )
-    best_val_acc = main(args)
+    best_val_acc = main(args, verbose=False)
     return best_val_acc
 
 
@@ -56,5 +56,6 @@ if __name__ == "__main__":
         study_name="vanilla_pneumonia",
         storage="sqlite:///model_weights/vanilla_pneumonia_search.db",
         load_if_exists=True,
+        direction="maximize",
     )
-    study.optimize(objective, n_trials=2)
+    study.optimize(objective, n_trials=10)

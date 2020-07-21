@@ -295,7 +295,9 @@ class Cross_entropy_one_hot(torch.nn.Module):
         # Cross entropy that accepts soft targets
         super(Cross_entropy_one_hot, self).__init__()
         self.weight = (
-            torch.nn.Parameter(weight, requires_grad=False) if weight is not None else None
+            torch.nn.Parameter(weight, requires_grad=False)
+            if weight is not None
+            else None
         )
         self.logsoftmax = torch.nn.LogSoftmax(dim=1)
         if reduction == "mean":
@@ -437,6 +439,7 @@ def train_federated(
     loss_fn,
     test_params=None,
     vis_params=None,
+    verbose=True,
 ):
     model.train()
     mng = mp.Manager()
@@ -513,17 +516,19 @@ def train_federated(
         },
     )
     synchronize.start()
-    done = mng.Value("i", False)
-    animate = mp.Process(
-        name="animation", target=progress_animation, args=(done, progress_dict)
-    )
-    animate.start()
+    if verbose:
+        done = mng.Value("i", False)
+        animate = mp.Process(
+            name="animation", target=progress_animation, args=(done, progress_dict)
+        )
+        animate.start()
     for j in jobs:
         j.join()
     stop_sync.value = True
     synchronize.join()
-    done.value = True
-    animate.join()
+    if verbose:
+        done.value = True
+        animate.join()
 
     model = sync_dict["model"]
 
@@ -694,7 +699,15 @@ def train_on_server(
 
 
 def train(
-    args, model, device, train_loader, optimizer, epoch, loss_fn, vis_params=None
+    args,
+    model,
+    device,
+    train_loader,
+    optimizer,
+    epoch,
+    loss_fn,
+    vis_params=None,
+    verbose=True,
 ):
     model.train()
     if args.mixup:
@@ -733,7 +746,7 @@ def train(
                 )
             else:
                 avg_loss.append(loss.item())
-    if not args.visdom:
+    if not args.visdom and verbose:
         print("Train Epoch: {} \tLoss: {:.6f}".format(epoch, np.mean(avg_loss),))
     return model
 

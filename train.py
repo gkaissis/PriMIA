@@ -299,7 +299,7 @@ def setup_pysyft(args, hook, verbose=False):
     return train_loader, val_loader, total_L, workers, worker_names
 
 
-def main(args):
+def main(args, verbose=True):
 
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
@@ -556,6 +556,7 @@ def main(args):
         num_classes,
         vis_params=vis_params,
         class_names=class_names,
+        verbose=verbose,
     )
     roc_auc_scores = []
     model_paths = []
@@ -571,7 +572,17 @@ def main(args):
             "roc_auc_scores": roc_auc_scores,
             "model_paths": model_paths,
         }
-    for epoch in range(start_at_epoch, args.epochs + 1):
+    for epoch in (
+        range(start_at_epoch, args.epochs + 1)
+        if verbose
+        else tqdm.tqdm(
+            range(start_at_epoch, args.epochs + 1),
+            leave=False,
+            desc="training",
+            total=args.epochs + 1,
+            initial=start_at_epoch,
+        )
+    ):
         if args.train_federated:
             for w in worker_names:
                 new_lr = scheduler.adjust_learning_rate(
@@ -601,6 +612,7 @@ def main(args):
                     loss_fn,
                     test_params=test_params,
                     vis_params=vis_params,
+                    verbose=verbose,
                 )
 
             else:
@@ -613,6 +625,7 @@ def main(args):
                     epoch,
                     loss_fn,
                     vis_params=vis_params,
+                    verbose=verbose,
                 )
         except Exception as e:
             if args.websockets:
@@ -642,6 +655,7 @@ def main(args):
                 num_classes=num_classes,
                 vis_params=vis_params,
                 class_names=class_names,
+                verbose=verbose,
             )
             model_path = "model_weights/{:s}_epoch_{:03d}.pt".format(
                 exp_name,
