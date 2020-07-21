@@ -89,7 +89,7 @@ class PPPP(data.Dataset):
             enumerate(loader),
             total=len(loader),
             leave=False,
-            desc="searching black pixels",
+            desc="accumulating data",
         ):
             imgs = imgs.numpy()
             acc += np.sum(imgs, axis=0)

@@ -143,6 +143,9 @@ class Arguments:
                             self.epochs, self.repetitions_dataset
                         )
                     )
+            self.weighted_averaging = config.getboolean(
+                "federated", "weighted_averaging", fallback=False
+            )
 
         self.visdom = cmd_args.no_visdom if mode == "train" else False
         self.encrypted_inference = (
@@ -292,14 +295,14 @@ class Cross_entropy_one_hot(torch.nn.Module):
         # Cross entropy that accepts soft targets
         super(Cross_entropy_one_hot, self).__init__()
         self.weight = (
-            torch.nn.Parameter(weight, requires_grad=False) if weight else None
+            torch.nn.Parameter(weight, requires_grad=False) if weight is not None else None
         )
         self.logsoftmax = torch.nn.LogSoftmax(dim=1)
         if reduction == "mean":
             self.loss = lambda output, target: torch.mean(  # pylint:disable=no-member
                 (
                     torch.sum(self.weight * target, dim=1)  # pylint:disable=no-member
-                    if self.weight
+                    if self.weight is not None
                     else 1.0
                 )
                 * torch.sum(  # pylint:disable=no-member
@@ -310,7 +313,7 @@ class Cross_entropy_one_hot(torch.nn.Module):
             self.loss = lambda output, target: torch.sum(  # pylint:disable=no-member
                 (
                     torch.sum(self.weight * target, dim=1)  # pylint:disable=no-member
-                    if self.weight
+                    if self.weight is not None
                     else 1.0
                 )
                 * torch.sum(  # pylint:disable=no-member
@@ -454,13 +457,16 @@ def train_federated(
 
     total_batches = 0
     weights = []
-    w_dict = {}
-    for id, (_, batches) in progress_dict.items():
+    for idt, (_, batches) in progress_dict.items():
         total_batches += batches
         weights.append(batches)
     weights = np.array(weights) / total_batches
-    for weight, id in zip(weights, progress_dict.keys()):
-        w_dict[id] = weight
+    if args.weighted_averaging:
+        w_dict = {}
+        for weight, idt in zip(weights, progress_dict.keys()):
+            w_dict[idt] = weight
+    else:
+        w_dict = {idt: 1.0 / len(progress_dict.keys()) for idt in progress_dict.keys()}
     jobs = [
         mp.Process(
             name="{:s} training".format(worker.id),
@@ -567,9 +573,7 @@ def synchronizer(
             models = {}
             for id, worker_model in result_dict.items():
                 models[id] = worker_model
-            ## could be weighted here
-            ## just add weights=weights
-            avg_model = federated_avg(models)
+            avg_model = federated_avg(models, weights=weights)
             sync_dict["model"] = avg_model
         for k in waiting_for_sync_dict.keys():
             waiting_for_sync_dict[k] = False
@@ -579,10 +583,14 @@ def synchronizer(
         ## By keeping the last model of each worker in the dict,
         ## we still assure that it's training is not lost
         # result_dict.clear()
+
+        ## this should be commented in but it triggers some backend failure
+        """
         progress = progress_dict.values()
         cur_batch = max([p[0] for p in progress])
         save_after = max([p[1] for p in progress]) / args.repetitions_dataset
         progress = sum([p[0] / p[1] for p in progress]) / len(progress)
+
         if vis_params:
             if progress >= 1.0:
                 sync_completed.value = True
@@ -622,7 +630,7 @@ def synchronizer(
             test_params["roc_auc_scores"].append(roc_auc)
             test_params["model_paths"].append(model_path)
 
-            save_iter += 1
+            save_iter += 1"""
         sync_completed.value = True
 
 

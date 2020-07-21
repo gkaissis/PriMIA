@@ -6,9 +6,10 @@ from tqdm import tqdm
 from argparse import ArgumentParser
 from sklearn.metrics import classification_report
 
-import sys, os.path
+from sys import path
+from os.path import split
 
-sys.path.insert(0, os.path.split(sys.path[0])[0])
+path.insert(0, split(path[0])[0])
 from torchlib.models import resnet18
 
 torch.set_num_threads(1)  # pylint:disable=no-member
@@ -17,7 +18,12 @@ workers = {"ALICE": 0, "BOB": 1}
 
 @crypten.mpc.run_multiprocess(world_size=2)
 def encrypt_model_and_data(
-    model_path: str, batch_size: int, data_path: str, label_path: str, num_samples: int
+    model_path: str,
+    batch_size: int,
+    data_path: str,
+    label_path: str,
+    num_samples: int,
+    start_at: int,
 ):
     model = resnet18(
         pretrained=True,
@@ -40,9 +46,11 @@ def encrypt_model_and_data(
 
     if num_samples == None:
         num_samples = data_encrypted.shape[0]
-    data = data[:num_samples]
-    data_encrypted = data_encrypted[:num_samples]
-    targets = targets[:num_samples]
+    data = data[start_at:num_samples]
+    data_encrypted = data_encrypted[start_at:num_samples]
+    targets = targets[start_at:num_samples]
+    if data_encrypted.shape[0] == 0:
+        raise ValueError("Data is empty - Either start at too high or num samples too low")
 
     # Classify the encrypted data
     private_model.eval()
@@ -51,10 +59,17 @@ def encrypt_model_and_data(
     predictions_encrypted = []
     t = time()
     batch_num = ceil(num_samples / batch_size)
+    start_at = ceil(start_at / batch_size)
     not_equal = 0
     try:
         with torch.no_grad():
-            for i in tqdm(range(batch_num), total=batch_num, leave=False, desc="Testing"):
+            for i in tqdm(
+                range(batch_num - start_at),
+                total=batch_num,
+                leave=False,
+                desc="Testing",
+                initial=start_at,
+            ):
                 output_enc = private_model(
                     data_encrypted[i * batch_size : (i + 1) * batch_size]
                 )
@@ -64,12 +79,16 @@ def encrypt_model_and_data(
                 output_unencrypted = model(data[i * batch_size : (i + 1) * batch_size])
                 output_unencrypted = output_unencrypted.argmax(dim=1).flatten()
                 predictions.append(output_unencrypted)
-                if not torch.equal(output, output_unencrypted):  # pylint:disable=no-member
+                if not torch.equal(  # pylint:disable=no-member
+                    output, output_unencrypted
+                ):
                     not_equal += 1
                     print("Prediction of encrypted model not equal to plaintext model")
     except KeyboardInterrupt:
         print("Interrupted - stopping inference")
     t = time() - t
+    if len(predictions_encrypted) == 0:
+        exit()
     # Compute the accuracy
     predictions_encrypted = torch.cat(predictions_encrypted)  # pylint:disable=no-member
     print(
@@ -121,6 +140,9 @@ if __name__ == "__main__":
         default="data/testlabels.pt",
         help="path to stored labels (torch tensor stored by torch.save)",
     )
+    parser.add_argument(
+        "--start_at", type=int, default=0, help="start inference at data sample i"
+    )
     args = parser.parse_args()
     encrypt_model_and_data(
         args.model_weights,
@@ -128,5 +150,6 @@ if __name__ == "__main__":
         args.data,
         args.labels,
         args.max_num_samples,
+        args.start_at,
     )
 

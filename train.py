@@ -40,6 +40,7 @@ from torchlib.utils import (
 
 
 def calc_class_weights(args, train_loader):
+    num_classes = {"pneumonia": 3, "mnist": 10}[args.dataset]
     comparison = list(
         torch.split(
             torch.zeros((num_classes, args.batch_size)), 1  # pylint:disable=no-member
@@ -95,7 +96,7 @@ def calc_class_weights(args, train_loader):
     return cw
 
 
-def setup_pysyft(args, verbose=False):
+def setup_pysyft(args, hook, verbose=False):
     from torchlib.websocket_utils import (  # pylint:disable=import-error
         read_websocket_config,
     )
@@ -298,48 +299,7 @@ def setup_pysyft(args, verbose=False):
     return train_loader, val_loader, total_L, workers, worker_names
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--config", type=str, required=True, help="Path to config",
-    )
-    parser.add_argument(
-        "--train_federated", action="store_true", help="Train in federated setting"
-    )
-    parser.add_argument(
-        "--dataset",
-        type=str,
-        default="pneumonia",
-        choices=["pneumonia", "mnist"],
-        required=True,
-        help="which dataset?",
-    )
-    parser.add_argument(
-        "--no_visdom", action="store_false", help="dont use a visdom server"
-    )
-    parser.add_argument("--no_cuda", action="store_true", help="dont use gpu")
-    parser.add_argument(
-        "--resume_checkpoint",
-        type=str,
-        default=None,
-        help="Start training from older model checkpoint",
-    )
-    parser.add_argument(
-        "--websockets", action="store_true", help="train on websocket config"
-    )
-    parser.add_argument(
-        "--verbose", action="store_true", help="set syft workers to verbose"
-    )
-    cmd_args = parser.parse_args()
-
-    config = configparser.ConfigParser()
-    assert path.isfile(cmd_args.config), "config file not found"
-    config.read(cmd_args.config)
-
-    args = Arguments(cmd_args, config, mode="train")
-    if args.websockets:
-        assert args.train_federated, "Websockets only work when it is federated"
-    print(str(args))
+def main(args):
 
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
@@ -353,7 +313,7 @@ if __name__ == "__main__":
 
     kwargs = {"num_workers": 1, "pin_memory": True} if use_cuda else {}
 
-    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M")
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     exp_name = "{:s}_{:s}_{:s}".format(
         "federated" if args.train_federated else "vanilla", args.dataset, timestamp
     )
@@ -373,7 +333,7 @@ if __name__ == "__main__":
 
         hook = sy.TorchHook(torch)
         train_loader, val_loader, total_L, workers, worker_names = setup_pysyft(
-            args, verbose=cmd_args.verbose
+            args, hook, verbose=cmd_args.verbose
         )
     else:
         if args.dataset == "mnist":
@@ -569,7 +529,7 @@ if __name__ == "__main__":
     loss_fn.to(device)
 
     start_at_epoch = 1
-    if cmd_args.resume_checkpoint:
+    if "cmd_args" in locals() and cmd_args.resume_checkpoint:
         print("resuming checkpoint - args will be overwritten")
         state = torch.load(cmd_args.resume_checkpoint, map_location=device)
         start_at_epoch = state["epoch"]
@@ -600,7 +560,6 @@ if __name__ == "__main__":
     roc_auc_scores = []
     model_paths = []
     if args.train_federated:
-        model_paths.append("test")
         test_params = {
             "device": device,
             "val_loader": val_loader,
@@ -665,7 +624,7 @@ if __name__ == "__main__":
                         total_L,
                         workers,
                         worker_names,
-                    ) = setup_pysyft(args, verbose=cmd_args.verbose)
+                    ) = setup_pysyft(args, hook, verbose=cmd_args.verbose)
                 except Exception as e:
                     print("restarting failed")
                     raise e
@@ -723,3 +682,50 @@ if __name__ == "__main__":
     # delete old model weights
     for model_file in model_paths:
         remove(model_file)
+
+    return roc_auc_scores[best_auc_idx]
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--config", type=str, required=True, help="Path to config",
+    )
+    parser.add_argument(
+        "--train_federated", action="store_true", help="Train in federated setting"
+    )
+    parser.add_argument(
+        "--dataset",
+        type=str,
+        default="pneumonia",
+        choices=["pneumonia", "mnist"],
+        required=True,
+        help="which dataset?",
+    )
+    parser.add_argument(
+        "--no_visdom", action="store_false", help="dont use a visdom server"
+    )
+    parser.add_argument("--no_cuda", action="store_true", help="dont use gpu")
+    parser.add_argument(
+        "--resume_checkpoint",
+        type=str,
+        default=None,
+        help="Start training from older model checkpoint",
+    )
+    parser.add_argument(
+        "--websockets", action="store_true", help="train on websocket config"
+    )
+    parser.add_argument(
+        "--verbose", action="store_true", help="set syft workers to verbose"
+    )
+    cmd_args = parser.parse_args()
+
+    config = configparser.ConfigParser()
+    assert path.isfile(cmd_args.config), "config file not found"
+    config.read(cmd_args.config)
+
+    args = Arguments(cmd_args, config, mode="train")
+    if args.websockets:
+        assert args.train_federated, "Websockets only work when it is federated"
+    print(str(args))
+    main(args)
