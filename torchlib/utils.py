@@ -343,9 +343,9 @@ class Cross_entropy_one_hot(torch.nn.Module):
 
 
 class To_one_hot(torch.nn.Module):
-    def __init__(self, num_labels):
+    def __init__(self, num_classes):
         super(To_one_hot, self).__init__()
-        self.num_labels = num_labels
+        self.num_classes = num_classes
 
     def forward(self, x: Union[int, List[int], torch.Tensor]):
         if type(x) == int:
@@ -354,14 +354,14 @@ class To_one_hot(torch.nn.Module):
             x = torch.tensor(x)  # pylint:disable=not-callable
         if len(x.shape) == 0:
             one_hot = torch.zeros(  # pylint:disable=no-member
-                (self.num_labels,), device=x.device
+                (self.num_classes,), device=x.device
             )
             one_hot.scatter_(0, x, 1)
             return one_hot
         elif len(x.shape) == 1:
             x = x.unsqueeze(1)
         one_hot = torch.zeros(  # pylint:disable=no-member
-            (x.shape[0], self.num_labels), device=x.device
+            (x.shape[0], self.num_classes), device=x.device
         )
         one_hot.scatter_(1, x, 1)
         return one_hot
@@ -670,7 +670,7 @@ def train_on_server(
     optimizer = optim.get_optim(worker.id)
     avg_loss = []
     model.send(worker)
-    loss_fn.send(worker)
+    loss_fn = loss_fn.send(worker)
     L = len(train_loader)
     for batch_idx, (data, target) in enumerate(train_loader):
         progress_dict[worker.id] = (batch_idx, L)
@@ -703,7 +703,7 @@ def train_on_server(
         loss = loss.get()
         avg_loss.append(loss.detach().cpu().item())
     model.get()
-    loss_fn.get()
+    loss_fn = loss_fn.get()
     result_dict[worker.id] = model
     loss_dict[worker.id]["final"] = np.mean(avg_loss)
     progress_dict[worker.id] = (batch_idx + 1, L)
@@ -719,13 +719,14 @@ def train(
     optimizer,
     epoch,
     loss_fn,
+    num_classes,
     vis_params=None,
     verbose=True,
 ):
     model.train()
     if args.mixup:
         mixup = MixUp(λ=args.mixup_lambda, p=args.mixup_prob)
-        oh_converter = To_one_hot(3)
+        oh_converter = To_one_hot(num_classes)
         oh_converter.to(device)
 
     L = len(train_loader)
@@ -776,7 +777,8 @@ def test(
     vis_params=None,
     class_names=None,
 ):
-    if args.mixup:
+    oh_converter = None
+    if args.mixup or (args.train_federated and args.weight_classes):
         oh_converter = To_one_hot(num_classes)
         oh_converter.to(device)
     model.eval()
@@ -797,7 +799,7 @@ def test(
                 data = data.to(device)
                 target = target.to(device)
             output = model(data)
-            loss = loss_fn(output, oh_converter(target) if args.mixup else target)
+            loss = loss_fn(output, oh_converter(target) if oh_converter else target)
             test_loss += loss.item()  # sum up batch loss
             total_scores.append(output)
             pred = output.argmax(dim=1)
