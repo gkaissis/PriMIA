@@ -72,8 +72,8 @@ def calc_class_weights(args, train_loader):
                 # the last batch is not considered
                 # TODO: find solution for this
                 continue
-            if args.train_federated and args.mixup:
-                if args.mixup_lambda == 0.5:
+            if args.train_federated and (args.mixup or args.weight_classes):
+                if args.mixup and args.mixup_lambda == 0.5:
                     raise ValueError(
                         "it's currently not supported to weight classes "
                         "while mixup has a lambda of 0.5"
@@ -107,6 +107,11 @@ def setup_pysyft(args, hook, verbose=False):
         worker_names.remove("validation")"""
 
     if args.websockets:
+        if args.weight_classes or (args.mixup and args.dataset == "mnist"):
+            raise NotImplementedError(
+                "weighted loss as well as mixup in combination"
+                " with mnist are not implemented currently"
+            )
         workers = {
             worker["id"]: sy.workers.node_client.NodeClient(
                 hook,
@@ -169,7 +174,7 @@ def setup_pysyft(args, hook, verbose=False):
                 ]
                 target_dict_pneumonia = {0: 1, 1: 0, 2: 2}
                 target_tf = [lambda x: target_dict_pneumonia[x]]
-                if args.mixup:
+                if args.mixup or args.weight_classes:
                     target_tf.append(
                         lambda x: torch.tensor(x)  # pylint:disable=not-callable
                     )
@@ -218,7 +223,7 @@ def setup_pysyft(args, hook, verbose=False):
             selected_data = torch.stack(data)  # pylint:disable=no-member
             selected_targets = (
                 torch.stack(targets)  # pylint:disable=no-member
-                if args.mixup
+                if args.mixup or args.weight_classes
                 else torch.tensor(targets)  # pylint:disable=not-callable
             )
             if args.mixup:
@@ -333,7 +338,11 @@ def main(args, verbose=True):
 
         hook = sy.TorchHook(torch)
         train_loader, val_loader, total_L, workers, worker_names = setup_pysyft(
-            args, hook, verbose=cmd_args.verbose
+            args,
+            hook,
+            verbose=cmd_args.verbose
+            if "cmd_args" in locals() and hasattr(cmd_args, "verbose")
+            else False,
         )
     else:
         if args.dataset == "mnist":
@@ -518,11 +527,11 @@ def main(args, verbose=True):
         )
     else:
         raise NotImplementedError("optimization not implemented")
-    if args.train_federated:
+    if args.train_federated or args.weight_classes:
         from syft.federated.floptimizer import Optims
 
         optimizer = Optims(worker_names, optimizer)
-    if args.mixup:
+    if args.mixup or args.weight_classes:
         loss_fn = Cross_entropy_one_hot(weight=cw, reduction="mean")
     else:
         loss_fn = nn.CrossEntropyLoss(weight=cw, reduction="mean")
@@ -624,6 +633,7 @@ def main(args, verbose=True):
                     optimizer,
                     epoch,
                     loss_fn,
+                    num_classes,
                     vis_params=vis_params,
                     verbose=verbose,
                 )

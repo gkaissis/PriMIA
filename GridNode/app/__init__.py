@@ -16,7 +16,7 @@ sys.path.append(
         os.path.join(os.path.dirname(__file__), os.path.pardir, os.path.pardir)
     )
 )
-from torchlib.utils import AddGaussianNoise
+from torchlib.utils import AddGaussianNoise, To_one_hot, MixUp
 from torchlib.dataloader import LabelMNIST
 
 
@@ -132,13 +132,24 @@ def create_app(
                 AddGaussianNoise(mean=0.0, std=args.noise_std, p=args.noise_prob),
             ]
             target_dict_pneumonia = {0: 1, 1: 0, 2: 2}
+            target_tf = [lambda x: target_dict_pneumonia[x]]
+            if args.mixup or args.weight_classes:
+                target_tf.append(
+                    lambda x: torch.tensor(x)  # pylint:disable=not-callable
+                )
+                target_tf.append(To_one_hot(3))
             dataset = ImageFolder(
                 data_dir,
                 transform=transforms.Compose(train_tf),
-                target_transform=lambda x: target_dict_pneumonia[x],
+                target_transform=transforms.Compose(target_tf),
             )
 
         data, targets = [], []
+        # repetitions = 1 if worker.id == "validation" else args.repetitions_dataset
+        if args.mixup:
+            dataset = torch.utils.data.DataLoader(dataset, batch_size=1, shuffle=True)
+            mixup = MixUp(λ=args.mixup_lambda, p=args.mixup_prob)
+            last_set = None
         for j in tqdm(
             range(args.repetitions_dataset),
             total=args.repetitions_dataset,
@@ -149,15 +160,34 @@ def create_app(
                 dataset,
                 total=len(dataset),
                 leave=False,
-                desc="register data {:d}. time".format(j),
+                desc="register data {:d}. time".format(j + 1),
             ):
+                if args.mixup:
+                    original_set = (d, t)
+                    if last_set:
+                        # pylint:disable=unsubscriptable-object
+                        d, t = mixup(((d, last_set[0]), (t, last_set[1])))
+                    last_set = original_set
                 data.append(d)
                 targets.append(t)
         selected_data = torch.stack(data)  # pylint:disable=no-member
-        selected_targets = torch.tensor(targets)  # pylint:disable=not-callable
+        selected_targets = (
+            torch.stack(targets)  # pylint:disable=no-member
+            if args.mixup or args.weight_classes
+            else torch.tensor(targets)  # pylint:disable=not-callable
+        )
+        if args.mixup:
+            selected_data = selected_data.squeeze(1)
+            selected_targets = selected_targets.squeeze(1)
         del data, targets
-        selected_data.tag(args.dataset, "#traindata")
-        selected_targets.tag(args.dataset, "#traintargets")
+        selected_data.tag(
+            args.dataset, "#traindata",  # "#valdata" if worker.id == "validation" else
+        )
+        selected_targets.tag(
+            args.dataset,
+            # "#valtargets" if worker.id == "validation" else
+            "#traintargets",
+        )
         local_worker.load_data([selected_data, selected_targets])
 
         print(
