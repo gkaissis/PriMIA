@@ -157,6 +157,19 @@ class Arguments:
         if self.websockets:
             assert self.train_federated, "If you use websockets it must be federated"
 
+    @classmethod
+    def from_namespace(cls, args):
+        obj = cls.__new__(cls)
+        super(Arguments, obj).__init__()
+        for attr in dir(args):
+            if (
+                not callable(getattr(args, attr))
+                and not attr.startswith("__")
+                and attr in dir(args)
+            ):
+                setattr(obj, attr, getattr(args, attr)) 
+        return obj
+
     def from_previous_checkpoint(self, cmd_args):
         self.visdom = False
         self.encrypted_inference = cmd_args.encrypted_inference

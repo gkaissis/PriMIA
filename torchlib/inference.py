@@ -11,6 +11,7 @@ import syft as sy
 import sys, os.path
 from warnings import warn
 from torchvision import datasets, transforms, models
+from argparse import Namespace
 
 sys.path.insert(0, os.path.split(sys.path[0])[0])  # TODO: make prettier
 from utils import test, Arguments  # pylint:disable=import-error
@@ -54,6 +55,8 @@ if __name__ == "__main__":
     state = torch.load(cmd_args.model_weights, map_location=device)
 
     args = state["args"]
+    if type(args) is Namespace:
+        args = Arguments.from_namespace(args)
     args.from_previous_checkpoint(cmd_args)
     print(str(args))
 
