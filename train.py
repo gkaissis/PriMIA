@@ -17,6 +17,7 @@ import tqdm
 import visdom
 from tabulate import tabulate
 from torchvision import datasets, models, transforms
+from optuna import TrialPruned
 
 from torchlib.dataloader import PPPP, LabelMNIST  # pylint:disable=import-error
 from torchlib.models import (
@@ -304,7 +305,7 @@ def setup_pysyft(args, hook, verbose=False):
     return train_loader, val_loader, total_L, workers, worker_names
 
 
-def main(args, verbose=True):
+def main(args, verbose=True, optuna_trial=None):
 
     use_cuda = not args.no_cuda and torch.cuda.is_available()
 
@@ -527,11 +528,11 @@ def main(args, verbose=True):
         )
     else:
         raise NotImplementedError("optimization not implemented")
-    if args.train_federated or args.weight_classes:
+    if args.train_federated:
         from syft.federated.floptimizer import Optims
 
         optimizer = Optims(worker_names, optimizer)
-    if args.mixup or args.weight_classes:
+    if args.mixup or (args.weight_classes and args.train_federated):
         loss_fn = Cross_entropy_one_hot(weight=cw, reduction="mean")
     else:
         loss_fn = nn.CrossEntropyLoss(weight=cw, reduction="mean")
@@ -671,6 +672,14 @@ def main(args, verbose=True):
                 exp_name,
                 epoch * (args.repetitions_dataset if args.repetitions_dataset else 1),
             )
+            if optuna_trial:
+                optuna_trial.report(
+                    roc_auc,
+                    epoch
+                    * (args.repetitions_dataset if args.repetitions_dataset else 1),
+                )
+                if optuna_trial.should_prune():
+                    raise TrialPruned()
 
             save_model(model, optimizer, model_path, args, epoch)
             roc_auc_scores.append(roc_auc)
