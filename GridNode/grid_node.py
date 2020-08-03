@@ -57,7 +57,7 @@ parser.add_argument(
 )
 
 parser.add_argument(
-    "--config", type=str, required=True, help="Path to config",
+    "--config", type=str, required=False, help="Path to config",
 )
 
 parser.set_defaults(use_test_config=False)

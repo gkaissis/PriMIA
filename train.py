@@ -19,7 +19,12 @@ from tabulate import tabulate
 from torchvision import datasets, models, transforms
 from optuna import TrialPruned
 
-from torchlib.dataloader import PPPP, LabelMNIST  # pylint:disable=import-error
+from torchlib.dataloader import (
+    PPPP,
+    LabelMNIST,
+    calc_mean_std,
+    single_channel_loader,
+)  # pylint:disable=import-error
 from torchlib.models import (
     conv_at_resolution,  # pylint:disable=import-error
     resnet18,
@@ -107,6 +112,24 @@ def setup_pysyft(args, hook, verbose=False):
     """if "validation" in worker_names:
         worker_names.remove("validation")"""
 
+    crypto_in_config = "crypto_provider" in worker_names
+    crypto_provider = None
+    assert (not args.secure_aggregation) or (
+        crypto_in_config
+    ), "No crypto provider in configuration"
+    if crypto_in_config:
+        worker_names.remove("crypto_provider")
+        cp_key = [
+            key
+            for key, worker in worker_dict.items()
+            if worker["id"] == "crypto_provider"
+        ]
+        assert len(cp_key) == 1
+        cp_key = cp_key[0]
+        if args.secure_aggregation:
+            crypto_provider_data = worker_dict[cp_key]
+        worker_dict.pop(cp_key)
+
     if args.websockets:
         if args.weight_classes or (args.mixup and args.dataset == "mnist"):
             raise NotImplementedError(
@@ -122,12 +145,25 @@ def setup_pysyft(args, hook, verbose=False):
             )
             for _, worker in worker_dict.items()
         }
+        if args.secure_aggregation:
+            crypto_provider = sy.workers.node_client.NodeClient(
+                hook,
+                "http://{:s}:{:s}".format(
+                    crypto_provider_data["host"], crypto_provider_data["port"]
+                ),
+                id=crypto_provider_data["id"],
+                verbose=verbose,
+            )
 
     else:
         workers = {
             worker["id"]: sy.VirtualWorker(hook, id=worker["id"], verbose=verbose)
             for _, worker in worker_dict.items()
         }
+        if args.secure_aggregation:
+            crypto_provider = sy.VirtualWorker(
+                hook, id="crypto_provider", verbose=verbose
+            )
         train_loader = None
         for i, worker in tqdm.tqdm(
             enumerate(workers.values()),
@@ -158,6 +194,26 @@ def setup_pysyft(args, hook, verbose=False):
                     ),
                 )
             elif args.dataset == "pneumonia":
+                data_dir = path.join(
+                    "data/server_simulation/", "worker{:d}".format(i + 1)
+                )
+                stats_dataset = datasets.ImageFolder(
+                    data_dir,
+                    transform=transforms.Compose(
+                        [
+                            transforms.Resize(args.train_resolution),
+                            transforms.CenterCrop(args.train_resolution),
+                            transforms.ToTensor(),
+                        ]
+                    ),
+                )
+                mean, std = calc_mean_std(
+                    stats_dataset,
+                    args.train_resolution,
+                    consider_black_pixels=False,
+                    save_folder=data_dir,
+                )
+                del stats_dataset
                 train_tf = [
                     transforms.RandomVerticalFlip(p=args.vertical_flip_prob),
                     transforms.RandomAffine(
@@ -170,7 +226,7 @@ def setup_pysyft(args, hook, verbose=False):
                     transforms.Resize(args.inference_resolution),
                     transforms.RandomCrop(args.train_resolution),
                     transforms.ToTensor(),
-                    transforms.Normalize((0.57282609,), (0.17427578,)),
+                    transforms.Normalize(tuple(mean), tuple(std)),
                     AddGaussianNoise(mean=0.0, std=args.noise_std, p=args.noise_prob),
                 ]
                 target_dict_pneumonia = {0: 1, 1: 0, 2: 2}
@@ -184,10 +240,17 @@ def setup_pysyft(args, hook, verbose=False):
                     # path.join("data/server_simulation/", "validation")
                     # if worker.id == "validation"
                     # else
-                    path.join("data/server_simulation/", "worker{:d}".format(i + 1)),
+                    data_dir,
                     transform=transforms.Compose(train_tf),
                     target_transform=transforms.Compose(target_tf),
                 )
+                mean, std = (
+                    torch.from_numpy(mean),  # pylint:disable=no-member
+                    torch.from_numpy(std),  # pylint:disable=no-member
+                )
+                mean.tag("#datamean")
+                std.tag("#datastd")
+                worker.load_data([mean, std])
 
             else:
                 raise NotImplementedError(
@@ -273,11 +336,42 @@ def setup_pysyft(args, hook, verbose=False):
             ),
         )
     elif args.dataset == "pneumonia":
+        means = [m[0] for m in grid.search("#datamean").values()]
+        stds = [s[0] for s in grid.search("#datastd").values()]
+        if len(means) > 0 and len(stds) > 0 and len(means) == len(stds):
+            mean = (
+                means[0]
+                .fix_precision()
+                .share(*workers, crypto_provider=crypto_provider)
+                .get()
+            )
+            std = (
+                stds[0]
+                .fix_precision()
+                .share(*workers, crypto_provider=crypto_provider)
+                .get()
+            )
+            for m, s in zip(means[1:], stds[1:]):
+                mean += (
+                    m.fix_precision()
+                    .share(*workers, crypto_provider=crypto_provider)
+                    .get()
+                )
+                std += (
+                    s.fix_precision()
+                    .share(*workers, crypto_provider=crypto_provider)
+                    .get()
+                )
+            mean = mean.get().float_precision() / len(stds)
+            std = std.get().float_precision() / len(stds)
+        else:
+            ## default values
+            mean, std = 0.5, 0.2
         val_tf = [
             transforms.Resize(args.inference_resolution),
             transforms.CenterCrop(args.train_resolution),
             transforms.ToTensor(),
-            transforms.Normalize((0.57282609,), (0.17427578,)),
+            transforms.Normalize(mean, std),
         ]
         target_dict_pneumonia = {0: 1, 1: 0, 2: 2}
         valset = datasets.ImageFolder(
@@ -302,7 +396,7 @@ def setup_pysyft(args, hook, verbose=False):
             len(val_loader.dataset)
         )
     )
-    return train_loader, val_loader, total_L, workers, worker_names
+    return train_loader, val_loader, total_L, workers, worker_names, crypto_provider
 
 
 def main(args, verbose=True, optuna_trial=None):
@@ -338,7 +432,14 @@ def main(args, verbose=True, optuna_trial=None):
     if args.train_federated:
 
         hook = sy.TorchHook(torch)
-        train_loader, val_loader, total_L, workers, worker_names = setup_pysyft(
+        (
+            train_loader,
+            val_loader,
+            total_L,
+            workers,
+            worker_names,
+            crypto_provider,
+        ) = setup_pysyft(
             args,
             hook,
             verbose=cmd_args.verbose
@@ -486,57 +587,84 @@ def main(args, verbose=True, optuna_trial=None):
         )
         vis_params = {"vis": vis, "vis_env": vis_env}
     if args.model == "vgg16":
-        model = vgg16(
-            pretrained=args.pretrained,
-            num_classes=num_classes,
-            in_channels=3 if args.dataset == "pneumonia" else 1,
-            adptpool=False,
-            input_size=args.inference_resolution,
-            pooling=args.pooling_type,
-        )
+        model_type = vgg16
+        model_args = {
+            "pretrained": args.pretrained,
+            "num_classes": num_classes,
+            "in_channels": 3 if args.dataset == "pneumonia" else 1,
+            "adptpool": False,
+            "input_size": args.inference_resolution,
+            "pooling": args.pooling_type,
+        }
     elif args.model == "simpleconv":
         if args.pretrained:
             warn("No pretrained version available")
 
-        model = conv_at_resolution[args.train_resolution](
-            num_classes=num_classes,
-            in_channels=3 if args.dataset == "pneumonia" else 1,
-            pooling=args.pooling_type,
-        )
+        model_type = conv_at_resolution[args.train_resolution]
+        model_args = {
+            "num_classes": num_classes,
+            "in_channels": 3 if args.dataset == "pneumonia" else 1,
+            "pooling": args.pooling_type,
+        }
     elif args.model == "resnet-18":
-        model = resnet18(
-            pretrained=args.pretrained,
-            num_classes=num_classes,
-            in_channels=3 if args.dataset == "pneumonia" else 1,
-            adptpool=False,
-            input_size=args.inference_resolution,
-            pooling=args.pooling_type,
-        )
+        model_type = resnet18
+        model_args = {
+            "pretrained": args.pretrained,
+            "num_classes": num_classes,
+            "in_channels": 3 if args.dataset == "pneumonia" else 1,
+            "adptpool": False,
+            "input_size": args.inference_resolution,
+            "pooling": args.pooling_type,
+        }
     else:
         raise NotImplementedError("model unknown")
+    if args.train_federated and args.secure_aggregation:
+        model = model_type(**model_args)
+        model = {
+            key: model.copy()
+            for key in [w.id for w in workers.values()] + ["local_model"]
+        }
+    else:
+        model = model_type(**model_args)
 
     if args.optimizer == "SGD":
         optimizer = optim.SGD(
             model.parameters(), lr=args.lr, weight_decay=args.weight_decay,
         )  # TODO momentum is not supported at the moment
     elif args.optimizer == "Adam":
-        optimizer = optim.Adam(
-            model.parameters(),
-            lr=args.lr,
-            betas=(args.beta1, args.beta2),
-            weight_decay=args.weight_decay,
+        optimizer = (
+            {
+                idt: optim.Adam(
+                    m.parameters(),
+                    lr=args.lr,
+                    betas=(args.beta1, args.beta2),
+                    weight_decay=args.weight_decay,
+                )
+                for idt, m in model.items()
+                if idt != "crypto_provider"
+            }
+            if args.secure_aggregation
+            else optim.Adam(
+                model.parameters(),
+                lr=args.lr,
+                betas=(args.beta1, args.beta2),
+                weight_decay=args.weight_decay,
+            )
         )
     else:
         raise NotImplementedError("optimization not implemented")
-    if args.train_federated:
+    if args.train_federated and not args.secure_aggregation:
         from syft.federated.floptimizer import Optims
 
         optimizer = Optims(worker_names, optimizer)
+    loss_args = {"weight": cw, "reduction": "mean"}
     if args.mixup or (args.weight_classes and args.train_federated):
-        loss_fn = Cross_entropy_one_hot(weight=cw, reduction="mean")
+        loss_fn = Cross_entropy_one_hot
     else:
-        loss_fn = nn.CrossEntropyLoss(weight=cw, reduction="mean")
-    loss_fn.to(device)
+        loss_fn = nn.CrossEntropyLoss
+    loss_fn = loss_fn(**loss_args).to(device)
+    if args.secure_aggregation:
+        loss_fn = {w: loss_fn.copy() for w in [*workers, "local_model"]}
 
     start_at_epoch = 1
     if "cmd_args" in locals() and cmd_args.resume_checkpoint:
@@ -554,15 +682,19 @@ def main(args, verbose=True, optuna_trial=None):
             pass  # not possible to load previous optimizer if setting changed
         args.incorporate_cmd_args(cmd_args)
         model.load_state_dict(state["model_state_dict"])
-    model.to(device)
+    if args.secure_aggregation:
+        for m in model.values():
+            m.to(device)
+    else:
+        model.to(device)
 
     test(
         args,
-        model,
+        model["local_model"] if args.secure_aggregation else model,
         device,
         val_loader,
         start_at_epoch - 1,
-        loss_fn,
+        loss_fn["local_model"] if args.secure_aggregation else loss_fn,
         num_classes,
         vis_params=vis_params,
         class_names=class_names,
@@ -596,7 +728,8 @@ def main(args, verbose=True, optuna_trial=None):
         if args.train_federated:
             for w in worker_names:
                 new_lr = scheduler.adjust_learning_rate(
-                    optimizer.get_optim(w), epoch - 1
+                    optimizer[w] if args.secure_aggregation else optimizer.get_optim(w),
+                    epoch - 1,
                 )
         else:
             new_lr = scheduler.adjust_learning_rate(optimizer, epoch - 1)
@@ -620,6 +753,7 @@ def main(args, verbose=True, optuna_trial=None):
                     optimizer,
                     epoch,
                     loss_fn,
+                    crypto_provider,
                     test_params=test_params,
                     vis_params=vis_params,
                     verbose=verbose,
@@ -648,6 +782,7 @@ def main(args, verbose=True, optuna_trial=None):
                         total_L,
                         workers,
                         worker_names,
+                        crypto_provider,
                     ) = setup_pysyft(args, hook, verbose=cmd_args.verbose)
                 except Exception as e:
                     print("restarting failed")
@@ -658,11 +793,11 @@ def main(args, verbose=True, optuna_trial=None):
         if (epoch % args.test_interval) == 0:
             _, roc_auc = test(
                 args,
-                model,
+                model["local_model"] if args.secure_aggregation else model,
                 device,
                 val_loader,
                 epoch,
-                loss_fn,
+                loss_fn["local_model"] if args.secure_aggregation else loss_fn,
                 num_classes=num_classes,
                 vis_params=vis_params,
                 class_names=class_names,
@@ -670,7 +805,12 @@ def main(args, verbose=True, optuna_trial=None):
             )
             model_path = "model_weights/{:s}_epoch_{:03d}.pt".format(
                 exp_name,
-                epoch * (args.repetitions_dataset if args.repetitions_dataset else 1),
+                epoch
+                * (
+                    args.repetitions_dataset
+                    if "repetitions_dataset" in vars(args)
+                    else 1
+                ),
             )
             if optuna_trial:
                 optuna_trial.report(
@@ -700,6 +840,8 @@ def main(args, verbose=True, optuna_trial=None):
     )
     # load best model on val set
     state = torch.load(best_model_file, map_location=device)
+    if args.secure_aggregation:
+        model = model["local_model"]
     model.load_state_dict(state["model_state_dict"])
 
     shutil.copyfile(
@@ -726,6 +868,9 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--train_federated", action="store_true", help="Train in federated setting"
+    )
+    parser.add_argument(
+        "--secure_aggregation", action="store_true", help="Perform secure aggregation"
     )
     parser.add_argument(
         "--dataset",

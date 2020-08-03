@@ -1,5 +1,6 @@
 import multiprocessing as mp
-from os.path import isfile
+from os import makedirs
+from os.path import isfile, split, isdir
 from random import random
 from time import sleep
 from typing import List, Optional, Tuple, Union
@@ -121,6 +122,9 @@ class Arguments:
             self.batch_size *= 2
             print("Doubled batch size because of mixup")
         self.train_federated = cmd_args.train_federated if mode == "train" else False
+        self.secure_aggregation = (
+            cmd_args.secure_aggregation if mode == "train" else False
+        )
         if self.train_federated:
             self.sync_every_n_batch = config.getint(
                 "federated", "sync_every_n_batch", fallback=10
@@ -167,7 +171,7 @@ class Arguments:
                 and not attr.startswith("__")
                 and attr in dir(args)
             ):
-                setattr(obj, attr, getattr(args, attr)) 
+                setattr(obj, attr, getattr(args, attr))
         return obj
 
     def from_previous_checkpoint(self, cmd_args):
@@ -441,6 +445,13 @@ def progress_animation(done, progress_dict):
     print("\033[K \n \033[K \033[F \033[F")
 
 
+def dict_to_mng_dict(dictionary: dict, mng: mp.Manager):
+    return_dict = mng.dict()
+    for key, value in dictionary.items():
+        return_dict[key] = value
+    return return_dict
+
+
 ## Assuming train loaders is dictionary with {worker : train_loader}
 def train_federated(
     args,
@@ -450,102 +461,118 @@ def train_federated(
     optimizer,
     epoch,
     loss_fn,
+    crypto_provider,
     test_params=None,
     vis_params=None,
     verbose=True,
 ):
-    model.train()
     mng = mp.Manager()
-    result_dict, waiting_for_sync_dict, sync_dict, progress_dict, loss_dict = (
-        mng.dict(),
-        mng.dict(),
-        mng.dict(),
-        mng.dict(),
-        mng.dict(),
-    )
-    stop_sync, sync_completed = mng.Value("i", False), mng.Value("i", False)
-    # num_workers = mng.Value("d", len(train_loaders.keys()))
-    for worker in train_loaders.keys():
-        result_dict[worker.id] = None
-        loss_dict[worker.id] = mng.dict()
-        waiting_for_sync_dict[worker.id] = False
-        progress_dict[worker.id] = (0, len(train_loaders[worker]))
-
-    total_batches = 0
-    weights = []
-    for idt, (_, batches) in progress_dict.items():
-        total_batches += batches
-        weights.append(batches)
-    weights = np.array(weights) / total_batches
-    if args.weighted_averaging:
-        w_dict = {}
-        for weight, idt in zip(weights, progress_dict.keys()):
-            w_dict[idt] = weight
+    if args.secure_aggregation:
+        model, avg_loss = secure_aggregation_epoch(
+            args,
+            model,
+            device,
+            train_loaders,
+            optimizer,
+            epoch,
+            loss_fn,
+            crypto_provider,
+            test_params=test_params,
+        )
     else:
-        w_dict = {idt: 1.0 / len(progress_dict.keys()) for idt in progress_dict.keys()}
-    jobs = [
-        mp.Process(
-            name="{:s} training".format(worker.id),
-            target=train_on_server,
+        model.train()
+        result_dict, waiting_for_sync_dict, sync_dict, progress_dict, loss_dict = (
+            mng.dict(),
+            mng.dict(),
+            mng.dict(),
+            mng.dict(),
+            mng.dict(),
+        )
+        stop_sync, sync_completed = mng.Value("i", False), mng.Value("i", False)
+        # num_workers = mng.Value("d", len(train_loaders.keys()))
+        for worker in train_loaders.keys():
+            result_dict[worker.id] = None
+            loss_dict[worker.id] = mng.dict()
+            waiting_for_sync_dict[worker.id] = False
+            progress_dict[worker.id] = (0, len(train_loaders[worker]))
+
+        total_batches = 0
+        weights = []
+        for idt, (_, batches) in progress_dict.items():
+            total_batches += batches
+            weights.append(batches)
+        weights = np.array(weights) / total_batches
+        if args.weighted_averaging:
+            w_dict = {}
+            for weight, idt in zip(weights, progress_dict.keys()):
+                w_dict[idt] = weight
+        else:
+            w_dict = {
+                idt: 1.0 / len(progress_dict.keys()) for idt in progress_dict.keys()
+            }
+        jobs = [
+            mp.Process(
+                name="{:s} training".format(worker.id),
+                target=train_on_server,
+                args=(
+                    args,
+                    model,
+                    worker,
+                    device,
+                    train_loader,
+                    optimizer,
+                    loss_fn,
+                    result_dict,
+                    waiting_for_sync_dict,
+                    sync_dict,
+                    sync_completed,
+                    progress_dict,
+                    loss_dict,
+                ),
+            )
+            for worker, train_loader in train_loaders.items()
+        ]
+        for j in jobs:
+            j.start()
+        synchronize = mp.Process(
+            name="synchronization",
+            target=synchronizer,
             args=(
                 args,
-                model,
-                worker,
-                device,
-                train_loader,
-                optimizer,
-                loss_fn,
                 result_dict,
                 waiting_for_sync_dict,
                 sync_dict,
-                sync_completed,
                 progress_dict,
                 loss_dict,
+                stop_sync,
+                sync_completed,
+                w_dict,
+                epoch,
             ),
+            kwargs={
+                "wait_interval": args.wait_interval,
+                "vis_params": vis_params,
+                "test_params": test_params,
+            },
         )
-        for worker, train_loader in train_loaders.items()
-    ]
-    for j in jobs:
-        j.start()
-    synchronize = mp.Process(
-        name="synchronization",
-        target=synchronizer,
-        args=(
-            args,
-            result_dict,
-            waiting_for_sync_dict,
-            sync_dict,
-            progress_dict,
-            loss_dict,
-            stop_sync,
-            sync_completed,
-            w_dict,
-            epoch,
-        ),
-        kwargs={
-            "wait_interval": args.wait_interval,
-            "vis_params": vis_params,
-            "test_params": test_params,
-        },
-    )
-    synchronize.start()
-    if verbose:
-        done = mng.Value("i", False)
-        animate = mp.Process(
-            name="animation", target=progress_animation, args=(done, progress_dict)
-        )
-        animate.start()
-    for j in jobs:
-        j.join()
-    stop_sync.value = True
-    synchronize.join()
-    if verbose:
-        done.value = True
-        animate.join()
+        synchronize.start()
+        if verbose:
+            done = mng.Value("i", False)
+            animate = mp.Process(
+                name="animation", target=progress_animation, args=(done, progress_dict)
+            )
+            animate.start()
+        for j in jobs:
+            j.join()
+        stop_sync.value = True
+        synchronize.join()
+        if verbose:
+            done.value = True
+            animate.join()
 
-    model = sync_dict["model"]
+        model = sync_dict["model"]
 
-    avg_loss = np.average([l["final"] for l in loss_dict.values()], weights=weights)
+        avg_loss = np.average([l["final"] for l in loss_dict.values()], weights=weights)
 
     if args.visdom:
         vis_params["vis"].line(
@@ -559,6 +586,155 @@ def train_federated(
     else:
         print("Train Epoch: {} \tLoss: {:.6f}".format(epoch, avg_loss,))
     return model
+
+
+def send_new_models(local_model, models):
+    with torch.no_grad():
+        for model_worker, remote_model in models.items():
+            if model_worker == "local_model":
+                continue
+            for new_param, remote_param in zip(
+                local_model.parameters(), remote_model.parameters()
+            ):
+                worker = remote_param.location
+                remote_value = new_param.send(worker)
+                # Try this and if not do x_ptr * 0 + remote_value
+                remote_param.set_(remote_value)
+
+
+def secure_aggregation(
+    local_model, models, workers, crypto_provider, args, test_params
+):
+    with torch.no_grad():
+        for local_param, *remote_params in zip(
+            *(
+                [local_model.parameters()]
+                + [
+                    model.parameters()
+                    for key, model in models.items()
+                    if key != "local_model"
+                ]
+            )
+        ):
+            param_stack = (
+                remote_params[0]
+                .copy()
+                .fix_prec()
+                .share(*workers, crypto_provider=crypto_provider)
+                .get()
+            )
+            for remote_param in remote_params[1:]:
+                param_stack += (
+                    remote_param.copy()
+                    .fix_prec()
+                    .share(*workers, crypto_provider=crypto_provider)
+                    .get()
+                )
+            param_stack = param_stack.get().float_prec()
+            param_stack /= len(remote_params)
+            local_param.set_(param_stack)
+    return local_model
+
+
+def secure_aggregation_epoch(
+    args,
+    models,
+    device,
+    train_loaders,
+    optimizers,
+    epoch,
+    loss_fns,
+    crypto_provider,
+    test_params=None,
+    verbose=True,
+):
+    for worker in train_loaders.keys():
+        if models[worker.id].location:
+            continue
+        models[worker.id].send(worker)
+        loss_fns[worker.id].send(worker)
+    # 1. Send new version of the model
+    send_new_models(models["local_model"], models)
+
+    avg_loss = []
+
+    num_batches = {key.id: len(loader) for key, loader in train_loaders.items()}
+    dataloaders = {key: iter(loader) for key, loader in train_loaders.items()}
+    pbar = tqdm.tqdm(
+        range(max(num_batches.values())),
+        total=max(num_batches.values()),
+        leave=False,
+        desc="Training with secure aggregation",
+    )
+    for batch_idx in pbar:
+        for worker, dataloader in tqdm.tqdm(
+            dataloaders.items(),
+            total=len(dataloaders),
+            leave=False,
+            desc="Train batch {:d}".format(batch_idx),
+        ):
+            if batch_idx > num_batches[worker.id]:
+                continue
+            model = models[worker.id]
+            optimizer = optimizers[worker.id]
+            loss_fn = loss_fns[worker.id]
+            optimizer.zero_grad()
+            data, target = next(dataloader)
+            pred = model(data)
+            loss = loss_fn(pred, target)
+            loss.backward()
+            optimizer.step()
+            avg_loss.append(loss.detach().cpu().get().item())
+        if batch_idx > 0 and batch_idx % args.sync_every_n_batch == 0:
+            pbar.set_description_str("Synchronizing")
+            models["local_model"] = secure_aggregation(
+                models["local_model"],
+                models,
+                train_loaders.keys(),
+                crypto_provider,
+                args,
+                test_params,
+            )
+            send_new_models(models["local_model"], models)
+            pbar.set_description_str("Training with secure aggregation")
+
+    # 2. Train remotely the models
+    # for worker in tqdm.tqdm(
+    #     train_loaders.keys(),
+    #     total=len(train_loaders),
+    #     desc="Training with secure aggregation",
+    #     leave=False,
+    # ):
+    #     model = models[worker.id]
+    #     optimizer = optimizers[worker.id]
+    #     dataloader = train_loaders[worker]
+    #     loss_fn = loss_fns[worker.id]
+    #     for (data, target) in tqdm.tqdm(
+    #         dataloader,
+    #         total=len(dataloader),
+    #         desc="train on {:s}".format(worker.id),
+    #         leave=False,
+    #     ):
+    #         optimizer.zero_grad()
+    #         pred = model(data)
+    #         loss = loss_fn(pred, target)
+    #         loss.backward()
+    #         optimizer.step()
+    #         avg_loss.append(loss.detach().cpu().get().item())
+
+    # 3. Secure aggregation of the updated models
+
+    models["local_model"] = secure_aggregation(
+        models["local_model"],
+        models,
+        train_loaders.keys(),
+        crypto_provider,
+        args,
+        test_params,
+    )
+    avg_loss = np.mean(avg_loss)
+
+    return models, avg_loss
 
 
 def synchronizer(
@@ -577,7 +753,8 @@ def synchronizer(
     test_params=None,
 ):
     if test_params:
-        save_iter: int = 1
+        pass
+        # save_iter: int = 1
     while not stop.value:
         while not all(waiting_for_sync_dict.values()) and not stop.value:
             sleep(0.1)
@@ -702,7 +879,6 @@ def train_on_server(
         optimizer.step()
         loss = loss.get()
         avg_loss.append(loss.detach().cpu().item())
-    model.get()
     loss_fn = loss_fn.get()
     result_dict[worker.id] = model
     loss_dict[worker.id]["final"] = np.mean(avg_loss)
@@ -763,6 +939,61 @@ def train(
     if not args.visdom and verbose:
         print("Train Epoch: {} \tLoss: {:.6f}".format(epoch, np.mean(avg_loss),))
     return model
+
+
+def stats_table(
+    conf_matrix, report, roc_auc=0.0, matthews_coeff=0.0, class_names=None, epoch=0
+):
+    rows = []
+    for i in range(conf_matrix.shape[0]):
+        report_entry = report[str(i)]
+        row = [
+            class_names[i] if class_names else i,
+            "{:.1f} %".format(report_entry["recall"] * 100.0),
+            "{:.1f} %".format(report_entry["precision"] * 100.0),
+            "{:.1f} %".format(report_entry["f1-score"] * 100.0),
+            report_entry["support"],
+        ]
+        row.extend([conf_matrix[i, j] for j in range(conf_matrix.shape[1])])
+        rows.append(row)
+    rows.append(
+        [
+            "Overall (macro)",
+            "{:.1f} %".format(report["macro avg"]["recall"] * 100.0),
+            "{:.1f} %".format(report["macro avg"]["precision"] * 100.0),
+            "{:.1f} %".format(report["macro avg"]["f1-score"] * 100.0),
+            report["macro avg"]["support"],
+        ]
+    )
+    rows.append(
+        [
+            "Overall (weighted)",
+            "{:.1f} %".format(report["weighted avg"]["recall"] * 100.0),
+            "{:.1f} %".format(report["weighted avg"]["precision"] * 100.0),
+            "{:.1f} %".format(report["weighted avg"]["f1-score"] * 100.0),
+            report["weighted avg"]["support"],
+        ]
+    )
+    rows.append(["Overall stats", "micro recall", "matthews coeff", "AUC ROC score"])
+    rows.append(
+        [
+            "",
+            "{:.1f} %".format(100.0 * report["accuracy"]),
+            "{:.3f}".format(matthews_coeff),
+            "{:.3f}".format(roc_auc),
+        ]
+    )
+    headers = [
+        "Epoch {:d}".format(epoch),
+        "Recall",
+        "Precision",
+        "F1 score",
+        "n total",
+    ]
+    headers.extend(
+        [class_names[i] if class_names else i for i in range(conf_matrix.shape[0])]
+    )
+    return tabulate(rows, headers=headers, tablefmt="fancy_grid",)
 
 
 def test(
@@ -833,66 +1064,33 @@ def test(
         )
         total_scores -= total_scores.min(axis=1)[:, np.newaxis]
         total_scores = total_scores / total_scores.sum(axis=1)[:, np.newaxis]
-        conf_matrix = mt.confusion_matrix(total_target, total_pred)
-        report = mt.classification_report(
-            total_target, total_pred, output_dict=True, zero_division=0
-        )
+
         roc_auc = mt.roc_auc_score(total_target, total_scores, multi_class="ovo")
-        rows = []
-        for i in range(conf_matrix.shape[0]):
-            report_entry = report[str(i)]
-            row = [
-                class_names[i] if class_names else i,
-                "{:.1f} %".format(report_entry["recall"] * 100.0),
-                "{:.1f} %".format(report_entry["precision"] * 100.0),
-                "{:.1f} %".format(report_entry["f1-score"] * 100.0),
-                report_entry["support"],
-            ]
-            row.extend([conf_matrix[i, j] for j in range(conf_matrix.shape[1])])
-            rows.append(row)
-        rows.append(
-            [
-                "Overall (macro)",
-                "{:.1f} %".format(report["macro avg"]["recall"] * 100.0),
-                "{:.1f} %".format(report["macro avg"]["precision"] * 100.0),
-                "{:.1f} %".format(report["macro avg"]["f1-score"] * 100.0),
-                report["macro avg"]["support"],
-            ]
-        )
-        rows.append(
-            [
-                "Overall (weighted)",
-                "{:.1f} %".format(report["weighted avg"]["recall"] * 100.0),
-                "{:.1f} %".format(report["weighted avg"]["precision"] * 100.0),
-                "{:.1f} %".format(report["weighted avg"]["f1-score"] * 100.0),
-                report["weighted avg"]["support"],
-            ]
-        )
-        rows.append(
-            ["Overall stats", "micro recall", "matthews coeff", "AUC ROC score"]
-        )
-        rows.append(
-            [
-                "",
-                "{:.1f} %".format(100.0 * report["accuracy"]),
-                "{:.3f}".format(mt.matthews_corrcoef(total_target, total_pred)),
-                "{:.3f}".format(roc_auc),
-            ]
-        )
         objective = 100.0 * roc_auc
-        headers = [
-            "Epoch {:d}".format(epoch),
-            "Recall",
-            "Precision",
-            "F1 score",
-            "n total",
-        ]
-        headers.extend(
-            [class_names[i] if class_names else i for i in range(conf_matrix.shape[0])]
-        )
         if verbose:
-            print(tabulate(rows, headers=headers, tablefmt="fancy_grid",))
+            conf_matrix = mt.confusion_matrix(total_target, total_pred)
+            report = mt.classification_report(
+                total_target, total_pred, output_dict=True, zero_division=0
+            )
+            print(
+                stats_table(
+                    conf_matrix,
+                    report,
+                    roc_auc=roc_auc,
+                    matthews_coeff=mt.matthews_corrcoef(total_target, total_pred),
+                    class_names=class_names,
+                    epoch=epoch,
+                )
+            )
         if args.visdom and vis_params:
+            vis_params["vis"].line(
+                X=np.asarray([epoch]),
+                Y=np.asarray([test_loss]),
+                win="loss_win",
+                name="val_loss",
+                update="append",
+                env=vis_params["vis_env"],
+            )
             vis_params["vis"].line(
                 X=np.asarray([epoch]),
                 Y=np.asarray([objective / 100.0]),
@@ -906,15 +1104,23 @@ def test(
 
 
 def save_model(model, optim, path, args, epoch):
-    opt_state_dict = (
-        {name: optim.get_optim(name).state_dict() for name in optim.workers}
-        if args.train_federated
-        else optim.state_dict()
-    )
+    if args.secure_aggregation:
+        opt_state_dict = {key: optim.state_dict() for key, optim in optim.items()}
+    elif args.train_federated:
+        opt_state_dict = {
+            name: optim.get_optim(name).state_dict() for name in optim.workers
+        }
+    else:
+        opt_state_dict = optim.state_dict()
+    dirpath = split(path)[0]
+    if not isdir(dirpath):
+        makedirs(dirpath)
     torch.save(
         {
             "epoch": epoch,
-            "model_state_dict": model.state_dict(),
+            "model_state_dict": model["local_model"].state_dict()
+            if args.secure_aggregation
+            else model.state_dict(),
             "optim_state_dict": opt_state_dict,
             "args": args,
         },

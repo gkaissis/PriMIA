@@ -15,7 +15,7 @@ from argparse import Namespace
 
 sys.path.insert(0, os.path.split(sys.path[0])[0])  # TODO: make prettier
 from utils import test, Arguments  # pylint:disable=import-error
-from torchlib.dataloader import PPPP
+from torchlib.dataloader import PPPP, ImageFolderFromCSV
 from torchlib.models import vgg16, resnet18, conv_at_resolution
 
 
@@ -46,6 +46,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--encrypted_inference", action="store_true", help="Perform encrypted inference"
     )
+    parser.add_argument("--adults", action="store_true", help="Use adult images")
     parser.add_argument("--no_cuda", action="store_true", help="dont use gpu")
     cmd_args = parser.parse_args()
 
@@ -102,7 +103,16 @@ if __name__ == "__main__":
                 )
             )
             tf.append(repeat)
-        testset = PPPP("data/Labels.csv", train=False, transform=transforms.Compose(tf))
+        if cmd_args.adults:
+            testset = ImageFolderFromCSV(
+                "data/Chest_xray_Corona_Metadata.csv", "data/Adults", 
+                transform=transforms.Compose(tf)
+            )
+
+        else:
+            testset = PPPP(
+                "data/Labels.csv", train=False, transform=transforms.Compose(tf)
+            )
         class_names = {0: "normal", 1: "bacterial pneumonia", 2: "viral pneumonia"}
     else:
         raise NotImplementedError("dataset not implemented")

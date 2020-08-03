@@ -17,7 +17,7 @@ sys.path.append(
     )
 )
 from torchlib.utils import AddGaussianNoise, To_one_hot, MixUp
-from torchlib.dataloader import LabelMNIST
+from torchlib.dataloader import LabelMNIST, calc_mean_std
 
 
 # from utils import AddGaussianNoise  # pylint: disable=import-error
@@ -89,6 +89,7 @@ def create_app(
             train_federated=True,
             websockets=True,
             verbose=True,
+            secure_aggregation=True,
         )
         args = Arguments(cmd_args, config, mode="train", verbose=False)
         torch.manual_seed(args.seed)
@@ -116,6 +117,23 @@ def create_app(
                 ),
             )
         else:
+            stats_dataset = ImageFolder(
+                data_dir,
+                transform=transforms.Compose(
+                    [
+                        transforms.Resize(args.train_resolution),
+                        transforms.CenterCrop(args.train_resolution),
+                        transforms.ToTensor(),
+                    ]
+                ),
+            )
+            mean, std = calc_mean_std(
+                stats_dataset,
+                args.train_resolution,
+                consider_black_pixels=False,
+                save_folder=data_dir,
+            )
+            del stats_dataset
             train_tf = [
                 transforms.RandomVerticalFlip(p=args.vertical_flip_prob),
                 transforms.RandomAffine(
@@ -128,7 +146,7 @@ def create_app(
                 transforms.Resize(args.inference_resolution),
                 transforms.RandomCrop(args.train_resolution),
                 transforms.ToTensor(),
-                transforms.Normalize((0.57282609,), (0.17427578,)),
+                transforms.Normalize(tuple(mean), tuple(std)),
                 AddGaussianNoise(mean=0.0, std=args.noise_std, p=args.noise_prob),
             ]
             target_dict_pneumonia = {0: 1, 1: 0, 2: 2}
@@ -143,6 +161,13 @@ def create_app(
                 transform=transforms.Compose(train_tf),
                 target_transform=transforms.Compose(target_tf),
             )
+            mean, std = (
+                torch.from_numpy(mean),  # pylint:disable=no-member
+                torch.from_numpy(std),  # pylint:disable=no-member
+            )
+            mean.tag("#datamean")
+            std.tag("#datastd")
+            local_worker.load_data([mean, std])
 
         data, targets = [], []
         # repetitions = 1 if worker.id == "validation" else args.repetitions_dataset

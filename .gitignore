@@ -144,3 +144,4 @@ data/server_simulation/worker*
 data/*.pt
 minimal_inference.py
 hyperparam_search/*
+SecAgTutorial.ipynb

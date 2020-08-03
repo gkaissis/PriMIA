@@ -26,7 +26,7 @@ def objective(trial: opt.trial):
         inference_resolution=224,
         test_batch_size=10,
         test_interval=1,
-        validation_split=25,
+        validation_split=10,
         epochs=epochs,
         lr=lr,
         end_lr=trial.suggest_loguniform("end_lr", 1e-6, lr),
@@ -83,9 +83,9 @@ if __name__ == "__main__":
         study_name="federated_pneumonia"
         if cmdln_args.federated
         else "vanilla_pneumonia",
-        storage="sqlite:///hyperparam_search/pneumonia_search.db",
+        storage="sqlite:///model_weights/pneumonia_search.db",
         load_if_exists=True,
         direction="maximize",
         pruner=opt.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=10),
     )
-    study.optimize(objective, n_trials=5)
+    study.optimize(objective, n_trials=30)
