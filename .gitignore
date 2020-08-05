@@ -145,3 +145,4 @@ data/*.pt
 minimal_inference.py
 hyperparam_search/*
 SecAgTutorial.ipynb
+*EVD*

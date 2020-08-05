@@ -41,7 +41,7 @@ if __name__ == "__main__":
         type=str,
         required=True,
         default=None,
-        help="Start training from older model checkpoint",
+        help="model weights to use",
     )
     parser.add_argument(
         "--encrypted_inference", action="store_true", help="Perform encrypted inference"
@@ -105,8 +105,9 @@ if __name__ == "__main__":
             tf.append(repeat)
         if cmd_args.adults:
             testset = ImageFolderFromCSV(
-                "data/Chest_xray_Corona_Metadata.csv", "data/Adults", 
-                transform=transforms.Compose(tf)
+                "data/Chest_xray_Corona_Metadata.csv",
+                "data/Adults",
+                transform=transforms.Compose(tf),
             )
 
         else:

@@ -599,7 +599,7 @@ def send_new_models(local_model, models):
                 worker = remote_param.location
                 remote_value = new_param.send(worker)
                 # Try this and if not do x_ptr * 0 + remote_value
-                remote_param.set_(remote_value)
+                remote_param[:] = remote_value[:]
 
 
 def secure_aggregation(
@@ -656,6 +656,14 @@ def secure_aggregation_epoch(
     # 1. Send new version of the model
     send_new_models(models["local_model"], models)
 
+    if not args.keep_optim_dict:
+        for worker in optimizers.keys():
+            kwargs = {"lr": args.lr, "weight_decay": args.weight_decay}
+            ## TODO implement for SGD (also in train_federated)
+            if args.optimizer == "Adam":
+                kwargs["betas"] = (args.beta1, args.beta2)
+            optimizers[worker].__init__(models[worker].parameters(), **kwargs)
+
     avg_loss = []
 
     num_batches = {key.id: len(loader) for key, loader in train_loaders.items()}
@@ -697,7 +705,15 @@ def secure_aggregation_epoch(
             )
             send_new_models(models["local_model"], models)
             pbar.set_description_str("Training with secure aggregation")
-
+            if not args.keep_optim_dict:
+                for worker in optimizers.keys():
+                    kwargs = {"lr": args.lr, "weight_decay": args.weight_decay}
+                    ## TODO implement for SGD (also in train_federated)
+                    if args.optimizer == "Adam":
+                        kwargs["betas"] = (args.beta1, args.beta2)
+                    optimizers[worker] = torch.optim.Adam(
+                        models[worker].parameters(), **kwargs
+                    )
     # 2. Train remotely the models
     # for worker in tqdm.tqdm(
     #     train_loaders.keys(),
@@ -1103,7 +1119,7 @@ def test(
     return test_loss, objective
 
 
-def save_model(model, optim, path, args, epoch):
+def save_model(model, optim, path, args, epoch, val_mean_std):
     if args.secure_aggregation:
         opt_state_dict = {key: optim.state_dict() for key, optim in optim.items()}
     elif args.train_federated:
@@ -1123,6 +1139,7 @@ def save_model(model, optim, path, args, epoch):
             else model.state_dict(),
             "optim_state_dict": opt_state_dict,
             "args": args,
+            "val_mean_std": val_mean_std,
         },
         path,
     )

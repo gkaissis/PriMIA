@@ -207,12 +207,7 @@ def setup_pysyft(args, hook, verbose=False):
                         ]
                     ),
                 )
-                mean, std = calc_mean_std(
-                    stats_dataset,
-                    args.train_resolution,
-                    consider_black_pixels=False,
-                    save_folder=data_dir,
-                )
+                mean, std = calc_mean_std(stats_dataset, save_folder=data_dir,)
                 del stats_dataset
                 train_tf = [
                     transforms.RandomVerticalFlip(p=args.vertical_flip_prob),
@@ -226,7 +221,7 @@ def setup_pysyft(args, hook, verbose=False):
                     transforms.Resize(args.inference_resolution),
                     transforms.RandomCrop(args.train_resolution),
                     transforms.ToTensor(),
-                    transforms.Normalize(tuple(mean), tuple(std)),
+                    transforms.Normalize(mean, std),
                     AddGaussianNoise(mean=0.0, std=args.noise_std, p=args.noise_prob),
                 ]
                 target_dict_pneumonia = {0: 1, 1: 0, 2: 2}
@@ -243,10 +238,6 @@ def setup_pysyft(args, hook, verbose=False):
                     data_dir,
                     transform=transforms.Compose(train_tf),
                     target_transform=transforms.Compose(target_tf),
-                )
-                mean, std = (
-                    torch.from_numpy(mean),  # pylint:disable=no-member
-                    torch.from_numpy(std),  # pylint:disable=no-member
                 )
                 mean.tag("#datamean")
                 std.tag("#datastd")
@@ -367,6 +358,7 @@ def setup_pysyft(args, hook, verbose=False):
         else:
             ## default values
             mean, std = 0.5, 0.2
+        val_mean_std = torch.stack([mean, std])  # pylint:disable=no-member
         val_tf = [
             transforms.Resize(args.inference_resolution),
             transforms.CenterCrop(args.train_resolution),
@@ -396,7 +388,15 @@ def setup_pysyft(args, hook, verbose=False):
             len(val_loader.dataset)
         )
     )
-    return train_loader, val_loader, total_L, workers, worker_names, crypto_provider
+    return (
+        train_loader,
+        val_loader,
+        total_L,
+        workers,
+        worker_names,
+        crypto_provider,
+        val_mean_std,
+    )
 
 
 def main(args, verbose=True, optuna_trial=None):
@@ -439,6 +439,7 @@ def main(args, verbose=True, optuna_trial=None):
             workers,
             worker_names,
             crypto_provider,
+            val_mean_std,
         ) = setup_pysyft(
             args,
             hook,
@@ -476,7 +477,7 @@ def main(args, verbose=True, optuna_trial=None):
         elif args.dataset == "pneumonia":
             # Different train and inference resolution only works with adaptive
             # pooling in model activated
-
+            mean, std = torch.load("data/mean_std.pt")
             train_tf = [
                 transforms.RandomVerticalFlip(p=args.vertical_flip_prob),
                 transforms.RandomAffine(
@@ -489,14 +490,14 @@ def main(args, verbose=True, optuna_trial=None):
                 transforms.Resize(args.inference_resolution),
                 transforms.RandomCrop(args.train_resolution),
                 transforms.ToTensor(),
-                transforms.Normalize((0.57282609,), (0.17427578,)),
+                transforms.Normalize(tuple(mean), tuple(std)),
                 AddGaussianNoise(mean=0.0, std=args.noise_std, p=args.noise_prob),
             ]
             test_tf = [
                 transforms.Resize(args.inference_resolution),
                 transforms.CenterCrop(args.inference_resolution),
                 transforms.ToTensor(),
-                transforms.Normalize((0.57282609,), (0.17427578,)),
+                transforms.Normalize(tuple(mean), tuple(std)),
             ]
 
             # Duplicate grayscale one channel image into 3 channels
@@ -783,6 +784,7 @@ def main(args, verbose=True, optuna_trial=None):
                         workers,
                         worker_names,
                         crypto_provider,
+                        val_mean_std,
                     ) = setup_pysyft(args, hook, verbose=cmd_args.verbose)
                 except Exception as e:
                     print("restarting failed")
@@ -821,7 +823,7 @@ def main(args, verbose=True, optuna_trial=None):
                 if optuna_trial.should_prune():
                     raise TrialPruned()
 
-            save_model(model, optimizer, model_path, args, epoch)
+            save_model(model, optimizer, model_path, args, epoch, val_mean_std)
             roc_auc_scores.append(roc_auc)
             model_paths.append(model_path)
     # reversal and formula because we want last occurance of highest value

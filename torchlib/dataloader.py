@@ -4,68 +4,42 @@ import syft as sy
 import pandas as pd
 import numpy as np
 from PIL import Image
-from torch import manual_seed
-from torch.utils import data
+from tqdm import tqdm
+from torch import (  # pylint:disable=no-name-in-module
+    manual_seed,
+    stack,
+    cat,
+    std_mean,
+    save,
+)
+from torch.utils import data as torchdata
 from torchvision.datasets import MNIST
 from torchvision import transforms
 from torchvision.datasets.folder import default_loader
 
 
-def calc_mean_std(
-    dataset,
-    crop_size,
-    channels=3,
-    consider_black_pixels=True,
-    save_folder=None,
-    verbose=False,
-):
-    import numpy as np
-    from tqdm import tqdm
-
-    acc = np.zeros((channels, crop_size, crop_size))
-    sq_acc = np.zeros((channels, crop_size, crop_size))
-    n_black_pixels = 0
-    for _, (imgs, _) in tqdm(
-        enumerate(dataset), total=len(dataset), leave=False, desc="accumulating data",
+def calc_mean_std(dataset, save_folder=None):
+    """
+    Needs a dataset where all images have the same size
+    """
+    accumulated_data = []
+    for d in tqdm(
+        dataset, total=len(dataset), leave=False, desc="accumulate data in dataset"
     ):
-        imgs = imgs.numpy()
-        if len(imgs.shape) == 4:
-            acc += np.sum(imgs, axis=0)  ## only happens if dataset is dataloader
-        else:
-            acc += imgs
-        sq_acc += np.sum(imgs ** 2, axis=0)
-        n_black_pixels += np.where(imgs == 0)[0].size
-
-        # if batch_idx % 50 == 0:
-        #    print('Accumulated {:d} / {:d}'.format(
-        #        batch_idx * batch_size, len(dset)))
-
-    N = len(dataset) * acc.shape[1] * acc.shape[2]
-    if not consider_black_pixels:
-        if verbose:
-            print("{:d} pixels in dataset".format(N))
-            print("{:d} black pixels in dataset".format(n_black_pixels))
-        N -= n_black_pixels
-
-    mean_p = np.asarray([np.sum(acc[c]) for c in range(channels)])
-    mean_p /= N
-    if verbose:
-        print("Mean pixel = ", mean_p)
-
-    # std = E[x^2] - E[x]^2
-    var = np.asarray([np.sum(sq_acc[c]) for c in range(channels)])
-    var /= N
-    var -= mean_p ** 2
-    std = np.sqrt(var)
-    if verbose:
-        print("Var. pixel = ", std)
+        if type(d) is tuple or type(d) is list:
+            d = d[0]
+        accumulated_data.append(d)
+    if isinstance(dataset, torchdata.Dataset):
+        accumulated_data = stack(accumulated_data)
+    elif isinstance(dataset, torchdata.DataLoader):
+        accumulated_data = cat(accumulated_data)
+    else:
+        raise NotImplementedError("don't know how to process this data input class")
+    dims = (0, *range(2, len(accumulated_data.shape)))
+    std, mean = std_mean(accumulated_data, dim=dims)
     if save_folder:
-        np.savetxt(
-            os.path.join(save_folder, "mean_var.txt"),
-            np.vstack((mean_p, std)),
-            fmt="%8.7f",
-        )
-    return mean_p, std
+        save(stack([mean, std]), os.path.join(save_folder, "mean_std.pt"))
+    return mean, std
 
 
 def single_channel_loader(filename):
@@ -82,7 +56,7 @@ class LabelMNIST(MNIST):
         self.targets = self.targets[indices]
 
 
-class ImageFolderFromCSV(data.Dataset):
+class ImageFolderFromCSV(torchdata.Dataset):
     def __init__(
         self, csv_path, img_folder_path, transform=None, target_transform=None
     ):
@@ -135,7 +109,7 @@ class ImageFolderFromCSV(data.Dataset):
         return len(self.img_files)
 
 
-class PPPP(data.Dataset):
+class PPPP(torchdata.Dataset):
     def __init__(
         self, label_path="data/Labels.csv", train=False, transform=None, seed=1,
     ):
@@ -177,19 +151,16 @@ class PPPP(data.Dataset):
     #    return self.class_names[numeric_label]
 
     """
-    Works only if not torch.utils.data.random_split is applied
+    Works only if not torch.utils.torchdata.random_split is applied
     """
 
     def get_class_occurances(self):
         return dict(self.labels["Numeric_Label"].value_counts())
 
-    def __compute_mean_std__(self, crop_size=224, consider_black_pixels=False):
+    def __compute_mean_std__(self):
 
         calc_mean_std(
-            self,
-            crop_size,
-            consider_black_pixels=consider_black_pixels,
-            save_folder="data",
+            self, save_folder="data",
         )
 
 
@@ -234,7 +205,7 @@ if __name__ == "__main__":
     )  # TODO: Add normalization
     ds = PPPP(train=True, transform=tf)
 
-    ds.__compute_mean_std__(consider_black_pixels=False)
+    ds.__compute_mean_std__()
     L = len(ds)
     print("length train set: {:d}".format(L))
 
