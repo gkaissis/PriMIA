@@ -619,7 +619,7 @@ def main(args, verbose=True, optuna_trial=None):
         }
     else:
         raise NotImplementedError("model unknown")
-    if args.train_federated and args.secure_aggregation:
+    if args.train_federated:
         model = model_type(**model_args)
         model = {
             key: model.copy()
@@ -642,9 +642,9 @@ def main(args, verbose=True, optuna_trial=None):
                     weight_decay=args.weight_decay,
                 )
                 for idt, m in model.items()
-                if idt != "crypto_provider"
+                if idt not in ["local_model", "crypto_provider"]
             }
-            if args.secure_aggregation
+            if args.train_federated
             else optim.Adam(
                 model.parameters(),
                 lr=args.lr,
@@ -654,17 +654,17 @@ def main(args, verbose=True, optuna_trial=None):
         )
     else:
         raise NotImplementedError("optimization not implemented")
-    if args.train_federated and not args.secure_aggregation:
-        from syft.federated.floptimizer import Optims
+        # if args.train_federated and not args.secure_aggregation:
+        #     from syft.federated.floptimizer import Optims
 
-        optimizer = Optims(worker_names, optimizer)
+        # optimizer = Optims(worker_names, optimizer)
     loss_args = {"weight": cw, "reduction": "mean"}
     if args.mixup or (args.weight_classes and args.train_federated):
         loss_fn = Cross_entropy_one_hot
     else:
         loss_fn = nn.CrossEntropyLoss
     loss_fn = loss_fn(**loss_args).to(device)
-    if args.secure_aggregation:
+    if args.train_federated:
         loss_fn = {w: loss_fn.copy() for w in [*workers, "local_model"]}
 
     start_at_epoch = 1
@@ -683,7 +683,7 @@ def main(args, verbose=True, optuna_trial=None):
             pass  # not possible to load previous optimizer if setting changed
         args.incorporate_cmd_args(cmd_args)
         model.load_state_dict(state["model_state_dict"])
-    if args.secure_aggregation:
+    if args.train_federated:
         for m in model.values():
             m.to(device)
     else:
@@ -691,11 +691,11 @@ def main(args, verbose=True, optuna_trial=None):
 
     test(
         args,
-        model["local_model"] if args.secure_aggregation else model,
+        model["local_model"] if args.train_federated else model,
         device,
         val_loader,
         start_at_epoch - 1,
-        loss_fn["local_model"] if args.secure_aggregation else loss_fn,
+        loss_fn["local_model"] if args.train_federated else loss_fn,
         num_classes,
         vis_params=vis_params,
         class_names=class_names,
@@ -729,7 +729,9 @@ def main(args, verbose=True, optuna_trial=None):
         if args.train_federated:
             for w in worker_names:
                 new_lr = scheduler.adjust_learning_rate(
-                    optimizer[w] if args.secure_aggregation else optimizer.get_optim(w),
+                    optimizer[
+                        w
+                    ],  # if args.secure_aggregation else optimizer.get_optim(w),
                     epoch - 1,
                 )
         else:
@@ -795,11 +797,11 @@ def main(args, verbose=True, optuna_trial=None):
         if (epoch % args.test_interval) == 0:
             _, roc_auc = test(
                 args,
-                model["local_model"] if args.secure_aggregation else model,
+                model["local_model"] if args.train_federated else model,
                 device,
                 val_loader,
                 epoch,
-                loss_fn["local_model"] if args.secure_aggregation else loss_fn,
+                loss_fn["local_model"] if args.train_federated else loss_fn,
                 num_classes=num_classes,
                 vis_params=vis_params,
                 class_names=class_names,
@@ -842,7 +844,7 @@ def main(args, verbose=True, optuna_trial=None):
     )
     # load best model on val set
     state = torch.load(best_model_file, map_location=device)
-    if args.secure_aggregation:
+    if args.train_federated:
         model = model["local_model"]
     model.load_state_dict(state["model_state_dict"])
 

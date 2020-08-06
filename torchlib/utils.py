@@ -180,7 +180,7 @@ class Arguments:
         self.no_cuda = cmd_args.no_cuda
         self.websockets = (
             cmd_args.websockets  # currently not implemented for inference
-            if self.encrypted_inference
+            if self.encrypted_inference and hasattr(cmd_args, "websockets")
             else False
         )
         if not "mixup" in dir(self):
@@ -466,7 +466,6 @@ def train_federated(
     vis_params=None,
     verbose=True,
 ):
-    mng = mp.Manager()
     if args.secure_aggregation:
         model, avg_loss = secure_aggregation_epoch(
             args,
@@ -480,7 +479,8 @@ def train_federated(
             test_params=test_params,
         )
     else:
-        model.train()
+        mng = mp.Manager()
+        # model.train()
         result_dict, waiting_for_sync_dict, sync_dict, progress_dict, loss_dict = (
             mng.dict(),
             mng.dict(),
@@ -516,12 +516,12 @@ def train_federated(
                 target=train_on_server,
                 args=(
                     args,
-                    model,
+                    model[worker.id],
                     worker,
                     device,
                     train_loader,
-                    optimizer,
-                    loss_fn,
+                    optimizer[worker.id],
+                    loss_fn[worker.id],
                     result_dict,
                     waiting_for_sync_dict,
                     sync_dict,
@@ -570,7 +570,16 @@ def train_federated(
             done.value = True
             animate.join()
 
-        model = sync_dict["model"]
+        model["local_model"] = sync_dict["model"]
+        for w in train_loaders.keys():
+            if model[w.id].location:
+                model[w.id].get()
+            model[w.id].load_state_dict(sync_dict["model"].state_dict())
+            if not args.keep_optim_dict:
+                kwargs = {"lr": args.lr, "weight_decay": args.weight_decay}
+                if args.optimizer == "Adam":
+                    kwargs["betas"] = (args.beta1, args.beta2)
+                optimizer[w.id].__init__(model[w.id].parameters(), **kwargs)
 
         avg_loss = np.average([l["final"] for l in loss_dict.values()], weights=weights)
 
@@ -593,13 +602,12 @@ def send_new_models(local_model, models):
         for model_worker, remote_model in models.items():
             if model_worker == "local_model":
                 continue
-            for new_param, remote_param in zip(
-                local_model.parameters(), remote_model.parameters()
-            ):
-                worker = remote_param.location
-                remote_value = new_param.send(worker)
+            local_parameters = dict(local_model.named_parameters())
+            for name, param in remote_model.named_parameters():
+                remote_value = local_parameters[name].data.copy().send(model_worker)
                 # Try this and if not do x_ptr * 0 + remote_value
-                remote_param[:] = remote_value[:]
+                param.data[:] = remote_value.data[:]
+    return models
 
 
 def secure_aggregation(
@@ -616,22 +624,24 @@ def secure_aggregation(
                 ]
             )
         ):
-            param_stack = (
-                remote_params[0]
-                .copy()
-                .fix_prec()
-                .share(*workers, crypto_provider=crypto_provider)
+            """param_stack = (
+                remote_params[0].copy()
+                # .fix_prec()
+                # .share(*workers, crypto_provider=crypto_provider)
                 .get()
             )
             for remote_param in remote_params[1:]:
                 param_stack += (
                     remote_param.copy()
-                    .fix_prec()
-                    .share(*workers, crypto_provider=crypto_provider)
+                    # .fix_prec()
+                    # .share(*workers, crypto_provider=crypto_provider)
                     .get()
-                )
-            param_stack = param_stack.get().float_prec()
-            param_stack /= len(remote_params)
+                )"""
+            param_stack = torch.mean(
+                torch.stack([r.data.copy().get() for r in remote_params]), dim=0
+            )
+            # param_stack = param_stack  # .get().float_prec()
+            # param_stack /= len(remote_params)
             local_param.set_(param_stack)
     return local_model
 
@@ -654,7 +664,7 @@ def secure_aggregation_epoch(
         models[worker.id].send(worker)
         loss_fns[worker.id].send(worker)
     # 1. Send new version of the model
-    send_new_models(models["local_model"], models)
+    models = send_new_models(models["local_model"], models)
 
     if not args.keep_optim_dict:
         for worker in optimizers.keys():
@@ -662,7 +672,7 @@ def secure_aggregation_epoch(
             ## TODO implement for SGD (also in train_federated)
             if args.optimizer == "Adam":
                 kwargs["betas"] = (args.beta1, args.beta2)
-            optimizers[worker].__init__(models[worker].parameters(), **kwargs)
+            optimizers[worker] = torch.optim.Adam(models[worker].parameters(), **kwargs)
 
     avg_loss = []
 
@@ -683,15 +693,13 @@ def secure_aggregation_epoch(
         ):
             if batch_idx > num_batches[worker.id]:
                 continue
-            model = models[worker.id]
-            optimizer = optimizers[worker.id]
             loss_fn = loss_fns[worker.id]
-            optimizer.zero_grad()
+            optimizers[worker.id].zero_grad()
             data, target = next(dataloader)
-            pred = model(data)
+            pred = models[worker.id](data)
             loss = loss_fn(pred, target)
             loss.backward()
-            optimizer.step()
+            optimizers[worker.id].step()
             avg_loss.append(loss.detach().cpu().get().item())
         if batch_idx > 0 and batch_idx % args.sync_every_n_batch == 0:
             pbar.set_description_str("Synchronizing")
@@ -703,7 +711,7 @@ def secure_aggregation_epoch(
                 args,
                 test_params,
             )
-            send_new_models(models["local_model"], models)
+            models = send_new_models(models["local_model"], models)
             pbar.set_description_str("Training with secure aggregation")
             if not args.keep_optim_dict:
                 for worker in optimizers.keys():
@@ -851,7 +859,7 @@ def train_on_server(
     worker,
     device,
     train_loader,
-    optim,
+    optimizer,
     loss_fn,
     result_dict,
     waiting_for_sync_dict,
@@ -860,10 +868,12 @@ def train_on_server(
     progress_dict,
     loss_dict,
 ):
-    optimizer = optim.get_optim(worker.id)
+    # optimizer = optim.get_optim(worker.id)
     avg_loss = []
-    model.send(worker)
-    loss_fn = loss_fn.send(worker)
+    model.train()
+    if not model.location:
+        model.send(worker)
+        loss_fn = loss_fn.send(worker)
     L = len(train_loader)
     for batch_idx, (data, target) in enumerate(train_loader):
         progress_dict[worker.id] = (batch_idx, L)
@@ -895,12 +905,13 @@ def train_on_server(
         optimizer.step()
         loss = loss.get()
         avg_loss.append(loss.detach().cpu().item())
+    model.get()
     loss_fn = loss_fn.get()
     result_dict[worker.id] = model
     loss_dict[worker.id]["final"] = np.mean(avg_loss)
     progress_dict[worker.id] = (batch_idx + 1, L)
     del waiting_for_sync_dict[worker.id]
-    optim.optimizers[worker.id] = optimizer
+    # optim.optimizers[worker.id] = optimizer
 
 
 def train(
@@ -1120,12 +1131,12 @@ def test(
 
 
 def save_model(model, optim, path, args, epoch, val_mean_std):
-    if args.secure_aggregation:
+    if args.train_federated:
         opt_state_dict = {key: optim.state_dict() for key, optim in optim.items()}
-    elif args.train_federated:
-        opt_state_dict = {
-            name: optim.get_optim(name).state_dict() for name in optim.workers
-        }
+    # elif args.train_federated:
+    #     opt_state_dict = {
+    #         name: optim.get_optim(name).state_dict() for name in optim.workers
+    #     }
     else:
         opt_state_dict = optim.state_dict()
     dirpath = split(path)[0]
@@ -1135,7 +1146,7 @@ def save_model(model, optim, path, args, epoch, val_mean_std):
         {
             "epoch": epoch,
             "model_state_dict": model["local_model"].state_dict()
-            if args.secure_aggregation
+            if args.train_federated
             else model.state_dict(),
             "optim_state_dict": opt_state_dict,
             "args": args,
