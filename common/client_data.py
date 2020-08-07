@@ -1,10 +1,7 @@
-import abc
 import argparse
-import functools
 import logging
 import os
 import pathlib
-import shutil
 
 import numpy as np
 import pandas as pd
@@ -54,7 +51,7 @@ def allocate_samples_on_disk(
       (client_path / label).mkdir(parents=True, exist_ok=True)
 
     for imname, label in zip(sample.X_ray_image_name, sample.Numeric_Label):
-      shutil.copy(split_root / imname, client_path / str(label) / imname)
+      os.symlink(os.path.abspath(split_root / imname), client_path / str(label) / imname)
 
 
 def main(args):
