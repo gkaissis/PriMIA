@@ -597,7 +597,16 @@ def train_federated(
     return model
 
 
-def send_new_models(local_model, models):
+def tensor_iterator(model):
+    """adding relavant iterators for the tensor elements"""
+    iterators = [
+        "parameters",
+        "buffers",
+    ]  # all the element iterators from nn module should be listed here,
+    return [getattr(model, i) for i in iterators]
+
+
+def send_new_models_old(local_model, models):
     with torch.no_grad():
         for model_worker, remote_model in models.items():
             if model_worker == "local_model":
@@ -610,7 +619,7 @@ def send_new_models(local_model, models):
     return models
 
 
-def secure_aggregation(
+def secure_aggregation_old(
     local_model, models, workers, crypto_provider, args, test_params
 ):
     with torch.no_grad():
@@ -624,26 +633,79 @@ def secure_aggregation(
                 ]
             )
         ):
-            """param_stack = (
-                remote_params[0].copy()
-                # .fix_prec()
-                # .share(*workers, crypto_provider=crypto_provider)
-                .get()
-            )
-            for remote_param in remote_params[1:]:
-                param_stack += (
-                    remote_param.copy()
-                    # .fix_prec()
-                    # .share(*workers, crypto_provider=crypto_provider)
-                    .get()
-                )"""
             param_stack = torch.mean(
                 torch.stack([r.data.copy().get() for r in remote_params]), dim=0
             )
-            # param_stack = param_stack  # .get().float_prec()
-            # param_stack /= len(remote_params)
             local_param.set_(param_stack)
     return local_model
+
+
+def send_new_models_iter(local_model, models):
+    with torch.no_grad():
+        for worker, remote_model in models.items():
+            for new_param, remote_param in zip(
+                tensor_iterator(local_model), tensor_iterator(remote_model)
+            ):
+                if callable(new_param):
+                    continue
+                remote_value = new_param.send(worker)
+                # Try this and if not do x_ptr * 0 + remote_value
+                remote_param.data[:] = remote_value.data[:]
+    return models
+
+
+def secure_aggregation_iter(
+    local_model, models, workers, crypto_provider, args, test_params
+):
+    with torch.no_grad():
+        for local_iter, *remote_iter in zip(
+            *(
+                [tensor_iterator(local_model)]
+                + [
+                    tensor_iterator(model)
+                    for key, model in models.items()
+                    if key != "local_model"
+                ]
+            )
+        ):
+            for local_param, *remote_params in zip(
+                *([local_iter()] + [r() for r in remote_iter])
+            ):
+                param_stack = torch.mean(
+                    torch.stack([r.data.copy().get().float() for r in remote_params]),
+                    dim=0,
+                )
+                local_param.set_(param_stack)
+    return local_model
+
+
+def secure_aggregation(
+    local_model, models, workers, crypto_provider, args, test_params
+):
+    models_dict = {
+        worker: m.get()  # .fix_prec().share(*workers, crypto_provider=crypto_provider)
+        for worker, m in models.items()
+        if worker != "local_model"
+    }
+    new_model = federated_avg(models_dict)  # .float_precision().get()
+    models["local_model"].load_state_dict(new_model.state_dict())
+    for worker, m in models.items():
+        if worker != "local_model":
+            # m.float_precision()
+            m.send(worker)
+    return models["local_model"]
+
+
+def send_new_models(local_model, models):
+    for worker in models.keys():
+        if worker == "local_model":
+            continue
+        if local_model.location:
+            local_model.get()
+        local_model.send(worker)
+        models[worker].load_state_dict(local_model.state_dict())
+    local_model.get()
+    return models
 
 
 def secure_aggregation_epoch(
