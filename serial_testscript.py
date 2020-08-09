@@ -84,7 +84,7 @@ if __name__ == "__main__":
         test_batch_size=1,
         test_interval=1,
         validation_split=10,
-        epochs=40,
+        epochs=1,
         lr=1e-4,
         end_lr=1e-5,
         restarts=0,
@@ -106,7 +106,7 @@ if __name__ == "__main__":
         mixup_lambda=None,
         sync_every_n_batch=5,
         wait_interval=0.1,
-        repetitions_dataset=5,
+        repetitions_dataset=1,
     )
 
     use_cuda = False
