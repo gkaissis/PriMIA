@@ -23,7 +23,7 @@ pylint:
 	pylint torchlib
 
 minimal_server_folders: symbolic_server_folders
-	cd data/server_simulation && python delete_all_but_one.py && cd ../..
+	cd data/server_simulation && python delete_all_but_n.py 16 && python calc_class_distribution.py && cd ../..
 
 fast_virtualtrain:
 	python train.py --dataset pneumonia --config configs/torch/pneumonia-resnet-pretrained-fast.ini --train_federated --no_visdom --no_cuda

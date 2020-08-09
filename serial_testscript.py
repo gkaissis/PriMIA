@@ -79,9 +79,9 @@ def test(
 
 if __name__ == "__main__":
     args = Namespace(
-        batch_size=200,
+        batch_size=4,  # debug mode has 48 images, just so we make sure we sync a few times
         train_resolution=224,
-        test_batch_size=1,
+        test_batch_size=4,
         test_interval=1,
         validation_split=10,
         epochs=1,
@@ -104,7 +104,7 @@ if __name__ == "__main__":
         noise_prob=0.5,
         mixup_prob=0.9,
         mixup_lambda=None,
-        sync_every_n_batch=5,
+        sync_every_n_batch=4,
         wait_interval=0.1,
         repetitions_dataset=1,
     )
@@ -276,7 +276,7 @@ if __name__ == "__main__":
         mean = mean.get().float_precision() / len(stds)
         std = std.get().float_precision() / len(stds)
     else:
-        mean, std = 0.5, 0.2
+        mean, std = 0.5, 0.2  # BAM nice hard-coding @a1302z
     val_mean_std = torch.stack([mean, std])  # pylint:disable=no-member
     val_tf = [
         transforms.Resize(args.train_resolution),
@@ -365,6 +365,7 @@ if __name__ == "__main__":
         "model_paths": model_paths,
     }
     for epoch in range(start_at_epoch, args.epochs + 1):
+
         for w in worker_names:
             new_lr = scheduler.adjust_learning_rate(
                 optimizer[w],  # if args.secure_aggregation else optimizer.get_optim(w),
@@ -455,13 +456,16 @@ if __name__ == "__main__":
     roc_auc_scores = np.array(roc_auc_scores)[::-1]
     best_auc_idx = np.argmax(roc_auc_scores)
     highest_acc = len(roc_auc_scores) - best_auc_idx - 1
-    best_epoch = (
-        highest_acc + 1
-    ) * args.test_interval  # actually -1 but we're switching to 1 indexed here
-    best_model_file = model_paths[highest_acc]
-    print(
-        "Highest ROC AUC score was {:.1f}% in epoch {:d}".format(
-            roc_auc_scores[best_auc_idx],
-            best_epoch * (args.repetitions_dataset if args.train_federated else 1),
-        )
-    )
+    print(f"Highest ROC-AUC {roc_auc_scores[best_auc_idx]}")
+
+# best_epoch = (
+#     highest_acc + 1
+# ) * args.test_interval  # actually -1 but we're switching to 1 indexed here
+# # best_model_file = model_paths[highest_acc]
+# print(
+#     "Highest ROC AUC score was {:.1f}% in epoch {:d}".format(
+#         roc_auc_scores[best_auc_idx],
+#         best_epoch * (args.repetitions_dataset if args.train_federated else 1),
+#     )
+# )
+
