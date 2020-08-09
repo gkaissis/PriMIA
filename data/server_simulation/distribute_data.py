@@ -61,5 +61,5 @@ if __name__ == "__main__":
             all_dst = os.path.join(
                 "all_samples", class_names[s["Numeric_Label"]], s["X_ray_image_name"]
             )
-            os.symlink(os.path.abspath(src_file), dst_file)
-            os.symlink(os.path.abspath(src_file), all_dst)
+            copyfile(src_file, dst_file)
+            copyfile(src_file, all_dst)
