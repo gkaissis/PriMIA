@@ -608,55 +608,7 @@ def tensor_iterator(model):
     return [getattr(model, i) for i in iterators]
 
 
-def send_new_models_old(local_model, models):
-    with torch.no_grad():
-        for model_worker, remote_model in models.items():
-            if model_worker == "local_model":
-                continue
-            local_parameters = dict(local_model.named_parameters())
-            for name, param in remote_model.named_parameters():
-                remote_value = local_parameters[name].data.copy().send(model_worker)
-                # Try this and if not do x_ptr * 0 + remote_value
-                param.data[:] = remote_value.data[:]
-    return models
-
-
-def secure_aggregation_old(
-    local_model, models, workers, crypto_provider, args, test_params
-):
-    with torch.no_grad():
-        for local_param, *remote_params in zip(
-            *(
-                [local_model.parameters()]
-                + [
-                    model.parameters()
-                    for key, model in models.items()
-                    if key != "local_model"
-                ]
-            )
-        ):
-            param_stack = torch.mean(
-                torch.stack([r.data.copy().get() for r in remote_params]), dim=0
-            )
-            local_param.set_(param_stack)
-    return local_model
-
-
-def send_new_models_iter(local_model, models):
-    with torch.no_grad():
-        for worker, remote_model in models.items():
-            for new_param, remote_param in zip(
-                tensor_iterator(local_model), tensor_iterator(remote_model)
-            ):
-                if callable(new_param):
-                    continue
-                remote_value = new_param.send(worker)
-                # Try this and if not do x_ptr * 0 + remote_value
-                remote_param.data[:] = remote_value.data[:]
-    return models
-
-
-def secure_aggregation_iter(
+def secure_aggregation(
     local_model, models, workers, crypto_provider, args, test_params
 ):
     with torch.no_grad():
@@ -673,34 +625,27 @@ def secure_aggregation_iter(
             for local_param, *remote_params in zip(
                 *([local_iter()] + [r() for r in remote_iter])
             ):
-                param_stack = torch.mean(
-                    torch.stack([r.data.copy().get().float() for r in remote_params]),
+                dt = remote_params[0].dtype
+                ## num_batches tracked are ints
+                ## -> irrelevant cause batch norm momentum is on by default
+                if dt != torch.float:
+                    continue
+                param_stack = torch.sum(
+                    torch.stack(
+                        [
+                            r.data.copy()
+                            .fix_prec()
+                            .share(*workers, crypto_provider=crypto_provider)
+                            .get()
+                            for r in remote_params
+                        ]
+                    ),
                     dim=0,
                 )
+                param_stack = param_stack.get().float_prec()
+                param_stack /= len(remote_params)
                 local_param.set_(param_stack)
     return local_model
-
-
-def secure_aggregation(
-    local_model, models, workers, crypto_provider, args, test_params
-):
-    models_dict = {
-        worker: m.get()  # .fix_prec().share(*workers, crypto_provider=crypto_provider) #commenting this in breaks the code
-        # GOTO 693
-        for worker, m in models.items()
-        if worker != "local_model"
-    }
-    new_model = federated_avg(
-        models_dict
-    )  # .float_precision().get() #Commenting this in breaks the code
-    # Reason: utils.add_model raises an error (see there) and utils.scale_model does the same (see there).
-    # See this thread on Slack: https://openmined.slack.com/archives/G0193JK7856/p1596977101005600
-    models["local_model"].load_state_dict(new_model.state_dict())
-    for worker, m in models.items():
-        if worker != "local_model":
-            # m.float_precision() #This is unneeded as long as the rest are commented out
-            m.send(worker)
-    return models["local_model"]
 
 
 def send_new_models(local_model, models):
@@ -1122,9 +1067,6 @@ def test(
             if verbose
             else val_loader
         ):
-            if not args.encrypted_inference:
-                data = data.to(device)
-                target = target.to(device)
             output = model(data)
             loss = loss_fn(output, oh_converter(target) if oh_converter else target)
             test_loss += loss.item()  # sum up batch loss
