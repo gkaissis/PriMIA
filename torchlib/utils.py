@@ -405,7 +405,9 @@ def federated_avg(models: dict, weights: Optional[torch.Tensor] = None):
     if weights:
         model = None
         for id, partial_model in models.items():
-            scaled_model = scale_model(partial_model, weights[id])
+            scaled_model = scale_model(
+                partial_model, weights[id]
+            )  # @a1302z are we consciously overwriting the id keyword here?
             if model:
                 model = add_model(model, scaled_model)
             else:
@@ -683,15 +685,20 @@ def secure_aggregation(
     local_model, models, workers, crypto_provider, args, test_params
 ):
     models_dict = {
-        worker: m.get()  # .fix_prec().share(*workers, crypto_provider=crypto_provider)
+        worker: m.get()  # .fix_prec().share(*workers, crypto_provider=crypto_provider) #commenting this in breaks the code
+        # GOTO 693
         for worker, m in models.items()
         if worker != "local_model"
     }
-    new_model = federated_avg(models_dict)  # .float_precision().get()
+    new_model = federated_avg(
+        models_dict
+    )  # .float_precision().get() #Commenting this in breaks the code
+    # Reason: utils.add_model raises an error (see there) and utils.scale_model does the same (see there).
+    # See this thread on Slack: https://openmined.slack.com/archives/G0193JK7856/p1596977101005600
     models["local_model"].load_state_dict(new_model.state_dict())
     for worker, m in models.items():
         if worker != "local_model":
-            # m.float_precision()
+            # m.float_precision() #This is unneeded as long as the rest are commented out
             m.send(worker)
     return models["local_model"]
 

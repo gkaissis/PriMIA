@@ -20,6 +20,9 @@ from torchvision.datasets.folder import default_loader
 
 def calc_mean_std(dataset, save_folder=None):
     """
+    Calculates the mean and standard deviation of `dataset` and
+    saves them to `save_folder`.
+
     Needs a dataset where all images have the same size
     """
     accumulated_data = []
@@ -43,6 +46,8 @@ def calc_mean_std(dataset, save_folder=None):
 
 
 def single_channel_loader(filename):
+    """Converts `filename` to a grayscale PIL Image
+    """
     with open(filename, "rb") as f:
         img = Image.open(f).convert("L")
         return img.copy()
