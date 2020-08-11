@@ -3,9 +3,20 @@ import pandas as pd
 from random import shuffle, seed
 from tqdm import tqdm
 from shutil import copyfile
+import argparse
 
 if __name__ == "__main__":
 
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "-s",
+        "--symbolic",
+        help="Create symlinks instead of copying files.",
+        default=False,
+        action="store_true",
+        required=False,
+    )
+    args = parser.parse_args()
     cur_path = os.path.abspath(os.getcwd())
 
     if os.path.split(cur_path)[1] != "server_simulation":
@@ -61,5 +72,9 @@ if __name__ == "__main__":
             all_dst = os.path.join(
                 "all_samples", class_names[s["Numeric_Label"]], s["X_ray_image_name"]
             )
-            copyfile(src_file, dst_file)
-            copyfile(src_file, all_dst)
+            if args.symbolic:
+                os.symlink(os.path.abspath(src_file), dst_file)
+                os.symlink(os.path.abspath(src_file), all_dst)
+            else:
+                copyfile(src_file, dst_file)
+                copyfile(src_file, all_dst)

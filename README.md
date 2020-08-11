@@ -1,6 +1,9 @@
 # Private Paediatric Pneumonia Prediction (4P)
 
-## Dataset 
+## Start here:
+Read [this file](docs/Welcome.md) for instructions on the most common use-cases.
+
+## Dataset
 Please check [this file](docs/Dataset_Description.md) for information on how to use this dataset.
 
 ## Allocating data to clients for federated learning

@@ -50,7 +50,9 @@ def encrypt_model_and_data(
     data_encrypted = data_encrypted[start_at:num_samples]
     targets = targets[start_at:num_samples]
     if data_encrypted.shape[0] == 0:
-        raise ValueError("Data is empty - Either start at too high or num samples too low")
+        raise ValueError(
+            "Data is empty - Either start at too high or num samples too low"
+        )
 
     # Classify the encrypted data
     private_model.eval()

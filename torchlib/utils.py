@@ -405,7 +405,9 @@ def federated_avg(models: dict, weights: Optional[torch.Tensor] = None):
     if weights:
         model = None
         for id, partial_model in models.items():
-            scaled_model = scale_model(partial_model, weights[id])
+            scaled_model = scale_model(
+                partial_model, weights[id]
+            )  # @a1302z are we consciously overwriting the id keyword here?
             if model:
                 model = add_model(model, scaled_model)
             else:
@@ -597,53 +599,65 @@ def train_federated(
     return model
 
 
-def send_new_models(local_model, models):
-    with torch.no_grad():
-        for model_worker, remote_model in models.items():
-            if model_worker == "local_model":
-                continue
-            local_parameters = dict(local_model.named_parameters())
-            for name, param in remote_model.named_parameters():
-                remote_value = local_parameters[name].data.copy().send(model_worker)
-                # Try this and if not do x_ptr * 0 + remote_value
-                param.data[:] = remote_value.data[:]
-    return models
+def tensor_iterator(model):
+    """adding relavant iterators for the tensor elements"""
+    iterators = [
+        "parameters",
+        "buffers",
+    ]  # all the element iterators from nn module should be listed here,
+    return [getattr(model, i) for i in iterators]
 
 
 def secure_aggregation(
     local_model, models, workers, crypto_provider, args, test_params
 ):
     with torch.no_grad():
-        for local_param, *remote_params in zip(
+        for local_iter, *remote_iter in zip(
             *(
-                [local_model.parameters()]
+                [tensor_iterator(local_model)]
                 + [
-                    model.parameters()
+                    tensor_iterator(model)
                     for key, model in models.items()
                     if key != "local_model"
                 ]
             )
         ):
-            """param_stack = (
-                remote_params[0].copy()
-                # .fix_prec()
-                # .share(*workers, crypto_provider=crypto_provider)
-                .get()
-            )
-            for remote_param in remote_params[1:]:
-                param_stack += (
-                    remote_param.copy()
-                    # .fix_prec()
-                    # .share(*workers, crypto_provider=crypto_provider)
-                    .get()
-                )"""
-            param_stack = torch.mean(
-                torch.stack([r.data.copy().get() for r in remote_params]), dim=0
-            )
-            # param_stack = param_stack  # .get().float_prec()
-            # param_stack /= len(remote_params)
-            local_param.set_(param_stack)
+            for local_param, *remote_params in zip(
+                *([local_iter()] + [r() for r in remote_iter])
+            ):
+                dt = remote_params[0].dtype
+                ## num_batches tracked are ints
+                ## -> irrelevant cause batch norm momentum is on by default
+                if dt != torch.float:
+                    continue
+                param_stack = torch.sum(
+                    torch.stack(
+                        [
+                            r.data.copy()
+                            .fix_prec()
+                            .share(*workers, crypto_provider=crypto_provider)
+                            .get()
+                            for r in remote_params
+                        ]
+                    ),
+                    dim=0,
+                )
+                param_stack = param_stack.get().float_prec()
+                param_stack /= len(remote_params)
+                local_param.set_(param_stack)
     return local_model
+
+
+def send_new_models(local_model, models):
+    for worker in models.keys():
+        if worker == "local_model":
+            continue
+        if local_model.location:
+            local_model.get()
+        local_model.send(worker)
+        models[worker].load_state_dict(local_model.state_dict())
+    local_model.get()
+    return models
 
 
 def secure_aggregation_epoch(
@@ -1053,9 +1067,6 @@ def test(
             if verbose
             else val_loader
         ):
-            if not args.encrypted_inference:
-                data = data.to(device)
-                target = target.to(device)
             output = model(data)
             loss = loss_fn(output, oh_converter(target) if oh_converter else target)
             test_loss += loss.item()  # sum up batch loss

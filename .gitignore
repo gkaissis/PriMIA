@@ -146,3 +146,4 @@ minimal_inference.py
 hyperparam_search/*
 SecAgTutorial.ipynb
 *EVD*
+.pretrained_weights

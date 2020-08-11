@@ -6,7 +6,9 @@ if __name__ == "__main__":
 
     if os.path.split(cur_path)[1] != "server_simulation":
         print(
-            "Be very careful, this script creates folders and distributes data."
+            """Be very careful, this script DELETES data! If all you want
+            to do is to clean up the subfolders of server_simulation
+            consider using make clean_server_folders instead"""
             "Only execute this from 4P/data/server_simulation"
         )
         inpt = input("Do you really wish to proceed? [y/N]").lower()
