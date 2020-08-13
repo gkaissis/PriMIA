@@ -14,16 +14,17 @@ if __name__ == "__main__":
     i = 0
     dist_per_worker = {}
     for dirpath, dirnames, filenames in os.walk("."):
-        if not "all_samples" in dirpath:
-            img_files = [f for f in filenames if f.endswith(".jpeg")]
-            dir_path_list = dirpath.split("/")
-            if len(dir_path_list) < 3:
-                continue
-            worker_name = dir_path_list[-2]
-            class_name = dir_path_list[-1]
-            if worker_name not in dist_per_worker:
-                dist_per_worker[worker_name] = {}
-            dist_per_worker[worker_name][class_name] = len(img_files)
+        if "train_total" in dirpath:
+            continue
+        img_files = [f for f in filenames if f.endswith(".jpeg")]
+        dir_path_list = dirpath.split("/")
+        if len(dir_path_list) < 3:
+            continue
+        worker_name = dir_path_list[-2]
+        class_name = dir_path_list[-1]
+        if worker_name not in dist_per_worker:
+            dist_per_worker[worker_name] = {}
+        dist_per_worker[worker_name][class_name] = len(img_files)
     rows = []
     headers = set()
     for d in dist_per_worker.values():
