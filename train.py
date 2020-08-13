@@ -1,10 +1,12 @@
+from os import path, remove, environ
+
+environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 import argparse
 import configparser
 import multiprocessing as mp
 import random
 import shutil
 from datetime import datetime
-from os import path, remove
 from warnings import warn
 
 import numpy as np
@@ -399,7 +401,7 @@ def setup_pysyft(args, hook, verbose=False):
 
 def main(args, verbose=True, optuna_trial=None):
 
-    use_cuda = not args.no_cuda and torch.cuda.is_available()
+    use_cuda = args.cuda and torch.cuda.is_available()
 
     torch.manual_seed(args.seed)
     random.seed(args.seed)
@@ -506,7 +508,7 @@ def main(args, verbose=True, optuna_trial=None):
             # occurances = dataset.get_class_occurances()
 
         else:
-            raise NotImplementedError("dataset not implemented")
+            raise RuntimeError("Dataset does not exist. Please select a valid dataset")
 
         total_L = total_L if args.train_federated else len(dataset)
         fraction = 1.0 / args.validation_split
@@ -543,7 +545,7 @@ def main(args, verbose=True, optuna_trial=None):
         vis = visdom.Visdom()
         assert vis.check_connection(
             timeout_seconds=3
-        ), "No connection could be formed quickly"
+        ), "Connection to the visdom server could not be established!"
         vis_env = path.join(
             args.dataset, "federated" if args.train_federated else "vanilla", timestamp
         )
@@ -854,13 +856,18 @@ def main(args, verbose=True, optuna_trial=None):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--config", type=str, required=True, help="Path to config",
+        "--config",
+        type=str,
+        required=True,
+        help="Path to the configuration file (.ini).",
     )
     parser.add_argument(
-        "--train_federated", action="store_true", help="Train in federated setting"
+        "--train_federated", action="store_true", help="Train with federated learning."
     )
     parser.add_argument(
-        "--secure_aggregation", action="store_true", help="Perform secure aggregation"
+        "--secure_aggregation",
+        action="store_true",
+        help="Train with secure aggregation.",
     )
     parser.add_argument(
         "--dataset",
@@ -868,12 +875,12 @@ if __name__ == "__main__":
         default="pneumonia",
         choices=["pneumonia", "mnist"],
         required=True,
-        help="which dataset?",
+        help="Select a dataset to use.",  # TODO: this gets changed with the data folders right @a1302z?
     )
     parser.add_argument(
-        "--no_visdom", action="store_false", help="dont use a visdom server"
+        "--visdom", action="store_true", help="Use Visdom for training monitoring."
     )
-    parser.add_argument("--no_cuda", action="store_true", help="dont use gpu")
+    parser.add_argument("--cuda", action="store_true", help="Use CUDA acceleration.")
     parser.add_argument(
         "--resume_checkpoint",
         type=str,
@@ -881,10 +888,10 @@ if __name__ == "__main__":
         help="Start training from older model checkpoint",
     )
     parser.add_argument(
-        "--websockets", action="store_true", help="train on websocket config"
+        "--websockets", action="store_true", help="Train using WebSockets."
     )
     parser.add_argument(
-        "--verbose", action="store_true", help="set syft workers to verbose"
+        "--verbose", action="store_true", help="Sets Syft workers to verbose mode"
     )
     cmd_args = parser.parse_args()
 
@@ -894,6 +901,13 @@ if __name__ == "__main__":
 
     args = Arguments(cmd_args, config, mode="train")
     if args.websockets:
-        assert args.train_federated, "Websockets only work when it is federated"
+        if args.train_federated:
+            raise RuntimeError("WebSockets can only be used when in federated mode.")
+    if args.cuda:
+        warn(
+            "CUDA is currently not supported by the backend. This option will be available at a later release",
+            category=FutureWarning,
+        )
+        exit()
     print(str(args))
     main(args)
