@@ -131,6 +131,7 @@ dependencies:
   - zipp=3.1.0=py_0
   - zlib=1.2.11=h7b6447c_3
   - zstd=1.4.4=h0b5b093_3
+  - scikit-image=0.17.2
   - pip:
     - absl-py==0.9.0
     - aioice==0.6.18
@@ -180,7 +181,6 @@ dependencies:
     - werkzeug==1.0.1
     - zope-event==4.4
     - zope-interface==5.1.0
-    - tensorflow-io
-    - scikit-image
+    - tensorflow-io==0.15.0
     - git+https://github.com/facebookresearch/CrypTen.git@cdecc8de1514d7f36a5268a50c714caba5e57318#egg=crypten
     - git+https://github.com/OpenMined/PySyft.git@80155352ad99265742d03165aa78bfb279810549#egg=syft
