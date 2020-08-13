@@ -148,3 +148,6 @@ hyperparam_search/*
 SecAgTutorial.ipynb
 *EVD*
 .pretrained_weights
+one_test_sample/
+*testscript.py
+src/
