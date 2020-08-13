@@ -88,7 +88,7 @@ if __name__ == "__main__":
             file_name = os.path.split(src_file)[1]
             target_file = os.path.join(name, train_imgs.classes[class_idx], file_name)
             if args.symbolic:
-                os.symlink(os.path.abspath(src_file), dst_file)
+                os.symlink(os.path.abspath(src_file), target_file)
             else:
                 copyfile(src_file, target_file)
     # test_imgs = ImageFolder(args.test_data_src)
