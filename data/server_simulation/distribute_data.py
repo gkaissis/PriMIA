@@ -6,6 +6,8 @@ import argparse
 from shutil import copyfile
 import sys, os.path
 
+from torchvision.datasets import ImageFolder
+
 sys.path.insert(0, os.path.split(os.path.split(sys.path[0])[0])[0])
 
 if __name__ == "__main__":
@@ -19,6 +21,25 @@ if __name__ == "__main__":
         action="store_true",
         required=False,
     )
+    parser.add_argument(
+        "--num_workers",
+        default=3,
+        type=int,
+        help="How many servers should be simulated.",
+    )
+    parser.add_argument(
+        "--train_data_src",
+        default="../train",
+        type=str,
+        help="Source data folder for training data.",
+    )
+    # parser.add_argument(
+    #     "--test_data_src",
+    #     default="../test",
+    #     type=str,
+    #     help="Source data folder for test data.",
+    # )
+    parser.add_argument
     args = parser.parse_args()
     cur_path = os.path.abspath(os.getcwd())
 
@@ -34,66 +55,51 @@ if __name__ == "__main__":
             print("aborting")
             exit()
 
-    # Settings
-    label_file = pd.read_csv("../Labels.csv")
-    labels = label_file[label_file["Dataset_type"] == "TRAIN"]
-    path_to_data = "../train"
-    class_names = {0: "normal", 1: "bacterial pneumonia", 2: "viral pneumonia"}
-    num_workers = 3
-
     # actual code
-    worker_dirs = ["worker{:d}".format(i + 1) for i in range(num_workers)]
+    worker_dirs = ["worker{:d}".format(i + 1) for i in range(args.num_workers)]
     worker_imgs = {name: [] for name in worker_dirs}
-    L = len(labels)
+
+    train_imgs = ImageFolder(args.train_data_src)
+    L = len(train_imgs)
     shuffled_idcs = list(range(L))
     seed(0)
     shuffle(shuffled_idcs)
     split_idx = len(shuffled_idcs) // 10
     ## first ten per cent are validation set
-    train_set, val_set = shuffled_idcs[split_idx:], shuffled_idcs[:split_idx]
-    for i in range(num_workers):
-        idcs_worker = train_set[i::num_workers]
-        worker_imgs["worker{:d}".format(i + 1)] = [labels.iloc[j] for j in idcs_worker]
-    worker_imgs["validation"] = [labels.iloc[j] for j in val_set]
-    """for i in tqdm(range(L), total=L, leave=False):
-        sample = labels.iloc[i]
-        worker_imgs[worker_dirs[i % num_workers]].append(sample)"""
-    for c in class_names.values():
-        for ps in ["train_total", "test"]:
-            p = os.path.join(ps, c)
-            if not os.path.isdir(p):
-                os.makedirs(p)
+    train_idcs, val_idcs = shuffled_idcs[split_idx:], shuffled_idcs[:split_idx]
+    for c in train_imgs.classes:
+        # for ps in ["train_total", "test"]:
+        #     p = os.path.join(ps, c)
+        #     if not os.path.isdir(p):
+        #         os.makedirs(p)
         for w in worker_imgs.keys():
             p = os.path.join(w, c)
             if not os.path.isdir(p):
                 os.makedirs(p)
-    for name, samples in tqdm(worker_imgs.items(), total=len(worker_imgs), leave=False):
-        for s in tqdm(samples, total=len(samples), leave=False):
-            src_file = os.path.join(path_to_data, s["X_ray_image_name"])
-            dst_file = os.path.join(
-                name, class_names[s["Numeric_Label"]], s["X_ray_image_name"]
-            )
-            all_dst = os.path.join(
-                "train_total", class_names[s["Numeric_Label"]], s["X_ray_image_name"]
-            )
+    for i in range(args.num_workers):
+        idcs_worker = train_idcs[i :: args.num_workers]
+        worker_imgs["worker{:d}".format(i + 1)] = idcs_worker
+    worker_imgs["validation"] = val_idcs
+    for name, idcs in tqdm(worker_imgs.items(), total=len(worker_imgs), leave=False):
+        for idx in tqdm(
+            idcs, total=len(idcs), leave=False, desc="save data to {:s}".format(name)
+        ):
+            src_file, class_idx = train_imgs.samples[idx]
+            file_name = os.path.split(src_file)[1]
+            target_file = os.path.join(name, train_imgs.classes[class_idx], file_name)
             if args.symbolic:
                 os.symlink(os.path.abspath(src_file), dst_file)
-                os.symlink(os.path.abspath(src_file), all_dst)
             else:
-                copyfile(src_file, dst_file)
-                copyfile(src_file, all_dst)
-
-    labels = label_file[label_file["Dataset_type"] == "TEST"]
-    path_to_data = "../test"
-    for i in tqdm(
-        range(len(labels)), total=len(labels), desc="create test folder", leave=False
-    ):
-        s = labels.iloc[i]
-        src_file = os.path.join(path_to_data, s["X_ray_image_name"])
-        dst_file = os.path.join(
-            "test", class_names[s["Numeric_Label"]], s["X_ray_image_name"]
-        )
-        if args.symbolic:
-            os.symlink(os.path.abspath(src_file), dst_file)
-        else:
-            copyfile(src_file, dst_file)
+                copyfile(src_file, target_file)
+    # test_imgs = ImageFolder(args.test_data_src)
+    # for path, class_idx in tqdm(
+    #     test_imgs.samples, total=len(test_imgs), desc="create test folder", leave=False,
+    # ):
+    #     src_file = path
+    #     file_name = os.path.split(src_file)[1]
+    #     dst_file = os.path.join("test", test_imgs.classes[class_idx], file_name)
+    #     print("Copy {:s} to \t{:s}".format(src_file, dst_file))
+    #     if args.symbolic:
+    #         os.symlink(os.path.abspath(src_file), dst_file)
+    #     else:
+    #         copyfile(src_file, dst_file)

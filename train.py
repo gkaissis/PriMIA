@@ -856,7 +856,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--unencrypted_aggregation",
         action="store_true",
-        help="Models are averaged without encryption. Makes it slightly faster.",
+        help="Models are averaged without encryption."
+        "Slight advantages in terms of model performance and training speed.",
     )
     parser.add_argument(
         "--data_dir",

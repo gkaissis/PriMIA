@@ -47,12 +47,24 @@ if __name__ == "__main__":
 
     kwargs = {"num_workers": 1, "pin_memory": True} if use_cuda else {}
     class_names = None
+    val_mean_std = (
+        state["val_mean_std"]
+        if "val_mean_std" in state.keys()
+        else (
+            torch.tensor([0.5]),  # pylint:disable=not-callable
+            torch.tensor([0.2]),  # pylint:disable=not-callable
+        )
+        if args.pretrained
+        else (
+            torch.tensor([0.5, 0.5, 0.5]),  # pylint:disable=not-callable
+            torch.tensor([0.2, 0.2, 0.2]),  # pylint:disable=not-callable
+        )
+    )
+    mean, std = val_mean_std
+    mean = mean.to(device)
+    std = std.to(device)
     if args.data_dir == "mnist":
         num_classes = 10
-        mean, std = (
-            torch.tensor([0.1307]),  # pylint:disable=not-callable
-            torch.tensor([0.3081]),  # pylint:disable=not-callable
-        )
         testset = datasets.MNIST(
             "../data",
             train=False,
@@ -66,28 +78,12 @@ if __name__ == "__main__":
         )
     else:
         num_classes = 3
-        val_mean_std = (
-            state["val_mean_std"]
-            if "val_mean_std" in state.keys()
-            else (
-                torch.tensor([0.5]),  # pylint:disable=not-callable
-                torch.tensor([0.2]),  # pylint:disable=not-callable
-            )
-            if args.pretrained
-            else (
-                torch.tensor([0.5, 0.5, 0.5]),  # pylint:disable=not-callable
-                torch.tensor([0.2, 0.2, 0.2]),  # pylint:disable=not-callable
-            )
-        )
-        mean, std = val_mean_std
-        mean = mean.to(device)
-        std = std.to(device)
         tf = [
             # transforms.Lambda(lambda x: adaptive_hist_equalization_on_PIL(x)),
             transforms.Resize(args.inference_resolution),
             transforms.CenterCrop(args.inference_resolution),
             transforms.ToTensor(),
-            transforms.Normalize(mean.cpu(), std.cpu()),
+            transforms.Normalize(mean, std),
         ]
 
         testset = datasets.ImageFolder(
