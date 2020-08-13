@@ -18,9 +18,7 @@ import visdom
 from tabulate import tabulate
 from torchvision import datasets, models, transforms
 from optuna import TrialPruned
-
 from torchlib.dataloader import (
-    PPPP,
     LabelMNIST,
     calc_mean_std,
     single_channel_loader,
@@ -454,11 +452,6 @@ def main(args, verbose=True, optuna_trial=None):
                 transforms.ToTensor(),
                 transforms.Normalize((0.1307,), (0.3081,)),
             ]
-            test_tf = [
-                transforms.Resize(args.inference_resolution),
-                transforms.ToTensor(),
-                transforms.Normalize((0.1307,), (0.3081,)),
-            ]
             if args.pretrained:
                 repeat = transforms.Lambda(
                     lambda x: torch.repeat_interleave(  # pylint: disable=no-member
@@ -466,7 +459,6 @@ def main(args, verbose=True, optuna_trial=None):
                     )
                 )
                 train_tf.append(repeat)
-                test_tf.append(repeat)
             dataset = datasets.MNIST(
                 "../data",
                 train=True,
@@ -477,7 +469,6 @@ def main(args, verbose=True, optuna_trial=None):
         elif args.dataset == "pneumonia":
             # Different train and inference resolution only works with adaptive
             # pooling in model activated
-            mean, std = torch.load("data/mean_std.pt")
             train_tf = [
                 transforms.RandomVerticalFlip(p=args.vertical_flip_prob),
                 transforms.RandomAffine(
@@ -490,34 +481,29 @@ def main(args, verbose=True, optuna_trial=None):
                 transforms.Resize(args.inference_resolution),
                 transforms.RandomCrop(args.train_resolution),
                 transforms.ToTensor(),
+            ]
+            # dataset = PPPP(
+            #     "data/Labels.csv",
+            target_dict_pneumonia = {0: 1, 1: 0, 2: 2}
+            target_tf = lambda x: target_dict_pneumonia[x]
+            dataset = datasets.ImageFolder(
+                "data/server_simulation/train_total",
+                transform=transforms.Compose(train_tf),
+                target_transform=target_tf,
+                loader=datasets.folder.default_loader
+                if args.pretrained
+                else single_channel_loader,
+            )
+            val_mean_std = calc_mean_std(dataset)
+            mean, std = val_mean_std
+            train_tf = [
                 transforms.Normalize(tuple(mean), tuple(std)),
                 AddGaussianNoise(mean=0.0, std=args.noise_std, p=args.noise_prob),
             ]
-            test_tf = [
-                transforms.Resize(args.inference_resolution),
-                transforms.CenterCrop(args.inference_resolution),
-                transforms.ToTensor(),
-                transforms.Normalize(tuple(mean), tuple(std)),
-            ]
 
-            # Duplicate grayscale one channel image into 3 channels
-            if args.pretrained:
-                repeat = transforms.Lambda(
-                    lambda x: torch.repeat_interleave(  # pylint: disable=no-member
-                        x, 3, dim=0
-                    )
-                )
-                train_tf.append(repeat)
-                test_tf.append(repeat)
+            dataset.transform.transforms.extend(train_tf)
 
-            dataset = PPPP(
-                "data/Labels.csv",
-                train=True,
-                transform=transforms.Compose(train_tf),
-                seed=args.seed,
-            )
-
-            occurances = dataset.get_class_occurances()
+            # occurances = dataset.get_class_occurances()
 
         else:
             raise NotImplementedError("dataset not implemented")

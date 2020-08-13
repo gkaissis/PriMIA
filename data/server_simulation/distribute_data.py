@@ -2,8 +2,11 @@ import os
 import pandas as pd
 from random import shuffle, seed
 from tqdm import tqdm
-from shutil import copyfile
 import argparse
+from shutil import copyfile
+import sys, os.path
+
+sys.path.insert(0, os.path.split(os.path.split(sys.path[0])[0])[0])
 
 if __name__ == "__main__":
 
@@ -32,8 +35,8 @@ if __name__ == "__main__":
             exit()
 
     # Settings
-    labels = pd.read_csv("../Labels.csv")
-    labels = labels[labels["Dataset_type"] == "TRAIN"]
+    label_file = pd.read_csv("../Labels.csv")
+    labels = label_file[label_file["Dataset_type"] == "TRAIN"]
     path_to_data = "../train"
     class_names = {0: "normal", 1: "bacterial pneumonia", 2: "viral pneumonia"}
     num_workers = 3
@@ -56,9 +59,10 @@ if __name__ == "__main__":
         sample = labels.iloc[i]
         worker_imgs[worker_dirs[i % num_workers]].append(sample)"""
     for c in class_names.values():
-        p = os.path.join("all_samples", c)
-        if not os.path.isdir(p):
-            os.makedirs(p)
+        for ps in ["train_total", "test"]:
+            p = os.path.join(ps, c)
+            if not os.path.isdir(p):
+                os.makedirs(p)
         for w in worker_imgs.keys():
             p = os.path.join(w, c)
             if not os.path.isdir(p):
@@ -70,7 +74,7 @@ if __name__ == "__main__":
                 name, class_names[s["Numeric_Label"]], s["X_ray_image_name"]
             )
             all_dst = os.path.join(
-                "all_samples", class_names[s["Numeric_Label"]], s["X_ray_image_name"]
+                "train_total", class_names[s["Numeric_Label"]], s["X_ray_image_name"]
             )
             if args.symbolic:
                 os.symlink(os.path.abspath(src_file), dst_file)
@@ -78,3 +82,18 @@ if __name__ == "__main__":
             else:
                 copyfile(src_file, dst_file)
                 copyfile(src_file, all_dst)
+
+    labels = label_file[label_file["Dataset_type"] == "TEST"]
+    path_to_data = "../test"
+    for i in tqdm(
+        range(len(labels)), total=len(labels), desc="create test folder", leave=False
+    ):
+        s = labels.iloc[i]
+        src_file = os.path.join(path_to_data, s["X_ray_image_name"])
+        dst_file = os.path.join(
+            "test", class_names[s["Numeric_Label"]], s["X_ray_image_name"]
+        )
+        if args.symbolic:
+            os.symlink(os.path.abspath(src_file), dst_file)
+        else:
+            copyfile(src_file, dst_file)
