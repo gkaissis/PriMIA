@@ -151,12 +151,12 @@ class Arguments:
                 "federated", "weighted_averaging", fallback=False
             )
 
-        self.visdom = cmd_args.no_visdom if mode == "train" else False
+        self.visdom = cmd_args.visdom if mode == "train" else False
         self.encrypted_inference = (
             cmd_args.encrypted_inference if mode == "inference" else False
         )
         self.dataset = cmd_args.dataset  # options: ['pneumonia', 'mnist']
-        self.no_cuda = cmd_args.no_cuda
+        self.cuda = cmd_args.cuda
         self.websockets = cmd_args.websockets if mode == "train" else False
         if self.websockets:
             assert self.train_federated, "If you use websockets it must be federated"
