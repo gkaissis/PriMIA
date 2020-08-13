@@ -26,6 +26,7 @@ from PIL import Image
 import tensorflow_io as tfio
 import tensorflow as tf
 from skimage.exposure import rescale_intensity
+import numpy as np
 
 
 def load_dcm(
