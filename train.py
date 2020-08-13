@@ -73,10 +73,6 @@ def calc_class_weights(args, train_loader, num_classes):
             else "calc_class_weights",
             total=len(tl),
         ):
-            if target.shape[0] < args.batch_size:
-                # the last batch is not considered
-                # TODO: find solution for this
-                continue
             if args.train_federated and (args.mixup or args.weight_classes):
                 if args.mixup and args.mixup_lambda == 0.5:
                     raise ValueError(
@@ -86,7 +82,7 @@ def calc_class_weights(args, train_loader, num_classes):
                 target = target.max(dim=1)
                 target = target[1]  # without pysyft it should be target.indices
             for i in range(num_classes):
-                n = target.eq(comparison[i]).sum().copy()
+                n = target.eq(comparison[i][..., : target.shape[0]]).sum().copy()
                 if args.train_federated:
                     n = n.get()
                 occurances[i] += n.item()
