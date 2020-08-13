@@ -14,8 +14,6 @@ if __name__ == "__main__":
     i = 0
     dist_per_worker = {}
     for dirpath, dirnames, filenames in os.walk("."):
-        if "train_total" in dirpath:
-            continue
         img_files = [f for f in filenames if f.endswith(".jpeg")]
         dir_path_list = dirpath.split("/")
         if len(dir_path_list) < 3:
@@ -25,13 +23,15 @@ if __name__ == "__main__":
         if worker_name not in dist_per_worker:
             dist_per_worker[worker_name] = {}
         dist_per_worker[worker_name][class_name] = len(img_files)
+
     rows = []
     headers = set()
     for d in dist_per_worker.values():
         headers |= set(d.keys())
     headers = list(headers)
     total = {h: 0 for h in headers}
-    for worker, class_dist_dict in dist_per_worker.items():
+    for worker in sorted(dist_per_worker.keys()):
+        class_dist_dict = dist_per_worker[worker]
         row = [worker]
         x = 0
         for h in headers:

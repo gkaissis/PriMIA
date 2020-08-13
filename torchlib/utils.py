@@ -122,8 +122,8 @@ class Arguments:
             self.batch_size *= 2
             print("Doubled batch size because of mixup")
         self.train_federated = cmd_args.train_federated if mode == "train" else False
-        self.secure_aggregation = (
-            cmd_args.secure_aggregation if mode == "train" else False
+        self.unencrypted_aggregation = (
+            cmd_args.unencrypted_aggregation if mode == "train" else False
         )
         if self.train_federated:
             self.sync_every_n_batch = config.getint(
@@ -155,7 +155,7 @@ class Arguments:
         self.encrypted_inference = (
             cmd_args.encrypted_inference if mode == "inference" else False
         )
-        self.dataset = cmd_args.dataset  # options: ['pneumonia', 'mnist']
+        self.data_dir = cmd_args.data_dir  # options: ['pneumonia', 'mnist']
         self.cuda = cmd_args.cuda
         self.websockets = cmd_args.websockets if mode == "train" else False
         if self.websockets:
@@ -178,7 +178,7 @@ class Arguments:
         self.visdom = False
         if hasattr(cmd_args, "encrypted_inference"):
             self.encrypted_inference = cmd_args.encrypted_inference
-        self.no_cuda = cmd_args.no_cuda
+        self.cuda = cmd_args.cuda
         self.websockets = (
             cmd_args.websockets  # currently not implemented for inference
             if self.encrypted_inference and hasattr(cmd_args, "websockets")
@@ -469,19 +469,7 @@ def train_federated(
     vis_params=None,
     verbose=True,
 ):
-    if args.secure_aggregation:
-        model, avg_loss = secure_aggregation_epoch(
-            args,
-            model,
-            device,
-            train_loaders,
-            optimizer,
-            epoch,
-            loss_fn,
-            crypto_provider,
-            test_params=test_params,
-        )
-    else:
+    if args.unencrypted_aggregation:
         mng = mp.Manager()
         # model.train()
         result_dict, waiting_for_sync_dict, sync_dict, progress_dict, loss_dict = (
@@ -586,6 +574,18 @@ def train_federated(
 
         avg_loss = np.average([l["final"] for l in loss_dict.values()], weights=weights)
 
+    else:
+        model, avg_loss = secure_aggregation_epoch(
+            args,
+            model,
+            device,
+            train_loaders,
+            optimizer,
+            epoch,
+            loss_fn,
+            crypto_provider,
+            test_params=test_params,
+        )
     if args.visdom:
         vis_params["vis"].line(
             X=np.asarray([epoch]),

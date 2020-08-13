@@ -14,12 +14,11 @@ from torchlib.dataloader import single_channel_loader
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--dataset",
+        "--data_dir",
         type=str,
         required=True,
-        default="pneumonia",
-        choices=["pneumonia", "mnist"],
-        help="which dataset?",
+        default="data/server_simulation/test",
+        help='Select a data folder [if matches "mnist" mnist will be used].',
     )
     parser.add_argument(
         "--model_weights",
@@ -28,10 +27,10 @@ if __name__ == "__main__":
         default=None,
         help="model weights to use",
     )
-    parser.add_argument("--no_cuda", action="store_true", help="dont use gpu")
+    parser.add_argument("--cuda", action="store_true", help="Use CUDA acceleration.")
     cmd_args = parser.parse_args()
 
-    use_cuda = not cmd_args.no_cuda and torch.cuda.is_available()
+    use_cuda = cmd_args.cuda and torch.cuda.is_available()
 
     device = torch.device("cuda" if use_cuda else "cpu")  # pylint: disable=no-member
     state = torch.load(cmd_args.model_weights, map_location=device)
@@ -48,28 +47,37 @@ if __name__ == "__main__":
 
     kwargs = {"num_workers": 1, "pin_memory": True} if use_cuda else {}
     class_names = None
-    if args.dataset == "mnist":
+    if args.data_dir == "mnist":
         num_classes = 10
-        mean, std = torch.tensor([0.1307]), torch.tensor([0.3081])
+        mean, std = (
+            torch.tensor([0.1307]),  # pylint:disable=not-callable
+            torch.tensor([0.3081]),  # pylint:disable=not-callable
+        )
         testset = datasets.MNIST(
             "../data",
             train=False,
             transform=transforms.Compose(
                 [
-                    transforms.Resize(56),
+                    transforms.Resize(args.inference_resolution),
                     transforms.ToTensor(),
                     transforms.Normalize(mean, std),
                 ]
             ),
         )
-    elif args.dataset == "pneumonia":
+    else:
         num_classes = 3
         val_mean_std = (
             state["val_mean_std"]
             if "val_mean_std" in state.keys()
-            else (torch.tensor([0.5]), torch.tensor([0.2]))
+            else (
+                torch.tensor([0.5]),  # pylint:disable=not-callable
+                torch.tensor([0.2]),  # pylint:disable=not-callable
+            )
             if args.pretrained
-            else (torch.tensor([0.5, 0.5, 0.5]), torch.tensor([0.2, 0.2, 0.2]))
+            else (
+                torch.tensor([0.5, 0.5, 0.5]),  # pylint:disable=not-callable
+                torch.tensor([0.2, 0.2, 0.2]),  # pylint:disable=not-callable
+            )
         )
         mean, std = val_mean_std
         mean = mean.to(device)
@@ -82,19 +90,19 @@ if __name__ == "__main__":
             transforms.Normalize(mean.cpu(), std.cpu()),
         ]
 
-        target_dict_pneumonia = {0: 1, 1: 0, 2: 2}
-        target_tf = lambda x: target_dict_pneumonia[x]
         testset = datasets.ImageFolder(
-            "data/server_simulation/test",
+            cmd_args.data_dir,
             transform=transforms.Compose(tf),
-            target_transform=target_tf,
             loader=datasets.folder.default_loader
+            if args.pretrained
+            else single_channel_loader
             if args.pretrained
             else single_channel_loader,
         )
+        assert (
+            len(testset.classes) == 3
+        ), "We can only handle data that has 3 classes: normal, bacterial and viral"
         class_names = {0: "normal", 1: "bacterial pneumonia", 2: "viral pneumonia"}
-    else:
-        raise NotImplementedError("dataset not implemented")
 
     test_loader = torch.utils.data.DataLoader(
         testset, batch_size=1, shuffle=True, **kwargs
@@ -110,7 +118,7 @@ if __name__ == "__main__":
         )
     elif args.model == "simpleconv":
         if args.pretrained:
-            warn("No pretrained version available")
+            raise RuntimeError("No pretrained version available")
         model = conv_at_resolution[args.train_resolution](
             num_classes=num_classes,
             in_channels=3 if args.pretrained else 1,

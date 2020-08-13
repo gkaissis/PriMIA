@@ -45,8 +45,7 @@ from torchlib.utils import (
 )
 
 
-def calc_class_weights(args, train_loader):
-    num_classes = {"pneumonia": 3, "mnist": 10}[args.dataset]
+def calc_class_weights(args, train_loader, num_classes):
     comparison = list(
         torch.split(
             torch.zeros((num_classes, args.batch_size)), 1  # pylint:disable=no-member
@@ -114,7 +113,7 @@ def setup_pysyft(args, hook, verbose=False):
 
     crypto_in_config = "crypto_provider" in worker_names
     crypto_provider = None
-    assert (not args.secure_aggregation) or (
+    assert (args.unencrypted_aggregation) or (
         crypto_in_config
     ), "No crypto provider in configuration"
     if crypto_in_config:
@@ -126,18 +125,18 @@ def setup_pysyft(args, hook, verbose=False):
         ]
         assert len(cp_key) == 1
         cp_key = cp_key[0]
-        if args.secure_aggregation:
+        if not args.unencrypted_aggregation:
             crypto_provider_data = worker_dict[cp_key]
         worker_dict.pop(cp_key)
 
     if args.websockets:
-        if args.weight_classes or (args.mixup and args.dataset == "mnist"):
+        if args.weight_classes or (args.mixup and args.data_dir == "mnist"):
             raise NotImplementedError(
                 "weighted loss as well as mixup in combination"
                 " with mnist are not implemented currently"
             )
         workers = {
-            worker["id"]: sy.workers.node_client.NodeClient(
+            worker["id"]: sy.workers.node_client.NodeClient(  # pylint:disable=no-member
                 hook,
                 "http://{:s}:{:s}".format(worker["host"], worker["port"]),
                 id=worker["id"],
@@ -145,8 +144,8 @@ def setup_pysyft(args, hook, verbose=False):
             )
             for _, worker in worker_dict.items()
         }
-        if args.secure_aggregation:
-            crypto_provider = sy.workers.node_client.NodeClient(
+        if not args.unencrypted_aggregation:
+            crypto_provider = sy.workers.node_client.NodeClient(  # pylint:disable=no-member
                 hook,
                 "http://{:s}:{:s}".format(
                     crypto_provider_data["host"], crypto_provider_data["port"]
@@ -160,7 +159,7 @@ def setup_pysyft(args, hook, verbose=False):
             worker["id"]: sy.VirtualWorker(hook, id=worker["id"], verbose=verbose)
             for _, worker in worker_dict.items()
         }
-        if args.secure_aggregation:
+        if not args.unencrypted_aggregation:
             crypto_provider = sy.VirtualWorker(
                 hook, id="crypto_provider", verbose=verbose
             )
@@ -171,7 +170,7 @@ def setup_pysyft(args, hook, verbose=False):
             leave=False,
             desc="load data",
         ):
-            if args.dataset == "mnist":
+            if args.data_dir == "mnist":
                 node_id = worker.id
                 KEEP_LABELS_DICT = {
                     "alice": [0, 1, 2, 3],
@@ -193,12 +192,13 @@ def setup_pysyft(args, hook, verbose=False):
                         ]
                     ),
                 )
-            elif args.dataset == "pneumonia":
-                data_dir = path.join(
-                    "data/server_simulation/", "worker{:d}".format(i + 1)
-                )
+            else:
+                data_dir = path.join(args.data_dir, "worker{:d}".format(i + 1))
                 stats_dataset = datasets.ImageFolder(
                     data_dir,
+                    loader=datasets.folder.default_loader
+                    if args.pretrained
+                    else single_channel_loader,
                     transform=transforms.Compose(
                         [
                             transforms.Resize(args.train_resolution),
@@ -207,6 +207,9 @@ def setup_pysyft(args, hook, verbose=False):
                         ]
                     ),
                 )
+                assert (
+                    len(stats_dataset.classes) == 3
+                ), "We can only handle data that has 3 classes: normal, bacterial and viral"
                 mean, std = calc_mean_std(stats_dataset, save_folder=data_dir,)
                 del stats_dataset
                 train_tf = [
@@ -224,29 +227,31 @@ def setup_pysyft(args, hook, verbose=False):
                     transforms.Normalize(mean, std),
                     AddGaussianNoise(mean=0.0, std=args.noise_std, p=args.noise_prob),
                 ]
-                target_dict_pneumonia = {0: 1, 1: 0, 2: 2}
-                target_tf = [lambda x: target_dict_pneumonia[x]]
+                target_tf = None
                 if args.mixup or args.weight_classes:
-                    target_tf.append(
-                        lambda x: torch.tensor(x)  # pylint:disable=not-callable
-                    )
-                    target_tf.append(To_one_hot(3))
+                    target_tf = [
+                        lambda x: torch.tensor(x),  # pylint:disable=not-callable
+                        To_one_hot(3),
+                    ]
                 dataset = datasets.ImageFolder(
                     # path.join("data/server_simulation/", "validation")
                     # if worker.id == "validation"
                     # else
                     data_dir,
+                    loader=datasets.folder.default_loader
+                    if args.pretrained
+                    else single_channel_loader,
                     transform=transforms.Compose(train_tf),
                     target_transform=transforms.Compose(target_tf),
                 )
+                assert (
+                    len(dataset.classes) == 3
+                ), "We can only handle data that has 3 classes: normal, bacterial and viral"
+
                 mean.tag("#datamean")
                 std.tag("#datastd")
                 worker.load_data([mean, std])
 
-            else:
-                raise NotImplementedError(
-                    "federation for virtual workers for this dataset unknown"
-                )
             data, targets = [], []
             # repetitions = 1 if worker.id == "validation" else args.repetitions_dataset
             if args.mixup:
@@ -285,20 +290,13 @@ def setup_pysyft(args, hook, verbose=False):
                 selected_data = selected_data.squeeze(1)
                 selected_targets = selected_targets.squeeze(1)
             del data, targets
-            selected_data.tag(
-                args.dataset,  # "#valdata" if worker.id == "validation" else
-                "#traindata",
-            )
-            selected_targets.tag(
-                args.dataset,
-                # "#valtargets" if worker.id == "validation" else
-                "#traintargets",
-            )
+            selected_data.tag("#traindata",)
+            selected_targets.tag("#traintargets",)
             worker.load_data([selected_data, selected_targets])
 
     grid: sy.PrivateGridNetwork = sy.PrivateGridNetwork(*workers.values())
-    data = grid.search(args.dataset, "#traindata")
-    target = grid.search(args.dataset, "#traintargets")
+    data = grid.search("#traindata")
+    target = grid.search("#traintargets")
     train_loader = {}
     total_L = 0
     for worker in data.keys():
@@ -314,9 +312,7 @@ def setup_pysyft(args, hook, verbose=False):
         )
         train_loader[workers[worker]] = tl
 
-    # data = grid.search(args.dataset, "#valdata")
-    # target = grid.search(args.dataset, "#valtargets")
-    if args.dataset == "mnist":
+    if args.data_dir == "mnist":
         valset = LabelMNIST(
             labels=list(range(10)),
             root="./data",
@@ -326,7 +322,7 @@ def setup_pysyft(args, hook, verbose=False):
                 [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,)),]
             ),
         )
-    elif args.dataset == "pneumonia":
+    else:
         means = [m[0] for m in grid.search("#datamean").values()]
         stds = [s[0] for s in grid.search("#datastd").values()]
         if len(means) > 0 and len(stds) > 0 and len(means) == len(stds):
@@ -365,12 +361,17 @@ def setup_pysyft(args, hook, verbose=False):
             transforms.ToTensor(),
             transforms.Normalize(mean, std),
         ]
-        target_dict_pneumonia = {0: 1, 1: 0, 2: 2}
         valset = datasets.ImageFolder(
-            path.join("data/server_simulation/", "validation"),
+            path.join(args.data_dir, "validation"),
+            loader=datasets.folder.default_loader
+            if args.pretrained
+            else single_channel_loader,
             transform=transforms.Compose(val_tf),
-            target_transform=lambda x: target_dict_pneumonia[x],
         )
+        assert (
+            len(valset.classes) == 3
+        ), "We can only handle data that has 3 classes: normal, bacterial and viral"
+
     val_loader = torch.utils.data.DataLoader(
         valset, batch_size=args.test_batch_size, shuffle=False
     )
@@ -415,20 +416,13 @@ def main(args, verbose=True, optuna_trial=None):
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     exp_name = "{:s}_{:s}_{:s}".format(
-        "federated" if args.train_federated else "vanilla", args.dataset, timestamp
+        "federated" if args.train_federated else "vanilla",
+        args.data_dir.replace("/", ""),
+        timestamp,
     )
-
+    num_classes = 10 if args.data_dir == "mnist" else 3
+    class_names = None
     # Dataset creation and definition
-    dataset_classes = {"mnist": 10, "pneumonia": 3}
-    num_classes = dataset_classes[args.dataset]
-    class_name_dict = {
-        "pneumonia": {0: "normal", 1: "bacterial pneumonia", 2: "viral pneumonia"}
-    }
-    class_names = (
-        class_name_dict[args.dataset]
-        if args.dataset in class_name_dict.keys()
-        else None
-    )
     if args.train_federated:
 
         hook = sy.TorchHook(torch)
@@ -448,11 +442,13 @@ def main(args, verbose=True, optuna_trial=None):
             else False,
         )
     else:
-        if args.dataset == "mnist":
+        if args.data_dir == "mnist":
+            val_mean_std = torch.tensor([[0.1307], [0.3081]])
+            mean, std = val_mean_std
             train_tf = [
                 transforms.Resize(args.train_resolution),
                 transforms.ToTensor(),
-                transforms.Normalize((0.1307,), (0.3081,)),
+                transforms.Normalize(mean, std),
             ]
             if args.pretrained:
                 repeat = transforms.Lambda(
@@ -468,7 +464,7 @@ def main(args, verbose=True, optuna_trial=None):
                 transform=transforms.Compose(train_tf),
             )
 
-        elif args.dataset == "pneumonia":
+        else:
             # Different train and inference resolution only works with adaptive
             # pooling in model activated
             train_tf = [
@@ -486,29 +482,28 @@ def main(args, verbose=True, optuna_trial=None):
             ]
             # dataset = PPPP(
             #     "data/Labels.csv",
-            target_dict_pneumonia = {0: 1, 1: 0, 2: 2}
-            target_tf = lambda x: target_dict_pneumonia[x]
             dataset = datasets.ImageFolder(
-                "data/server_simulation/train_total",
+                args.data_dir,
                 transform=transforms.Compose(train_tf),
-                target_transform=target_tf,
                 loader=datasets.folder.default_loader
+                if args.pretrained
+                else single_channel_loader
                 if args.pretrained
                 else single_channel_loader,
             )
+            assert (
+                len(dataset.classes) == 3
+            ), "We can only handle data that has 3 classes: normal, bacterial and viral"
             val_mean_std = calc_mean_std(dataset)
             mean, std = val_mean_std
             train_tf = [
-                transforms.Normalize(tuple(mean), tuple(std)),
+                transforms.Normalize(mean, std),
                 AddGaussianNoise(mean=0.0, std=args.noise_std, p=args.noise_prob),
             ]
 
             dataset.transform.transforms.extend(train_tf)
-
+            class_names = dataset.classes
             # occurances = dataset.get_class_occurances()
-
-        else:
-            raise RuntimeError("Dataset does not exist. Please select a valid dataset")
 
         total_L = total_L if args.train_federated else len(dataset)
         fraction = 1.0 / args.validation_split
@@ -526,13 +521,7 @@ def main(args, verbose=True, optuna_trial=None):
 
     cw = None
     if args.weight_classes:
-        if "occurances" in locals():
-            cw = torch.zeros((len(occurances)))  # pylint: disable=no-member
-            for c, n in occurances.items():
-                cw[c] = 1.0 / float(n)
-            cw /= torch.sum(cw)  # pylint: disable=no-member
-        else:
-            cw = calc_class_weights(args, train_loader)
+        cw = calc_class_weights(args, train_loader, num_classes)
         cw = cw.to(device)
 
     scheduler = LearningRateScheduler(
@@ -547,7 +536,7 @@ def main(args, verbose=True, optuna_trial=None):
             timeout_seconds=3
         ), "Connection to the visdom server could not be established!"
         vis_env = path.join(
-            args.dataset, "federated" if args.train_federated else "vanilla", timestamp
+            "federated" if args.train_federated else "vanilla", timestamp
         )
         plt_dict = dict(
             name="training loss",
@@ -580,7 +569,7 @@ def main(args, verbose=True, optuna_trial=None):
         model_args = {
             "pretrained": args.pretrained,
             "num_classes": num_classes,
-            "in_channels": 3 if args.dataset == "pneumonia" else 1,
+            "in_channels": 1 if args.data_dir == "mnist" or not args.pretrained else 3,
             "adptpool": False,
             "input_size": args.inference_resolution,
             "pooling": args.pooling_type,
@@ -592,7 +581,7 @@ def main(args, verbose=True, optuna_trial=None):
         model_type = conv_at_resolution[args.train_resolution]
         model_args = {
             "num_classes": num_classes,
-            "in_channels": 3 if args.dataset == "pneumonia" else 1,
+            "in_channels": 1 if args.data_dir == "mnist" or not args.pretrained else 3,
             "pooling": args.pooling_type,
         }
     elif args.model == "resnet-18":
@@ -600,7 +589,7 @@ def main(args, verbose=True, optuna_trial=None):
         model_args = {
             "pretrained": args.pretrained,
             "num_classes": num_classes,
-            "in_channels": 3 if args.dataset == "pneumonia" else 1,
+            "in_channels": 1 if args.data_dir == "mnist" or not args.pretrained else 3,
             "adptpool": False,
             "input_size": args.inference_resolution,
             "pooling": args.pooling_type,
@@ -865,17 +854,16 @@ if __name__ == "__main__":
         "--train_federated", action="store_true", help="Train with federated learning."
     )
     parser.add_argument(
-        "--secure_aggregation",
+        "--unencrypted_aggregation",
         action="store_true",
-        help="Train with secure aggregation.",
+        help="Models are averaged without encryption. Makes it slightly faster.",
     )
     parser.add_argument(
-        "--dataset",
+        "--data_dir",
         type=str,
-        default="pneumonia",
-        choices=["pneumonia", "mnist"],
         required=True,
-        help="Select a dataset to use.",  # TODO: this gets changed with the data folders right @a1302z?
+        default="data/train",
+        help='Select a data folder [if matches "mnist" mnist will be used].',
     )
     parser.add_argument(
         "--visdom", action="store_true", help="Use Visdom for training monitoring."
@@ -903,7 +891,7 @@ if __name__ == "__main__":
     if args.websockets:
         if args.train_federated:
             raise RuntimeError("WebSockets can only be used when in federated mode.")
-    if args.cuda:
+    if args.cuda and args.train_federated:
         warn(
             "CUDA is currently not supported by the backend. This option will be available at a later release",
             category=FutureWarning,
