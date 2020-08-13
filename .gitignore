@@ -138,7 +138,8 @@ data/MNIST/
 configs/websetting/config_copy.csv
 data/*_clients/*/
 data/LabelMNIST
-data/server_simulation/all_samples
+data/server_simulation/train_total
+data/server_simulation/test
 data/server_simulation/validation
 data/server_simulation/worker*
 data/*.pt
@@ -147,3 +148,6 @@ hyperparam_search/*
 SecAgTutorial.ipynb
 *EVD*
 .pretrained_weights
+one_test_sample/
+*testscript.py
+src/

@@ -151,12 +151,12 @@ class Arguments:
                 "federated", "weighted_averaging", fallback=False
             )
 
-        self.visdom = cmd_args.no_visdom if mode == "train" else False
+        self.visdom = cmd_args.visdom if mode == "train" else False
         self.encrypted_inference = (
             cmd_args.encrypted_inference if mode == "inference" else False
         )
         self.dataset = cmd_args.dataset  # options: ['pneumonia', 'mnist']
-        self.no_cuda = cmd_args.no_cuda
+        self.cuda = cmd_args.cuda
         self.websockets = cmd_args.websockets if mode == "train" else False
         if self.websockets:
             assert self.train_federated, "If you use websockets it must be federated"
@@ -176,7 +176,8 @@ class Arguments:
 
     def from_previous_checkpoint(self, cmd_args):
         self.visdom = False
-        self.encrypted_inference = cmd_args.encrypted_inference
+        if hasattr(cmd_args, "encrypted_inference"):
+            self.encrypted_inference = cmd_args.encrypted_inference
         self.no_cuda = cmd_args.no_cuda
         self.websockets = (
             cmd_args.websockets  # currently not implemented for inference
@@ -676,7 +677,7 @@ def secure_aggregation_epoch(
         if models[worker.id].location:
             continue
         models[worker.id].send(worker)
-        loss_fns[worker.id].send(worker)
+        loss_fns[worker.id] = loss_fns[worker.id].send(worker)
     # 1. Send new version of the model
     models = send_new_models(models["local_model"], models)
 
@@ -707,11 +708,10 @@ def secure_aggregation_epoch(
         ):
             if batch_idx > num_batches[worker.id]:
                 continue
-            loss_fn = loss_fns[worker.id]
             optimizers[worker.id].zero_grad()
             data, target = next(dataloader)
             pred = models[worker.id](data)
-            loss = loss_fn(pred, target)
+            loss = loss_fns[worker.id](pred, target)
             loss.backward()
             optimizers[worker.id].step()
             avg_loss.append(loss.detach().cpu().get().item())
@@ -1067,6 +1067,7 @@ def test(
             if verbose
             else val_loader
         ):
+            data, target = data.to(device), target.to(device)
             output = model(data)
             loss = loss_fn(output, oh_converter(target) if oh_converter else target)
             test_loss += loss.item()  # sum up batch loss

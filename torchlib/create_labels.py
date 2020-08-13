@@ -12,6 +12,7 @@ from os import path as ospath
 
 syspath.append(ospath.abspath(ospath.join(ospath.dirname(__file__), ospath.pardir)))
 from torchlib.models import vgg16, resnet18, conv_at_resolution
+from torchlib.dataloader import single_channel_loader
 
 
 class PathDataset(torch.utils.data.Dataset):
@@ -21,7 +22,9 @@ class PathDataset(torch.utils.data.Dataset):
         self.transform = transform
 
         self.imgs = [
-            f for f in listdir(root) if re.search(r".*\.(jpg|jpeg|png|JPG|JPEG)$", f)
+            f
+            for f in listdir(root)
+            if re.search(r".*\.(jpg|jpeg|png|JPG|JPEG)$", f) and not f.startswith("._")
         ]
 
     def __len__(self):
@@ -100,13 +103,18 @@ if __name__ == "__main__":
     )
     tf = transforms.Compose(
         [
+            transforms.Lambda(lambda x: adaptive_hist_equalization_on_PIL(x)),
             transforms.Resize(model_args.train_resolution),
             transforms.CenterCrop(model_args.train_resolution),
             transforms.ToTensor(),
-            transforms.Normalize(mean_std[0], mean_std[1]),
+            transforms.Normalize(mean_std[0].cpu(), mean_std[1].cpu()),
         ]
     )
-    dataset = PathDataset(args.data_dir, transform=tf)
+    dataset = PathDataset(
+        args.data_dir,
+        transform=tf,
+        loader=default_loader if model_args.pretrained else single_channel_loader,
+    )
     result_dict = {name: [] for name in class_names}
 
     for data, path in tqdm(dataset, total=len(dataset), leave=False, desc="Evaluating"):

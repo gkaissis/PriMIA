@@ -1,6 +1,10 @@
 import optuna as opt
-from train import main
 from argparse import Namespace
+import sys, os.path
+
+sys.path.insert(0, os.path.split(sys.path[0])[0])
+
+from train import main
 
 global cmdln_args
 
@@ -50,7 +54,7 @@ def objective(trial: opt.trial):
         noise_std=trial.suggest_float("noise_std", 0.0, 0.15),
         noise_prob=trial.suggest_float("noise_prob", 0.0, 1.0),
         mixup=trial.suggest_categorical("mixup", [True, False]),
-        repetitions_dataset = repetitions_dataset
+        repetitions_dataset=repetitions_dataset,
     )
     if args.mixup:  # pylint:disable=no-member
         args.mixup_lambda = trial.suggest_categorical(

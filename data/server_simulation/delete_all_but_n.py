@@ -25,7 +25,10 @@ if __name__ == "__main__":
     for dirpath, dirnames, filenames in os.walk("."):
         d = dirpath.split("/")
         if len(d) == 3 and (
-            not any(exception in d[-2] for exception in ["all_samples"])
+            not any(
+                exception in d[-2]
+                for exception in ["train_total", "validation", "test"]
+            )
         ):
             img_files = [f for f in filenames if f.endswith(".jpeg")]
             for filename in img_files[args.n :]:
