@@ -317,20 +317,21 @@ class Cross_entropy_one_hot(torch.nn.Module):
             if weight is not None
             else None
         )
+        self.reduction = reduction
         self.logsoftmax = torch.nn.LogSoftmax(dim=1)
-        if reduction == "mean":
-            self.loss = lambda output, target: torch.mean(  # pylint:disable=no-member
+
+    def forward(self, output: torch.Tensor, target: torch.Tensor):
+        if self.reduction == "mean":
+            loss = torch.mean(
                 (
-                    torch.sum(self.weight * target, dim=1)  # pylint:disable=no-member
+                    torch.sum(self.weight * target, dim=1)
                     if self.weight is not None
                     else 1.0
                 )
-                * torch.sum(  # pylint:disable=no-member
-                    -target * self.logsoftmax(output), dim=1
-                )
+                * torch.sum(-target * self.logsoftmax(output), dim=1)
             )
-        elif reduction == "sum":
-            self.loss = lambda output, target: torch.sum(  # pylint:disable=no-member
+        elif self.reduction == "sum":
+            loss = torch.sum(  # pylint:disable=no-member
                 (
                     torch.sum(self.weight * target, dim=1)  # pylint:disable=no-member
                     if self.weight is not None
@@ -342,9 +343,7 @@ class Cross_entropy_one_hot(torch.nn.Module):
             )
         else:
             raise NotImplementedError("reduction method unknown")
-
-    def forward(self, output: torch.Tensor, target: torch.Tensor):
-        return self.loss(output, target)
+        return loss
 
 
 class To_one_hot(torch.nn.Module):
@@ -636,7 +635,11 @@ def secure_aggregation(
                         [
                             r.data.copy()
                             .fix_prec()
-                            .share(*workers, crypto_provider=crypto_provider)
+                            .share(
+                                *workers,
+                                crypto_provider=crypto_provider,
+                                protocol="fss"
+                            )
                             .get()
                             for r in remote_params
                         ]

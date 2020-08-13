@@ -13,8 +13,10 @@
 
 - Config.ini documentation
 
-- find_config_federated.py: Random hyperam search for the whole federation
+- find_config_federated.py: Random hyperam search for the whole federation (if you are the training coordinator)
     -TODO: hyperparam.ini
+
+- find_config.py: Optuna-based hyperparam search for the local worker (If you are on a local worker)
 
 - inference.py: Entrypoint for performing inference (encrypted or plain text) TODO: remove option for class_report
     - Virtual or Grid
@@ -68,3 +70,4 @@ Internal use:
 - models.py
 - utils.py : TODO: needs docstings and tests @gkaissis
 - websocket_utils.py TODO: cleanup
+
