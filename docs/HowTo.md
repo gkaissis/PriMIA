@@ -13,14 +13,14 @@
 
 - Simulate training with WebSocketWorkers using our data:
     - Run run_websocket_server.py ... (finds data automatically)
-    - #TODO add instructions for GridNode
+    - TODO: add instructions for GridNode
 
 - Run training on VirtualWorkers using your own data:
-    - #TODO add instructions (...) populate folders etc.
+    - TODO: add instructions (...) populate folders etc.
 
 - Run training on real servers using WebSockets and your own data:
     - run websocket server on each cloud instance (finds data automatically)
-    - #TODO add instructions
+    - TODO: add instructions
 
 - Create a minimal training and validation set of 1 image each to debug:
     - Run `make minimal_server_folders`
@@ -31,7 +31,7 @@
 - Run a benchmark with CrypTen:
     WARNING: This is EXTREMELY processor and RAM intense and can result in your machine running out of RAM or locking up.
     - Make sure there is a `.pretrained_weights` directory in the project root containing the model you want to encrypt
-    - Name the model you would like to use `crypten_weights.pt``
+    - Name the model you would like to use `crypten_weights.pt`
     - Run `make crypten_dataset`
     - Run `make crypten_benchmark`
     
