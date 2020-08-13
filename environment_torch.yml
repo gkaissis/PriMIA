@@ -183,5 +183,6 @@ dependencies:
     - werkzeug==1.0.1
     - zope-event==4.4
     - zope-interface==5.1.0
-    - pydicom
+    - tensorflow-io
+    - scikit-image
 
