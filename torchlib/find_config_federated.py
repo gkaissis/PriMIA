@@ -1,8 +1,11 @@
-from train import main
 from argparse import Namespace
 import random
 from numpy import random as rnd
 from numpy import power
+import sys, os.path
+
+sys.path.insert(0, os.path.split(sys.path[0])[0])
+from train import main
 
 random.seed(1)
 rnd.seed(1)
@@ -20,6 +23,7 @@ if __name__ == "__main__":
             config="optuna",
             dataset="pneumonia",
             encrypted_inference=False,
+            secure_aggregation=True,
             inference_resolution=224,
             log_interval=10,
             model="resnet-18",
