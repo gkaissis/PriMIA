@@ -19,28 +19,45 @@ server_folders:
 symbolic_server_folders:
 	cd data/server_simulation && python distribute_data.py -s && cd ../..
 
-dependencies:
+install:
 	conda env create -f environment_torch.yml
-
-pylint:
-	pylint torchlib
 
 minimal_server_folders: symbolic_server_folders
 	cd data/server_simulation && python delete_all_but_n.py 16 && python calc_class_distribution.py && cd ../..
 
 crypten_dataset:
+	@echo FAILS
 	python data/create_crypten_data.py
 
-fast_virtualtrain:
-	python train.py --config configs/torch/pneumonia-resnet-pretrained-fast.ini --train_federated
+federated_secure:
+	@echo Training on VirtualWorkers with SecAgg
+	python train.py --config configs/torch/pneumonia-resnet-pretrained-fast.ini --train_federated --data_dir data/server_simulation
 
-secure_aggregation:
-	@echo This will probably fail!
-	python train.py --dataset pneumonia --config configs/torch/pneumonia-resnet-pretrained-fast.ini --train_federated
+federated_insecure:
+	@echo Training on VirtualWorkers without SecAgg
+	python train.py --config configs/torch/pneumonia-resnet-pretrained-fast.ini --train_federated --data_dir data/server_simulation --unencrypted_aggregation
+
+local_secure:
+	@echo Training Locally with SecAgg
+	python train.py --config configs/torch/pneumonia-resnet-pretrained-fast.ini --data_dir data/server_simulation/worker1
+
+local_insecure:
+	@echo Training Locally without SecAgg
+	python train.py --config configs/torch/pneumonia-resnet-pretrained-fast.ini --data_dir data/server_simulation/worker1 --unencrypted_aggregation
+
+local_secure_cuda:
+	@echo Training Locally with SecAgg on CUDA
+	python train.py --config configs/torch/pneumonia-resnet-pretrained-fast.ini --data_dir data/server_simulation/worker1 --cuda
+
+local_insecure_cuda:
+	@echo Training Locally without SecAgg on CUDA
+	python train.py --config configs/torch/pneumonia-resnet-pretrained-fast.ini --data_dir data/server_simulation/worker1 --unencrypted_aggregation --cuda
 
 assert_cuda_fail:
-	@echo Designed to fail!
+	@echo Training Federated with CUDA -> Designed to fail. Does not exit with code 1.
 	python train.py --dataset pneumonia --config configs/torch/pneumonia-resnet-pretrained-fast.ini --train_federated --cuda
+
+train_all: federated_secure federated_insecure local_insecure local_secure_cuda local_insecure_cuda
 
 visdom_train:
 	python train.py --dataset pneumonia --config configs/torch/pneumonia-resnet-pretrained-fast.ini --train_federated --visdom
