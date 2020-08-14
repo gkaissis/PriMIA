@@ -27,9 +27,9 @@ jobs:
         environment-file: environment_torch.yml
         add-pip-as-python-dependency: true
         activate-environment: torch4p
-        
-    - name: Create Minimal Dataset
+              
+    - name: Bash
+      shell: bash -l {0}
       run: |
-        conda activate torch4p
         conda info
-        conda list
+        conda list | grep syft
