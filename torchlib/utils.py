@@ -10,6 +10,7 @@ import pandas as pd
 import torch
 import tqdm
 from sklearn import metrics as mt
+import syft.frameworks.torch.fl.utils as syft_fl_utils
 from syft.frameworks.torch.fl.utils import add_model, scale_model
 from tabulate import tabulate
 
@@ -413,12 +414,7 @@ def federated_avg(models: dict, weights: Optional[torch.Tensor] = None):
             else:
                 model = scaled_model
     else:
-        nr_models = len(models)
-        model_list = list(models.values())
-        model = model_list[0]
-        for i in range(1, nr_models):
-            model = add_model(model, model_list[i])
-        model = scale_model(model, (1.0 / nr_models))
+        model = syft_fl_utils.federated_avg(models)
     return model
 
 
