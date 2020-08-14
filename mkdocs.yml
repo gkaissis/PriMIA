@@ -1,0 +1,30 @@
+site_name: PrIMIA
+theme:
+    name: material
+    palette:
+        scheme: default
+        primary: blue grey
+        accent: light blue
+    font:
+        text: 'Work Sans'
+        code: 'Fira Code'
+    logo: images/primia.png
+
+nav:
+    - "index.md"
+    - "CLI_Docs.md"
+    - "HowTo.md"
+    - "Dataset_Description.md"
+    - "Tech_Supplement.md"
+
+extra_javascript:
+  - 'https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js?config=TeX-MML-AM_CHTML'
+markdown_extensions:
+  - pymdownx.arithmatex
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.emoji:
+      emoji_generator: !!python/name:pymdownx.emoji.to_svg
+  - footnotes
+  - codehilite:
+      linenums: true

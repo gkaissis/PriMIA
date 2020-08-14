@@ -20,6 +20,9 @@ if __name__ == "__main__":
         default=None,
         help="Path to data folder of pneumonia data. Each worker has its subfolder called workeri where i is its index and three subfolders with the classes.",
     )
+    parser.add_argument(
+        "--config", type=str, required=True, help="Path to config",
+    )
     args = parser.parse_args()
     # worker_dict = {"alice": 8777, "bob": 8778, "charlie": 8779}
     worker_dict = read_websocket_config("configs/websetting/config.csv")
@@ -35,11 +38,13 @@ if __name__ == "__main__":
                 id_dict["id"],
                 "--data_directory",
                 "mnist",
+                "--config",
+                args.config,
             ]
             for row, id_dict in worker_dict.items()
         ]
     elif args.dataset == "pneumonia":
-        assert os.path.isdir(args.path), 'given path is no directory'
+        assert os.path.isdir(args.path), "given path is no directory"
         worker_calls = [
             [
                 "python",
@@ -48,10 +53,13 @@ if __name__ == "__main__":
                 str(id_dict["port"]),
                 "--id",
                 id_dict["id"],
-                "--host", "127.0.0.1",
+                "--host",
+                "127.0.0.1",
                 "--data_directory",
                 # "/home/alex/worker_emulation/all_samples",
                 os.path.join(args.path, "worker{:d}/".format(i + 1)),
+                "--config",
+                args.config,
             ]
             for i, (row, id_dict) in enumerate(worker_dict.items())
         ]

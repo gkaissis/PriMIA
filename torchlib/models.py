@@ -103,10 +103,10 @@ class VGG(nn.Module):
             # print("No avg pooling")
         self.classifier = nn.Sequential(
             nn.Linear(25088, 4096),
-            nn.ReLU(),  # inplace=True),  # changed for pysyft
+            nn.ReLU(inplace=True),
             nn.Dropout(),
             nn.Linear(4096, 4096),
-            nn.ReLU(),  # inplace=True),  # changed for pysyft
+            nn.ReLU(inplace=True),
             nn.Dropout(),
             nn.Linear(4096, num_classes),
             # nn.LogSoftmax(dim=1),
@@ -135,21 +135,24 @@ class VGG(nn.Module):
                 nn.init.constant_(m.bias, 0)
 
 
-def make_layers(cfg, batch_norm=False, in_channels=3):
+def make_layers(cfg, batch_norm=False, in_channels=3, pooling="avg"):
     layers = []
     for v in cfg:
         if v == "M":
-            layers += [nn.AvgPool2d(kernel_size=2, stride=2)]
+            if pooling == "avg":
+                layers += [nn.AvgPool2d(kernel_size=2, stride=2)]
+            elif pooling == "max":
+                layers += [nn.MaxPool2d(kernel_size=2, stride=2)]
+            else:
+                raise NotImplementedError(
+                    "pooling type unknown: {:s}".format(str(pooling))
+                )
         else:
             conv2d = nn.Conv2d(in_channels, v, kernel_size=3, padding=1)
             if batch_norm:
-                layers += [
-                    conv2d,
-                    nn.BatchNorm2d(v),
-                    nn.ReLU(),
-                ]  # inplace=True)] changed for pysyft
+                layers += [conv2d, nn.BatchNorm2d(v), nn.ReLU(inplace=True)]
             else:
-                layers += [conv2d, nn.ReLU()]  # inplace=True)] changed for pysyft
+                layers += [conv2d, nn.ReLU(inplace=True)]
             in_channels = v
     return nn.Sequential(*layers)
 
@@ -161,6 +164,7 @@ def _vgg(
     pretrained,
     progress,
     in_channels=3,
+    pooling="avg",
     num_classes=1000,
     **kwargs
 ):
@@ -168,18 +172,21 @@ def _vgg(
         kwargs["init_weights"] = False
     assert not (pretrained and in_channels != 3), "If pretrained you need 3 in channels"
     model = VGG(
-        make_layers(cfgs[cfg], batch_norm=batch_norm, in_channels=in_channels,),
+        make_layers(
+            cfgs[cfg], batch_norm=batch_norm, in_channels=in_channels, pooling=pooling
+        ),
         **kwargs
     )
     if pretrained:
         state_dict = load_state_dict_from_url(model_urls[arch], progress=progress)
         model.load_state_dict(state_dict)
+    if num_classes != 1000:
         model.classifier = nn.Sequential(
             nn.Linear(512, 512),
-            nn.ReLU(),  # inplace=True),  # changed for pysyft
+            nn.ReLU(inplace=True),
             nn.Dropout(),
             nn.Linear(512, 512),
-            nn.ReLU(),  # inplace=True),  # changed for pysyft
+            nn.ReLU(inplace=True),
             nn.Dropout(),
             nn.Linear(512, num_classes),
             # nn.LogSoftmax(dim=1),
@@ -187,7 +194,7 @@ def _vgg(
     return model
 
 
-def vgg16(pretrained=False, progress=True, in_channels=3, **kwargs):
+def vgg16(pretrained=False, progress=True, in_channels=3, pooling="avg", **kwargs):
     r"""VGG 16-layer model (configuration "D")
     `"Very Deep Convolutional Networks For Large-Scale Image Recognition" <https://arxiv.org/pdf/1409.1556.pdf>`_
 
@@ -196,7 +203,14 @@ def vgg16(pretrained=False, progress=True, in_channels=3, **kwargs):
         progress (bool): If True, displays a progress bar of the download to stderr
     """
     return _vgg(
-        "vgg16", "D", False, pretrained, progress, in_channels=in_channels, **kwargs
+        "vgg16",
+        "D",
+        False,
+        pretrained,
+        progress,
+        in_channels=in_channels,
+        pooling=pooling,
+        **kwargs
     )
 
 
@@ -243,7 +257,7 @@ class BasicBlock(nn.Module):
         # Both self.conv1 and self.downsample layers downsample the input when stride != 1
         self.conv1 = conv3x3(inplanes, planes, stride)
         self.bn1 = norm_layer(planes)
-        self.relu = nn.ReLU()  # inplace=True)
+        self.relu = nn.ReLU(inplace=True)
         self.conv2 = conv3x3(planes, planes)
         self.bn2 = norm_layer(planes)
         self.downsample = downsample
@@ -299,7 +313,7 @@ class Bottleneck(nn.Module):
         self.bn2 = norm_layer(width)
         self.conv3 = conv1x1(width, planes * self.expansion)
         self.bn3 = norm_layer(planes * self.expansion)
-        self.relu = nn.ReLU()  # inplace=True)
+        self.relu = nn.ReLU(inplace=True)
         self.downsample = downsample
         self.stride = stride
 
@@ -340,6 +354,7 @@ class ResNet(nn.Module):
         in_channels=3,
         adptpool=True,
         input_size=224,
+        pooling="avg",
     ):
         super(ResNet, self).__init__()
         if norm_layer is None:
@@ -363,8 +378,13 @@ class ResNet(nn.Module):
             in_channels, self.inplanes, kernel_size=7, stride=2, padding=3, bias=False
         )
         self.bn1 = norm_layer(self.inplanes)
-        self.relu = nn.ReLU()  # inplace=True)
-        self.maxpool = nn.AvgPool2d(kernel_size=3, stride=2, padding=1)
+        self.relu = nn.ReLU(inplace=True)
+        if pooling == "max":
+            self.pool = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        elif pooling == "avg":
+            self.pool = nn.AvgPool2d(kernel_size=3, stride=2, padding=1)
+        else:
+            raise NotImplementedError("pooling type unknown: {:s}".format(str(pooling)))
         self.layer1 = self._make_layer(block, 64, layers[0])
         self.layer2 = self._make_layer(
             block, 128, layers[1], stride=2, dilate=replace_stride_with_dilation[0]
@@ -446,7 +466,7 @@ class ResNet(nn.Module):
         x = self.conv1(x)
         x = self.bn1(x)
         x = self.relu(x)
-        x = self.maxpool(x)
+        x = self.pool(x)
 
         x = self.layer1(x)
         x = self.layer2(x)
@@ -463,16 +483,18 @@ class ResNet(nn.Module):
         return self._forward_impl(x)
 
 
-def _resnet(arch, block, layers, pretrained, progress, num_classes, **kwargs):
-    model = ResNet(block, layers, **kwargs)
+def _resnet(
+    arch, block, layers, pretrained, progress, num_classes, pooling="avg", **kwargs
+):
+    model = ResNet(block, layers, pooling=pooling, **kwargs)
     if pretrained:
         state_dict = load_state_dict_from_url(model_urls[arch], progress=progress)
         model.load_state_dict(state_dict)
-        model.fc = nn.Linear(512 * block.expansion, num_classes)
+    model.fc = nn.Linear(512 * block.expansion, num_classes)
     return model
 
 
-def resnet18(pretrained=False, progress=True, in_channels=3, **kwargs):
+def resnet18(pretrained=False, progress=True, in_channels=3, pooling="avg", **kwargs):
     r"""ResNet-18 model from
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_
 
@@ -487,11 +509,12 @@ def resnet18(pretrained=False, progress=True, in_channels=3, **kwargs):
         pretrained,
         progress,
         in_channels=in_channels,
+        pooling=pooling,
         **kwargs
     )
 
 
-def resnet34(pretrained=False, progress=True, in_channels=3, **kwargs):
+def resnet34(pretrained=False, progress=True, in_channels=3, pooling="avg", **kwargs):
     r"""ResNet-34 model from
     `"Deep Residual Learning for Image Recognition" <https://arxiv.org/pdf/1512.03385.pdf>`_
 
@@ -506,6 +529,7 @@ def resnet34(pretrained=False, progress=True, in_channels=3, **kwargs):
         pretrained,
         progress,
         in_channels=in_channels,
+        pooling=pooling,
         **kwargs
     )
 
@@ -530,29 +554,35 @@ def _initialize_weights(model):
 
 
 class ConvNet512(nn.Module):
-    def __init__(self, num_classes=10, in_channels=1):
+    def __init__(self, num_classes=10, in_channels=1, pooling="avg"):
         super(ConvNet512, self).__init__()
+        if pooling == "avg":
+            pool_layer = nn.AvgPool2d
+        elif pooling == "max":
+            pool_layer = nn.MaxPool2d
+        else:
+            raise NotImplementedError("pooling type unknown: {:s}".format(str(pooling)))
         self.features = nn.Sequential(
             nn.Conv2d(in_channels, 8, 3),
             nn.ReLU(),
-            nn.AvgPool2d(2),
-            nn.AvgPool2d(2),
+            pool_layer(2),
+            pool_layer(2),
             nn.Conv2d(8, 32, 3),
             nn.ReLU(),
-            nn.AvgPool2d(2),
+            pool_layer(2),
             nn.Conv2d(32, 64, 3),
             nn.ReLU(),
-            nn.AvgPool2d(2),
+            pool_layer(2),
             nn.Conv2d(64, 128, 3),
             nn.ReLU(),
-            nn.AvgPool2d(2),
+            pool_layer(2),
             nn.Conv2d(128, 256, 3),
             nn.ReLU(),
-            nn.AvgPool2d(2),
+            pool_layer(2),
             nn.Conv2d(256, 512, 3),
             nn.ReLU(),
-            nn.AvgPool2d(2),
-            nn.AvgPool2d(2),
+            pool_layer(2),
+            pool_layer(2),
         )
         self.classifier = nn.Sequential(
             nn.Linear(512, 512),
@@ -571,30 +601,36 @@ class ConvNet512(nn.Module):
 
 
 class ConvNet224(nn.Module):
-    def __init__(self, num_classes=10, in_channels=1):
+    def __init__(self, num_classes=10, in_channels=1, pooling="avg"):
         super(ConvNet224, self).__init__()
+        if pooling == "avg":
+            pool_layer = nn.AvgPool2d
+        elif pooling == "max":
+            pool_layer = nn.MaxPool2d
+        else:
+            raise NotImplementedError("pooling type unknown: {:s}".format(str(pooling)))
         self.features = nn.Sequential(
             nn.Conv2d(in_channels, 8, 3),
             nn.ReLU(),
-            nn.AvgPool2d(2),
+            pool_layer(2),
             nn.BatchNorm2d(8),
             nn.Conv2d(8, 32, 3),
             nn.ReLU(),
-            nn.AvgPool2d(2),
+            pool_layer(2),
             nn.BatchNorm2d(32),
             nn.Conv2d(32, 64, 3),
             nn.ReLU(),
-            nn.AvgPool2d(2),
+            pool_layer(2),
             nn.Conv2d(64, 128, 3),
             nn.ReLU(),
-            nn.AvgPool2d(2),
+            pool_layer(2),
             nn.BatchNorm2d(128),
             nn.Conv2d(128, 256, 3),
             nn.ReLU(),
-            nn.AvgPool2d(2),
+            pool_layer(2),
             nn.Conv2d(256, 512, 3),
             nn.ReLU(),
-            nn.AvgPool2d(2),
+            pool_layer(2),
         )
         self.classifier = nn.Sequential(
             nn.Linear(512, 512),
@@ -613,8 +649,14 @@ class ConvNet224(nn.Module):
 
 
 class ConvNetMNIST(nn.Module):
-    def __init__(self, num_classes=10, in_channels=1):
+    def __init__(self, num_classes=10, in_channels=1, pooling="avg"):
         super(ConvNetMNIST, self).__init__()
+        if pooling == "avg":
+            pool_layer = nn.AvgPool2d
+        elif pooling == "max":
+            pool_layer = nn.MaxPool2d
+        else:
+            raise NotImplementedError("pooling type unknown: {:s}".format(str(pooling)))
         # self.features = nn.Sequential(
         self.conv1 = nn.Conv2d(in_channels, 8, 3)
         self.relu1 = nn.ReLU()
@@ -626,13 +668,13 @@ class ConvNetMNIST(nn.Module):
         # self.bn3 = nn.BatchNorm2d(64),
         self.conv4 = nn.Conv2d(64, 128, 3)
         # self.relu4 = nn.ReLU(),
-        self.pool4 = nn.AvgPool2d(2)
+        self.pool4 = pool_layer(2)
         self.conv5 = nn.Conv2d(128, 256, 3)
         # self.relu5 = nn.ReLU(),
-        self.pool5 = nn.AvgPool2d(2)
+        self.pool5 = pool_layer(2)
         self.conv6 = nn.Conv2d(256, 512, 3)
         # self.relu6 = nn.ReLU(),
-        self.pool6 = nn.AvgPool2d(2)
+        self.pool6 = pool_layer(2)
         # )
         # self.classifier = nn.Sequential(
         self.linear1 = nn.Linear(512, 512)
@@ -670,8 +712,6 @@ class ConvNetMNIST(nn.Module):
         x = self.relu1(x)
         x = self.linear3(x)
         return x
-
-    
 
 
 conv_at_resolution = {28: ConvNetMNIST, 224: ConvNet224, 512: ConvNet512}

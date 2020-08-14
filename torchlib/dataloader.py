@@ -4,17 +4,54 @@ import syft as sy
 import pandas as pd
 import numpy as np
 from PIL import Image
-from torch import manual_seed
-from torch.utils import data
+from tqdm import tqdm
+from torch import (  # pylint:disable=no-name-in-module
+    manual_seed,
+    stack,
+    cat,
+    std_mean,
+    save,
+)
+from torch.utils import data as torchdata
 from torchvision.datasets import MNIST
 from torchvision import transforms
 from torchvision.datasets.folder import default_loader
 
 
+def calc_mean_std(dataset, save_folder=None):
+    """
+    Calculates the mean and standard deviation of `dataset` and
+    saves them to `save_folder`.
+
+    Needs a dataset where all images have the same size
+    """
+    accumulated_data = []
+    for d in tqdm(
+        dataset, total=len(dataset), leave=False, desc="accumulate data in dataset"
+    ):
+        if type(d) is tuple or type(d) is list:
+            d = d[0]
+        accumulated_data.append(d)
+    if isinstance(dataset, torchdata.Dataset):
+        accumulated_data = stack(accumulated_data)
+    elif isinstance(dataset, torchdata.DataLoader):
+        accumulated_data = cat(accumulated_data)
+    else:
+        raise NotImplementedError("don't know how to process this data input class")
+    dims = (0, *range(2, len(accumulated_data.shape)))
+    std, mean = std_mean(accumulated_data, dim=dims)
+    if save_folder:
+        save(stack([mean, std]), os.path.join(save_folder, "mean_std.pt"))
+    return mean, std
+
+
 def single_channel_loader(filename):
+    """Converts `filename` to a grayscale PIL Image
+    """
     with open(filename, "rb") as f:
         img = Image.open(f).convert("L")
         return img.copy()
+
 
 class LabelMNIST(MNIST):
     def __init__(self, labels, *args, **kwargs):
@@ -22,16 +59,64 @@ class LabelMNIST(MNIST):
         indices = np.isin(self.targets, labels).astype("bool")
         self.data = self.data[indices]
         self.targets = self.targets[indices]
-        
 
 
-class PPPP(data.Dataset):
+class ImageFolderFromCSV(torchdata.Dataset):
     def __init__(
-        self,
-        label_path="data/Labels.csv",
-        train=False,
-        transform=None,
-        seed = 1,
+        self, csv_path, img_folder_path, transform=None, target_transform=None
+    ):
+        super().__init__()
+        self.transform = transform
+        self.target_transform = target_transform
+        self.img_folder_path = img_folder_path
+        self.img_files = [
+            i for i in os.listdir(img_folder_path) if not i.startswith(".")
+        ]
+
+        metastats = pd.read_csv(csv_path)
+
+        metastats["class_label"] = metastats.apply(
+            ImageFolderFromCSV.__meta_to_class__, axis=1
+        )
+        self.categorize_dict = dict(
+            zip(metastats.X_ray_image_name, metastats.class_label)
+        )
+        for img in self.img_files:
+            assert (
+                img in self.categorize_dict.keys()
+            ), "img label not known {:s}".format(str(img))
+            if self.categorize_dict[img] == -1:
+                self.img_files.remove(img)
+                print("Ignore image {:s} because category is certain".format(img))
+
+    @staticmethod
+    def __meta_to_class__(row):
+        if row["Label"] == "Normal":
+            return 0
+        if row["Label"] == "Pnemonia":  # i know this is a typo but was in original csv
+            if row["Label_1_Virus_category"] == "bacteria":
+                return 1
+            if row["Label_1_Virus_category"] == "Virus":
+                return 2
+        return -1
+
+    def __getitem__(self, i):
+        img_path = self.img_files[i]
+        label = self.categorize_dict[img_path]
+        img = single_channel_loader(os.path.join(self.img_folder_path, img_path))
+        if self.transform:
+            img = self.transform(img)
+        if self.target_transform:
+            label = self.target_transform(label)
+        return img, label
+
+    def __len__(self):
+        return len(self.img_files)
+
+
+class PPPP(torchdata.Dataset):
+    def __init__(
+        self, label_path="data/Labels.csv", train=False, transform=None, seed=1,
     ):
         super().__init__()
         random.seed(seed)
@@ -71,52 +156,16 @@ class PPPP(data.Dataset):
     #    return self.class_names[numeric_label]
 
     """
-    Works only if not torch.utils.data.random_split is applied
+    Works only if not torch.utils.torchdata.random_split is applied
     """
 
     def get_class_occurances(self):
         return dict(self.labels["Numeric_Label"].value_counts())
 
-    def __compute_mean_std__(self, crop_size=224, consider_black_pixels=False):
-        import numpy as np
-        from tqdm import tqdm
-        from torch.utils.data import DataLoader
+    def __compute_mean_std__(self):
 
-        batch_size = 90
-        num_workers = 8
-
-        loader = DataLoader(self, batch_size=batch_size, num_workers=num_workers)
-        acc = np.zeros((3, crop_size, crop_size))
-        sq_acc = np.zeros((3, crop_size, crop_size))
-        n_black_pixels = 0
-        for _, (imgs, _) in tqdm(enumerate(loader), total=len(loader)):
-            imgs = imgs.numpy()
-            acc += np.sum(imgs, axis=0)
-            sq_acc += np.sum(imgs ** 2, axis=0)
-            n_black_pixels += np.where(imgs == 0)[0].size
-
-            # if batch_idx % 50 == 0:
-            #    print('Accumulated {:d} / {:d}'.format(
-            #        batch_idx * batch_size, len(dset)))
-
-        N = len(self) * acc.shape[1] * acc.shape[2]
-        if not consider_black_pixels:
-            print("{:d} pixels in dataset".format(N))
-            N -= n_black_pixels
-            print("{:d} black pixels in dataset".format(n_black_pixels))
-
-        mean_p = np.asarray([np.sum(acc[c]) for c in range(3)])
-        mean_p /= N
-        print("Mean pixel = ", mean_p)
-
-        # std = E[x^2] - E[x]^2
-        var = np.asarray([np.sum(sq_acc[c]) for c in range(3)])
-        var /= N
-        var -= mean_p ** 2
-        var = np.sqrt(var)
-        print("Var. pixel = ", var)
-        np.savetxt(
-            os.path.join("data/mean_var.txt"), np.vstack((mean_p, var)), fmt="%8.7f"
+        calc_mean_std(
+            self, save_folder="data",
         )
 
 
@@ -131,42 +180,26 @@ if __name__ == "__main__":
     )
     from torchlib.utils import AddGaussianNoise
 
-    sizes = []
-    ds = PPPP(train=False, transform=transforms.ToTensor())
+    ds = PPPP(train=True, transform=transforms.ToTensor())
+    print("Class distribution")
     print(ds.get_class_occurances())
-    exit()
+
+    sizes = []
+
     for data, _ in tqdm(ds, total=len(ds), leave=False):
         sizes.append(data.size()[1:])
     sizes = np.array(sizes)
-    print(np.min(sizes, axis=0))
-    print(np.max(sizes, axis=0))
-    print(np.mean(sizes, axis=0))
-    print(np.median(sizes, axis=0))
-
-
-
-    # cj = transforms.ColorJitter(0, 0.5, 0.5, 0.5)
-    ds = PPPP(
-        transform=transforms.Compose(
-            [
-                transforms.RandomVerticalFlip(p=0.5),
-                transforms.RandomAffine(
-                    degrees=30,
-                    translate=(0.0, 0.0),
-                    scale=(0.85, 1.15),
-                    shear=10,
-                    fillcolor=0.0,
-                ),
-                transforms.Resize(224),
-                transforms.RandomCrop(224),
-                transforms.ToTensor(),
-                transforms.Normalize((0.57282609,), (0.17427578,)),
-                transforms.RandomApply([AddGaussianNoise(mean=0.0, std=0.05)], p=0.5),
-                transforms.ToPILImage(),
-            ]
+    print(
+        "data resolution stats: \n\tmin: {:s}\n\tmax: {:s}\n\tmean: {:s}\n\tmedian: {:s}".format(
+            str(np.min(sizes, axis=0)),
+            str(np.max(sizes, axis=0)),
+            str(np.mean(sizes, axis=0)),
+            str(np.median(sizes, axis=0)),
         )
     )
-    exit()
+
+    ds = PPPP(train=False)
+
     L = len(ds)
     print("length test set: {:d}".format(L))
     img, label = ds[1]
@@ -177,24 +210,12 @@ if __name__ == "__main__":
     )  # TODO: Add normalization
     ds = PPPP(train=True, transform=tf)
 
-    ds.__compute_mean_std__(consider_black_pixels=False)
+    ds.__compute_mean_std__()
     L = len(ds)
     print("length train set: {:d}".format(L))
-    img, label = ds[0]
-    print(img.size())
-    print(label)
-    """
-    cnt = 0
-    import tqdm
 
-    for img, label in tqdm.tqdm(ds, total=L, leave=False):
-        if img.size(0) != 1:
-            cnt += 1
-    print("{:d} images that are not grayscale".format(cnt))
+    from matplotlib import pyplot as plt
 
     ds = PPPP()
-    import matplotlib.pyplot as plt
-
     hist = ds.labels.hist(bins=3, column="Numeric_Label")
     plt.show()
-    """
