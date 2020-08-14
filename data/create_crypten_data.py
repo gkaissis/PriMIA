@@ -1,31 +1,27 @@
 import torch
 from torchvision import transforms
-
+from torchvision.datasets import ImageFolder
+from tqdm import tqdm
 import sys, os.path
 
 sys.path.insert(0, os.path.split(sys.path[0])[0])
-from torchlib.dataloader import PPPP
+
+from torchlib.dicomtools import CombinedLoader
+from torchlib.dataloader import calc_mean_std
 
 if __name__ == "__main__":
 
-    dataset = PPPP(
-        train=False,
+    dataset = ImageFolder(
+        "data/test",
         transform=transforms.Compose(
-            [
-                transforms.Resize(224),
-                transforms.CenterCrop(224),
-                transforms.ToTensor(),
-                transforms.Normalize((0.57282609,), (0.17427578,)),
-                transforms.Lambda(
-                    lambda x: torch.repeat_interleave(  # pylint:disable=no-member
-                        x, 3, dim=0
-                    )
-                ),
-            ]
+            [transforms.Resize(224), transforms.CenterCrop(224), transforms.ToTensor(),]
         ),
+        loader=CombinedLoader(),
     )
+    mean, std = calc_mean_std(dataset)
+    dataset.transform.transforms.append(transforms.Normalize(mean, std))
     data, target = [], []
-    for d, t in dataset:
+    for d, t in tqdm(dataset, total=len(dataset), leave=False, desc="Load data"):
         data.append(d)
         target.append(t)
     data = torch.stack(data)  # pylint:disable=no-member
