@@ -852,7 +852,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--unencrypted_aggregation",
         action="store_true",
-        help="Models are averaged without encryption."
+        help="Turns off secure aggregation."
         "Slight advantages in terms of model performance and training speed.",
     )
     parser.add_argument(
@@ -860,10 +860,10 @@ if __name__ == "__main__":
         type=str,
         required=True,
         default="data/train",
-        help='Select a data folder [if matches "mnist" mnist will be used].',
+        help='Select a data folder [if "mnist" is passed, the torchvision MNIST dataset will be downloaded and used].',
     )
     parser.add_argument(
-        "--visdom", action="store_true", help="Use Visdom for training monitoring."
+        "--visdom", action="store_true", help="Use Visdom for monitoring training."
     )
     parser.add_argument("--cuda", action="store_true", help="Use CUDA acceleration.")
     parser.add_argument(

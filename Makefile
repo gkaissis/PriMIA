@@ -32,7 +32,7 @@ crypten_dataset:
 	python data/create_crypten_data.py
 
 fast_virtualtrain:
-	python train.py --dataset pneumonia --config configs/torch/pneumonia-resnet-pretrained-fast.ini --train_federated
+	python train.py --config configs/torch/pneumonia-resnet-pretrained-fast.ini --train_federated
 
 secure_aggregation:
 	@echo This will probably fail!
