@@ -75,11 +75,6 @@ def calc_class_weights(args, train_loader, num_classes):
             total=len(tl),
         ):
             if args.train_federated and (args.mixup or args.weight_classes):
-                if args.mixup and args.mixup_lambda == 0.5:
-                    raise ValueError(
-                        "it's currently not supported to weight classes "
-                        "while mixup has a lambda of 0.5"
-                    )
                 target = target.max(dim=1)
                 target = target[1]  # without pysyft it should be target.indices
             for i in range(num_classes):
@@ -485,7 +480,7 @@ def main(args, verbose=True, optuna_trial=None):
             )
             assert (
                 len(dataset.classes) == 3
-            ), "We can only handle data that has 3 classes: normal, bacterial and viral"
+            ), "Dataset must have exactly 3 classes: normal, bacterial and viral"
             val_mean_std = calc_mean_std(dataset)
             mean, std = val_mean_std
             train_tf = [
@@ -877,7 +872,7 @@ if __name__ == "__main__":
     cmd_args = parser.parse_args()
 
     config = configparser.ConfigParser()
-    assert path.isfile(cmd_args.config), "config file not found"
+    assert path.isfile(cmd_args.config), "Configuration file not found"
     config.read(cmd_args.config)
 
     args = Arguments(cmd_args, config, mode="train")
@@ -889,6 +884,13 @@ if __name__ == "__main__":
             "CUDA is currently not supported by the backend. This option will be available at a later release",
             category=FutureWarning,
         )
-        exit()
+        exit(0)
+    if args.train_federated and (args.mixup or args.weight_classes):
+        if args.mixup and args.mixup_lambda == 0.5:
+            warn(
+                "Class weighting and a lambda value of 0.5 are incompatible, setting lambda to 0.499",
+                category=RuntimeWarning,
+            )
+            args.mixup_lambda = 0.499
     print(str(args))
     main(args)
