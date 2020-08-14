@@ -25,10 +25,11 @@ jobs:
       with:
         python-version: 3.7.1
         environment-file: environment_torch.yml
-        activate-environment: torch4p
         add-pip-as-python-dependency: true
+        activate-environment: torch4p
         
     - name: Create Minimal Dataset
       run: |
+        conda activate torch4p
         conda info
         conda list
