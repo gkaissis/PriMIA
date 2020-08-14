@@ -31,9 +31,9 @@ symbolic_server_folders:
 minimal_server_folders: symbolic_server_folders
 	cd data/server_simulation && python delete_all_but_n.py 16 && python calc_class_distribution.py && cd ../..
 
-#CrypTen stuff
+#CrypTen Benchmark
 crypten_dataset:
-	@echo FAILS
+	@echo Creating CrypTen dataset from the test set
 	python data/create_crypten_data.py
 
 crypten_benchmark:
