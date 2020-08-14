@@ -1,3 +1,6 @@
+import os
+
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 import torch
 import configparser
 import argparse
@@ -8,7 +11,7 @@ from sklearn import metrics as mt
 from numpy import newaxis
 from torchlib.utils import stats_table, Arguments  # pylint:disable=import-error
 from torchlib.models import vgg16, resnet18, conv_at_resolution
-from torchlib.dataloader import single_channel_loader
+from torchlib.dicomtools import CombinedLoader
 
 
 if __name__ == "__main__":
@@ -86,14 +89,11 @@ if __name__ == "__main__":
             transforms.Normalize(mean, std),
         ]
 
+        loader = CombinedLoader()
+        if not args.pretrained:
+            loader.change_channels(1)
         testset = datasets.ImageFolder(
-            cmd_args.data_dir,
-            transform=transforms.Compose(tf),
-            loader=datasets.folder.default_loader
-            if args.pretrained
-            else single_channel_loader
-            if args.pretrained
-            else single_channel_loader,
+            cmd_args.data_dir, transform=transforms.Compose(tf), loader=loader
         )
         assert (
             len(testset.classes) == 3

@@ -23,7 +23,6 @@ from optuna import TrialPruned
 from torchlib.dataloader import (
     LabelMNIST,
     calc_mean_std,
-    single_channel_loader,
 )  # pylint:disable=import-error
 from torchlib.models import (
     conv_at_resolution,  # pylint:disable=import-error
@@ -43,6 +42,8 @@ from torchlib.utils import (
     train,
     train_federated,
 )
+
+from torchlib.dicomtools import CombinedLoader
 
 
 def calc_class_weights(args, train_loader, num_classes):
@@ -125,6 +126,10 @@ def setup_pysyft(args, hook, verbose=False):
             crypto_provider_data = worker_dict[cp_key]
         worker_dict.pop(cp_key)
 
+    loader = CombinedLoader()
+    if not args.pretrained:
+        loader.change_channels(1)
+
     if args.websockets:
         if args.weight_classes or (args.mixup and args.data_dir == "mnist"):
             raise NotImplementedError(
@@ -192,9 +197,7 @@ def setup_pysyft(args, hook, verbose=False):
                 data_dir = path.join(args.data_dir, "worker{:d}".format(i + 1))
                 stats_dataset = datasets.ImageFolder(
                     data_dir,
-                    loader=datasets.folder.default_loader
-                    if args.pretrained
-                    else single_channel_loader,
+                    loader=loader,
                     transform=transforms.Compose(
                         [
                             transforms.Resize(args.train_resolution),
@@ -234,9 +237,7 @@ def setup_pysyft(args, hook, verbose=False):
                     # if worker.id == "validation"
                     # else
                     data_dir,
-                    loader=datasets.folder.default_loader
-                    if args.pretrained
-                    else single_channel_loader,
+                    loader=loader,
                     transform=transforms.Compose(train_tf),
                     target_transform=transforms.Compose(target_tf),
                 )
@@ -359,9 +360,7 @@ def setup_pysyft(args, hook, verbose=False):
         ]
         valset = datasets.ImageFolder(
             path.join(args.data_dir, "validation"),
-            loader=datasets.folder.default_loader
-            if args.pretrained
-            else single_channel_loader,
+            loader=loader,
             transform=transforms.Compose(val_tf),
         )
         assert (
@@ -478,14 +477,11 @@ def main(args, verbose=True, optuna_trial=None):
             ]
             # dataset = PPPP(
             #     "data/Labels.csv",
+            loader = CombinedLoader()
+            if not args.pretrained:
+                loader.change_channels(1)
             dataset = datasets.ImageFolder(
-                args.data_dir,
-                transform=transforms.Compose(train_tf),
-                loader=datasets.folder.default_loader
-                if args.pretrained
-                else single_channel_loader
-                if args.pretrained
-                else single_channel_loader,
+                args.data_dir, transform=transforms.Compose(train_tf), loader=loader,
             )
             assert (
                 len(dataset.classes) == 3

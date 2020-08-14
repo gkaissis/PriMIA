@@ -3,6 +3,9 @@ This implementation is based on the pysyft tutorial:
 https://github.com/OpenMined/PySyft/blob/master/examples/tutorials/Part%2011%20-%20Secure%20Deep%20Learning%20Classification.ipynb
 """
 
+import os
+
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
 import torch
 import configparser
@@ -15,25 +18,43 @@ from argparse import Namespace
 from tqdm import tqdm
 from sklearn import metrics as mt
 from numpy import newaxis
-from torchvision.datasets.folder import default_loader
 from os import listdir
-import re
 
 from torchlib.utils import stats_table, Arguments  # pylint:disable=import-error
 from torchlib.models import vgg16, resnet18, conv_at_resolution
 from torchlib.websocket_utils import read_websocket_config
+from torchlib.dicomtools import CombinedLoader
 
 
 class PathDataset(torch.utils.data.Dataset):
-    def __init__(self, root, transform=None, loader=default_loader):
+    def __init__(
+        self,
+        root,
+        transform=None,
+        loader=CombinedLoader(),
+        extensions=[
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".ppm",
+            ".bmp",
+            ".pgm",
+            ".tif",
+            ".tiff",
+            ".webp",
+            ".dcm",
+            ".dicom",
+        ],
+    ):
         super(PathDataset, self).__init__()
         self.root = root
         self.transform = transform
-
+        self.loader = loader
         self.imgs = [
             f
             for f in listdir(root)
-            if re.search(r".*\.(jpg|jpeg|png|JPG|JPEG)$", f) and not f.startswith("._")
+            if os.path.splitext(f)[1].lower() in extensions
+            and not os.path.split(f)[1].lower().startswith("._")
         ]
 
     def __len__(self):
@@ -41,7 +62,7 @@ class PathDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         img_path = self.imgs[idx]
-        img = default_loader(os.path.join(self.root, img_path))
+        img = self.loader(os.path.join(self.root, img_path))
         if self.transform:
             img = self.transform(img)
         return img
@@ -80,10 +101,10 @@ if __name__ == "__main__":
         "\nFirst column consists of id, host and port"
         "\nIf not passed as argument virtual workers are used",
     )
-    parser.add_argument("--no_cuda", action="store_true", help="dont use gpu")
+    parser.add_argument("--cuda", action="store_true", help="Use CUDA acceleration.")
     cmd_args = parser.parse_args()
 
-    use_cuda = not cmd_args.no_cuda and torch.cuda.is_available()
+    use_cuda = cmd_args.cuda and torch.cuda.is_available()
 
     device = torch.device("cuda" if use_cuda else "cpu")  # pylint: disable=no-member
     state = torch.load(cmd_args.model_weights, map_location=device)
@@ -128,7 +149,7 @@ if __name__ == "__main__":
 
     kwargs = {"num_workers": 1, "pin_memory": True} if use_cuda else {}
     class_names = None
-    if args.dataset == "mnist":
+    if args.data_dir == "mnist":
         num_classes = 10
         mean, std = torch.tensor([0.1307]), torch.tensor([0.3081])
         tf = transforms.Compose(
@@ -138,7 +159,7 @@ if __name__ == "__main__":
                 # transforms.Normalize(mean, std),
             ]
         )
-    elif args.dataset == "pneumonia":
+    else:
         num_classes = 3
         val_mean_std = (
             state["val_mean_std"]
@@ -154,18 +175,17 @@ if __name__ == "__main__":
             transforms.ToTensor(),
             # transforms.Normalize(mean.cpu(), std.cpu()),
         ]
-        from torchlib.dataloader import single_channel_loader
 
         class_names = {0: "normal", 1: "bacterial pneumonia", 2: "viral pneumonia"}
-    else:
-        raise NotImplementedError("dataset not implemented")
 
     mean = mean.to(device)
     std = std.to(device)
+
+    loader = CombinedLoader()
+    if not args.pretrained:
+        loader.change_channels(1)
     dataset = PathDataset(
-        cmd_args.data_dir,
-        transform=transforms.Compose(tf),
-        loader=default_loader if args.pretrained else single_channel_loader,
+        cmd_args.data_dir, transform=transforms.Compose(tf), loader=loader,
     )
     if args.encrypted_inference:
         if not cmd_args.websockets_config:
