@@ -15,7 +15,7 @@ License][cc-by].
 [cc-by-image]: https://i.creativecommons.org/l/by/4.0/88x31.png
 [cc-by-shield]: https://img.shields.io/badge/License-CC%20BY%204.0-lightgrey.svg
 
-The following modifications were made to create a dataset with a (great) majority of frontal chest X-Rays of children and adolescents:
+The following modifications were made to create a dataset of frontal chest X-Rays of children and adolescents:
 
 - All adult images (based on ossification status and/or degenerative changes to the spine) were removed. Example: ![](images/removed_images/1-s2.0-S0929664620300449-gr2_lrg-a.jpg)
 
@@ -31,9 +31,7 @@ The following modifications were made to create a dataset with a (great) majorit
 - All images considered of non-diagnostic quality were removed. Example:
 ![](images/removed_images/person1679_bacteria_4448.jpeg)
 
-The removed images can be found in the `Removed` folder.
-
-The training set consists of 5163 images, the test set of 624 images.
+The final training set consists of 5163 images, the test set of 624 images.
 
 The original metadata file was modified to represent the new dataset. Labels were encoded as follows:
 
