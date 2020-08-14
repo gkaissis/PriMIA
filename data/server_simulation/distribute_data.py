@@ -67,6 +67,10 @@ if __name__ == "__main__":
     split_idx = len(shuffled_idcs) // 10
     ## first ten per cent are validation set
     train_idcs, val_idcs = shuffled_idcs[split_idx:], shuffled_idcs[:split_idx]
+    for i in range(args.num_workers):
+        idcs_worker = train_idcs[i :: args.num_workers]
+        worker_imgs["worker{:d}".format(i + 1)] = idcs_worker
+    worker_imgs["validation"] = val_idcs
     for c in train_imgs.classes:
         # for ps in ["train_total", "test"]:
         #     p = os.path.join(ps, c)
@@ -76,10 +80,6 @@ if __name__ == "__main__":
             p = os.path.join(w, c)
             if not os.path.isdir(p):
                 os.makedirs(p)
-    for i in range(args.num_workers):
-        idcs_worker = train_idcs[i :: args.num_workers]
-        worker_imgs["worker{:d}".format(i + 1)] = idcs_worker
-    worker_imgs["validation"] = val_idcs
     for name, idcs in tqdm(worker_imgs.items(), total=len(worker_imgs), leave=False):
         for idx in tqdm(
             idcs, total=len(idcs), leave=False, desc="save data to {:s}".format(name)
