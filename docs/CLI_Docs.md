@@ -1,4 +1,4 @@
-# Command-line Interface Documentation
+# Library Documentation
 
 - train.py: Main entrypoint for training
     - Train virtually
