@@ -41,9 +41,13 @@
 
 ### 5. Miscellaneous
 
+- Monitor your training with Visdom
+    - From the command line, run `visdom` to start a visdom server. It will be located on `localhost:xxxx`. Navigate to this page with your browser.
+    - For an example, run `make federated_secure_visdom` which will launch a slightly longer training which you can monitor with Visdom! 
+    - For more information on Visdom, see [here](https://github.com/facebookresearch/visdom). Scroll down on this page to see configuration options, e.g. port selection or authentication for Visdom and many tutorials!
+
 - Run MNIST/Run VGG etc. etc. 
     - args ...
 
-- Monitor your training with visdom
 
 - Run a hyperparam optimisation trial (locally)

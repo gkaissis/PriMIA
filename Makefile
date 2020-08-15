@@ -2,6 +2,9 @@
 install:
 	conda env create -f environment_torch.yml
 
+update:
+	conda env update -f environment_torch.yml
+
 doc_install:
 	pip install -rU doc_requirements.txt
 
@@ -68,3 +71,8 @@ assert_cuda_fail:
 train_all: federated_secure federated_insecure local local_cuda assert_cuda_fail
 	@echo All checks successful
 
+###### VISDOM
+federated_secure_visdom:
+	@echo Training on VirtualWorkers with SecAgg
+	python train.py --config configs/test_configs/visdom.ini --train_federated --data_dir data/server_simulation --visdom
+	@echo Finished Training on VirtualWorkers with SecAgg
