@@ -76,3 +76,8 @@ federated_secure_visdom:
 	@echo Training on VirtualWorkers with SecAgg
 	python train.py --config configs/test_configs/visdom.ini --train_federated --data_dir data/server_simulation --visdom
 	@echo Finished Training on VirtualWorkers with SecAgg
+
+###### VISDOM
+mixup_ablation:
+	python train.py --config configs/test_configs/mixup_ablation.ini --data_dir data/server_simulation/worker1 --visdom --cuda
+	

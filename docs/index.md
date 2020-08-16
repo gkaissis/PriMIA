@@ -42,3 +42,6 @@ This is the companion repository to our publication (xxx). The technical supplem
 
 ## Dataset
 We used the Paediatric Pneumonia Dataset originally created by Kermany et al.
+
+## Disclaimer
+This software is a research product and is provided _as is_ without any guarantees of functionality, security, support or compatibility. Until appropriately validated, it must not be used in any critical workflow and we assume no liability for any user action or omission.

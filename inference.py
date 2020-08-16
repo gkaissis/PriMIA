@@ -19,6 +19,7 @@ from tqdm import tqdm
 from sklearn import metrics as mt
 from numpy import newaxis
 from os import listdir
+import json
 
 from torchlib.utils import stats_table, Arguments  # pylint:disable=import-error
 from torchlib.models import vgg16, resnet18, conv_at_resolution
@@ -113,7 +114,7 @@ if __name__ == "__main__":
     if type(args) is Namespace:
         args = Arguments.from_namespace(args)
     args.from_previous_checkpoint(cmd_args)
-    print(str(args))
+    sys.stderr.write(str(args))
 
     torch.manual_seed(args.seed)
     torch.backends.cudnn.deterministic = True
@@ -143,7 +144,7 @@ if __name__ == "__main__":
         else:
             data_owner = sy.VirtualWorker(hook, id="data_owner")
             crypto_provider = sy.VirtualWorker(hook, id="crypto_provider")
-        model_owner = sy.VirtualWorker(hook, id="model_owner")  # doesnt do shit
+        model_owner = sy.VirtualWorker(hook, id="model_owner")
         workers = [model_owner, data_owner]
         sy.local_worker.clients = [model_owner, data_owner]
 
@@ -291,6 +292,6 @@ if __name__ == "__main__":
                 output = output.get().float_prec()
             pred = output.argmax(dim=1)
             total_pred.append(pred.detach().cpu().item())
-
-    print("inference results: \n{:s}".format(str(total_pred)))
+    pred_dict = {"Inference Results": dict(enumerate(total_pred))}
+    sys.stdout.write(json.dumps(pred_dict))
 
