@@ -1,3 +1,10 @@
+"""Convenience script to perform an inference benchmark using CrypTen. Should be run after create_crypten_data.py has generated a test dataset and corresponding labels. Should not be modified.
+Returns classification metrics and whether the encrypted model performs identically as the plain-text model.
+"""
+
+import os
+
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 import torch
 import crypten
 from math import ceil

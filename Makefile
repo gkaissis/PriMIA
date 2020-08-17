@@ -19,10 +19,13 @@ clean_weights:
 clean_server_folders:
 	cd data/server_simulation && rm -rf all_samples/ validation/ worker1 worker2 worker3 && cd ../..
 
+clean_mnist:
+	cd data/ && rm -rf LabelMNIST && cd ../..
+
 clean_crypten:
 	cd data && rm -f testdata.pt testlabels.pt && cd ../..
 
-clean_all: clean_python clean_weights clean_server_folders clean_crypten
+clean_all: clean_python clean_weights clean_server_folders clean_crypten clean_mnist
 
 #Create Datasets
 server_folders:
