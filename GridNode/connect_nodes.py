@@ -1,14 +1,17 @@
+import os
+
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 import syft as sy
 import torch
-import os
+
 hook = sy.TorchHook(torch)
 client = sy.workers.node_client.NodeClient(hook, "http://127.0.0.1:8777", id="alice")
 print(client)
 grid = sy.PrivateGridNetwork(client,)
 print(grid)
-data = grid.search('#mnist', "#data")
+data = grid.search("#mnist", "#data")
 target = grid.search("#mnist", "#target")
-dataset = [sy.BaseDataset(data[worker][0],target[worker][0]) for worker in data.keys()]
+dataset = [sy.BaseDataset(data[worker][0], target[worker][0]) for worker in data.keys()]
 fed_datasets = sy.FederatedDataset(dataset)
 train_loader = sy.FederatedDataLoader(fed_datasets)
 print(train_loader)
