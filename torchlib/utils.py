@@ -112,12 +112,44 @@ class Arguments:
         self.translate = config.getfloat("augmentation", "translate", fallback=0.0)
         self.scale = config.getfloat("augmentation", "scale", fallback=0.0)
         self.shear = config.getfloat("augmentation", "shear", fallback=0.0)
-        self.noise_std = config.getfloat("augmentation", "noise_std", fallback=1.0)
-        self.noise_prob = config.getfloat("augmentation", "noise_prob", fallback=0.0)
-        self.mixup = config.getboolean("augmentation", "mixup", fallback=False)
-        self.mixup_prob = config.getfloat("augmentation", "mixup_prob", fallback=None)
+        self.albu_prop = config.getfloat("albumentations", "overall_prop", fallback=1.0)
+        self.noise_std = config.getfloat("albumentations", "noise_std", fallback=1.0)
+        self.noise_prob = config.getfloat("albumentations", "noise_prob", fallback=0.0)
+        self.clahe = config.getboolean("albumentations", "clahe", fallback=False)
+        self.randomgamma = config.getboolean(
+            "albumentations", "randomgamma", fallback=False
+        )
+        self.randombrightness = config.getboolean(
+            "albumentations", "randombrightness", fallback=False
+        )
+        self.blur = config.getboolean("albumentations", "blur", fallback=False)
+        self.elastic = config.getboolean("albumentations", "elastic", fallback=False)
+        self.optical_distortion = config.getboolean(
+            "albumentations", "optical_distortion", fallback=False
+        )
+        self.grid_distortion = config.getboolean(
+            "albumentations", "grid_distortion", fallback=False
+        )
+        self.grid_shuffle = config.getboolean(
+            "albumentations", "grid_shuffle", fallback=False
+        )
+        self.hsv = config.getboolean("albumentations", "hsv", fallback=False)
+        self.invert = config.getboolean("albumentations", "invert", fallback=False)
+        self.cutout = config.getboolean("albumentations", "cutout", fallback=False)
+        self.shadow = config.getboolean("albumentations", "shadow", fallback=False)
+        self.fog = config.getboolean("albumentations", "fog", fallback=False)
+        self.sun_flare = config.getboolean(
+            "albumentations", "sun_flare", fallback=False
+        )
+        self.solarize = config.getboolean("albumentations", "solarize", fallback=False)
+        self.equalize = config.getboolean("albumentations", "equalize", fallback=False)
+        self.grid_dropout = config.getboolean(
+            "albumentations", "grid_dropout", fallback=False
+        )
+        self.mixup = config.getboolean("albumentations", "mixup", fallback=False)
+        self.mixup_prob = config.getfloat("albumentations", "mixup_prob", fallback=None)
         self.mixup_lambda = config.getfloat(
-            "augmentation", "mixup_lambda", fallback=None
+            "albumentations", "mixup_lambda", fallback=None
         )
         if self.mixup and self.mixup_prob == 1.0:
             self.batch_size *= 2

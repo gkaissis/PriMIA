@@ -11,11 +11,28 @@ from torch import (  # pylint:disable=no-name-in-module
     cat,
     std_mean,
     save,
+    is_tensor,
+    from_numpy,
 )
+import albumentations as a
 from torch.utils import data as torchdata
 from torchvision.datasets import MNIST
 from torchvision import transforms
 from torchvision.datasets.folder import default_loader
+
+
+class AlbumentationsTorchTransform:
+    def __init__(self, transform, **kwargs):
+        self.transform = transform
+        self.kwargs = kwargs
+
+    def __call__(self, img):
+        if Image.isImageType(img):
+            img = np.array(img)
+        elif is_tensor(img):
+            img = img.numpy()
+        img = self.transform(image=img, **self.kwargs)["image"]
+        return from_numpy(a.augmentations.functional.to_float(img, max_value=255.0))
 
 
 def calc_mean_std(dataset, save_folder=None):

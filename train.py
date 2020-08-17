@@ -17,12 +17,14 @@ import torch.nn.functional as F
 import torch.optim as optim
 import tqdm
 import visdom
+import albumentations as a
 from tabulate import tabulate
 from torchvision import datasets, models, transforms
 from optuna import TrialPruned
 from torchlib.dataloader import (
     LabelMNIST,
     calc_mean_std,
+    AlbumentationsTorchTransform,
 )  # pylint:disable=import-error
 from torchlib.models import (
     conv_at_resolution,  # pylint:disable=import-error
@@ -483,12 +485,85 @@ def main(args, verbose=True, optuna_trial=None):
             ), "Dataset must have exactly 3 classes: normal, bacterial and viral"
             val_mean_std = calc_mean_std(dataset)
             mean, std = val_mean_std
-            train_tf = [
-                transforms.Normalize(mean, std),
-                AddGaussianNoise(mean=0.0, std=args.noise_std, p=args.noise_prob),
+            train_tf = transforms.Compose(
+                [
+                    transforms.RandomAffine(
+                        degrees=args.rotation,
+                        translate=(args.translate, args.translate),
+                        scale=(1.0 - args.scale, 1.0 + args.scale),
+                        shear=args.shear,
+                        #    fillcolor=0,
+                    )
+                ]
+            )
+            train_tf_albu = [
+                a.VerticalFlip(p=args.vertical_flip_prob),
+                a.Resize(args.inference_resolution, args.inference_resolution),
+                a.RandomCrop(args.train_resolution, args.inference_resolution),
             ]
 
-            dataset.transform.transforms.extend(train_tf)
+            if args.clahe:
+                train_tf_albu.extend(
+                    [
+                        a.FromFloat(dtype="uint8", max_value=1.0),
+                        a.CLAHE(always_apply=True),
+                    ]
+                )
+            if args.randomgamma:
+                train_tf_albu.append(a.RandomGamma())
+            if args.randombrightness:
+                train_tf_albu.append(a.RandomBrightness())
+            if args.blur:
+                train_tf_albu.append(a.Blur())
+            if args.elastic:
+                train_tf_albu.append(a.ElasticTransform())
+            if args.optical_distortion:
+                train_tf_albu.append(a.OpticalDistortion())
+            if args.grid_distortion:
+                train_tf_albu.append(a.GridDistortion())
+            if args.grid_shuffle:
+                train_tf_albu.append(a.RandomGridShuffle())
+            if args.hsv:
+                train_tf_albu.append(a.HueSaturationValue())
+            if args.invert:
+                train_tf_albu.append(a.InvertImg())
+            if args.cutout:
+                train_tf_albu.append(
+                    a.Cutout(num_holes=5, max_h_size=80, max_w_size=80)
+                )
+            if args.shadow:
+                assert args.pretrained, "RandomShadows needs 3 channels"
+                train_tf_albu.append(a.RandomShadow())
+            if args.fog:
+                assert args.pretrained, "RandomFog needs 3 channels"
+                train_tf_albu.append(a.RandomFog())
+            if args.sun_flare:
+                assert args.pretrained, "RandomSunFlare needs 3 channels"
+                train_tf_albu.append(a.RandomSunFlare())
+            if args.solarize:
+                train_tf_albu.append(a.Solarize())
+            if args.equalize:
+                train_tf_albu.append(a.Equalize())
+            if args.grid_dropout:
+                train_tf_albu.append(a.GridDropout())
+            train_tf_albu.append(
+                a.GaussNoise(var_limit=args.noise_std ** 2, p=args.noise_prob)
+            )
+            train_tf_albu.append(
+                a.Normalize(
+                    mean[None, None, :], std[None, None, :], max_pixel_value=1.0
+                )
+            )
+            train_tf_albu = AlbumentationsTorchTransform(
+                a.Compose(train_tf_albu, p=args.albu_prop)
+            )
+            dataset.transform = transforms.Compose(
+                [
+                    train_tf,
+                    train_tf_albu,
+                    transforms.Lambda(lambda x: x.permute(2, 0, 1)),  # why?
+                ]
+            )
             class_names = dataset.classes
             # occurances = dataset.get_class_occurances()
 
