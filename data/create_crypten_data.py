@@ -1,3 +1,10 @@
+"""Convenience script to generate and save data for the CrypTen benchmark. Should not be modified. Reads data/test and saves the images and the corresponding labels to .pt files for usage with the crypten_inference.py script.
+"""
+
+import os
+
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+
 import torch
 from torchvision import transforms
 from torchvision.datasets import ImageFolder
