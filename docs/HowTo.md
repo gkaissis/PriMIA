@@ -24,16 +24,19 @@ Here you can find a collection of recipes for various tasks and settings you mig
 
 - Run training on VirtualWorkers using your own data:
     - TODO: add instructions (...) populate folders etc.
+    - If you want to use more or fewer workers
 
 ### 3. Training using GridNodes
 
 - Simulate training with GridNodes using our data:
     - Run run_websocket_server.py ... (finds data automatically)
     - TODO: add instructions for GridNode
+    - If you want to use more or fewer workers
 
 - Run training on real servers using GridNodes and your own data:
     - run websocket server on each cloud instance (finds data automatically)
     - TODO: add instructions
+    - If you want to use more or fewer workers
 
 ### 4. CrypTen
 
@@ -45,6 +48,8 @@ Here you can find a collection of recipes for various tasks and settings you mig
     - Run `make crypten_benchmark`. This will run a benchmark on two images from the test set and should take about 200 seconds on a powerful machine. It might take **much** longer depending on your CPU and RAM.
 
 ### 5. Miscellaneous
+
+- If you want to adapt PriMIA to another use-case altogether, go [here](HoWToMod.md)
 
 - Monitor your training with Visdom
     - From the command line, run `visdom` to start a visdom server. It will be located on `localhost:xxxx`. Navigate to this page with your browser.
