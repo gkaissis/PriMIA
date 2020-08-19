@@ -13,25 +13,24 @@ if __name__ == "__main__":
     import signal
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset", choices=["mnist", "pneumonia"], required=True)
     parser.add_argument(
-        "--path",
+        "--data_dir",
         type=str,
         default=None,
-        help="Path to data folder of pneumonia data. Each worker has its subfolder called workeri where i is its index and three subfolders with the classes.",
+        help="Path to data folder of pneumonia data. Each worker has its subfolder called worker<i> where i is its index, and three subfolders with the classes.",
     )
     parser.add_argument(
         "--config", type=str, required=True, help="Path to config",
     )
     args = parser.parse_args()
-    # worker_dict = {"alice": 8777, "bob": 8778, "charlie": 8779}
     worker_dict = read_websocket_config("configs/websetting/config.csv")
     print(worker_dict)
-    if args.dataset == "mnist":
+    if args.data_dir == "mnist":
         worker_calls = [
             [
                 "python",
-                "GridNode/grid_node.py",
+                "-m",
+                "Node",
                 "--port",
                 str(id_dict["port"]),
                 "--id",
@@ -40,15 +39,18 @@ if __name__ == "__main__":
                 "mnist",
                 "--config",
                 args.config,
+                "--host",
+                "127.0.0.1",
             ]
             for row, id_dict in worker_dict.items()
         ]
-    elif args.dataset == "pneumonia":
-        assert os.path.isdir(args.path), "given path is no directory"
+    else:
+        assert os.path.isdir(args.data_dir), "given path is no directory"
         worker_calls = [
             [
                 "python",
-                "GridNode/grid_node.py",
+                "-m",
+                "Node",
                 "--port",
                 str(id_dict["port"]),
                 "--id",
@@ -56,15 +58,33 @@ if __name__ == "__main__":
                 "--host",
                 "127.0.0.1",
                 "--data_directory",
-                # "/home/alex/worker_emulation/all_samples",
-                os.path.join(args.path, "worker{:d}/".format(i + 1)),
+                os.path.join(args.data_dir, "worker{:d}/".format(i + 1)),
                 "--config",
                 args.config,
             ]
             for i, (row, id_dict) in enumerate(worker_dict.items())
+            if id_dict["id"] != "crypto_provider"
         ]
-    else:
-        raise NotImplementedError("dataset not implemented")
+        cp = [
+            id_dict
+            for id_dict in worker_dict.values()
+            if id_dict["id"] == "crypto_provider"
+        ]
+        if len(cp) == 1:
+            cp = cp[0]
+            worker_calls.append(
+                [
+                    "python",
+                    "-m",
+                    "Node",
+                    "--port",
+                    str(cp["port"]),
+                    "--id",
+                    cp["id"],
+                    "--host",
+                    "127.0.0.1",
+                ]
+            )
     calls = []
     for call in worker_calls:
         calls.append(Popen(call))
