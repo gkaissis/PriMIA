@@ -95,6 +95,70 @@ def calc_class_weights(args, train_loader, num_classes):
     return cw
 
 
+def create_albu_transform(args, mean, std):
+    train_tf = transforms.RandomAffine(
+        degrees=args.rotation,
+        translate=(args.translate, args.translate),
+        scale=(1.0 - args.scale, 1.0 + args.scale),
+        shear=args.shear,
+        #    fillcolor=0,
+    )
+    train_tf_albu = [
+        a.VerticalFlip(p=args.vertical_flip_prob),
+        a.Resize(args.inference_resolution, args.inference_resolution),
+        a.RandomCrop(args.train_resolution, args.train_resolution),
+    ]
+
+    if args.clahe:
+        train_tf_albu.extend(
+            [a.FromFloat(dtype="uint8", max_value=1.0), a.CLAHE(always_apply=True),]
+        )
+    if args.randomgamma:
+        train_tf_albu.append(a.RandomGamma())
+    if args.randombrightness:
+        train_tf_albu.append(a.RandomBrightness())
+    if args.blur:
+        train_tf_albu.append(a.Blur())
+    if args.elastic:
+        train_tf_albu.append(a.ElasticTransform())
+    if args.optical_distortion:
+        train_tf_albu.append(a.OpticalDistortion())
+    if args.grid_distortion:
+        train_tf_albu.append(a.GridDistortion())
+    if args.grid_shuffle:
+        train_tf_albu.append(a.RandomGridShuffle())
+    if args.hsv:
+        train_tf_albu.append(a.HueSaturationValue())
+    if args.invert:
+        train_tf_albu.append(a.InvertImg())
+    if args.cutout:
+        train_tf_albu.append(a.Cutout(num_holes=5, max_h_size=80, max_w_size=80))
+    if args.shadow:
+        assert args.pretrained, "RandomShadows needs 3 channels"
+        train_tf_albu.append(a.RandomShadow())
+    if args.fog:
+        assert args.pretrained, "RandomFog needs 3 channels"
+        train_tf_albu.append(a.RandomFog())
+    if args.sun_flare:
+        assert args.pretrained, "RandomSunFlare needs 3 channels"
+        train_tf_albu.append(a.RandomSunFlare())
+    if args.solarize:
+        train_tf_albu.append(a.Solarize())
+    if args.equalize:
+        train_tf_albu.append(a.Equalize())
+    if args.grid_dropout:
+        train_tf_albu.append(a.GridDropout())
+    train_tf_albu.append(a.GaussNoise(var_limit=args.noise_std ** 2, p=args.noise_prob))
+    train_tf_albu.append(a.ToFloat(max_value=255.0))
+    train_tf_albu.append(
+        a.Normalize(mean[None, None, :], std[None, None, :], max_pixel_value=1.0)
+    )
+    train_tf_albu = AlbumentationsTorchTransform(
+        a.Compose(train_tf_albu, p=args.albu_prop)
+    )
+    return transforms.Compose([train_tf, train_tf_albu,])
+
+
 def setup_pysyft(args, hook, verbose=False):
     from torchlib.websocket_utils import (  # pylint:disable=import-error
         read_websocket_config,
@@ -134,7 +198,9 @@ def setup_pysyft(args, hook, verbose=False):
                 " with mnist are not implemented currently"
             )
         workers = {
-            worker["id"]: sy.workers.node_client.NodeClient(  # pylint:disable=no-member
+            worker[
+                "id"
+            ]: sy.grid.clients.data_centric_fl_client.DataCentricFLClient(  # pylint:disable=no-member
                 hook,
                 "http://{:s}:{:s}".format(worker["host"], worker["port"]),
                 id=worker["id"],
@@ -143,7 +209,7 @@ def setup_pysyft(args, hook, verbose=False):
             for _, worker in worker_dict.items()
         }
         if not args.unencrypted_aggregation:
-            crypto_provider = sy.workers.node_client.NodeClient(  # pylint:disable=no-member
+            crypto_provider = sy.grid.clients.data_centric_fl_client.DataCentricFLClient(  # pylint:disable=no-member
                 hook,
                 "http://{:s}:{:s}".format(
                     crypto_provider_data["host"], crypto_provider_data["port"]
@@ -195,12 +261,18 @@ def setup_pysyft(args, hook, verbose=False):
                 stats_dataset = datasets.ImageFolder(
                     data_dir,
                     loader=loader,
-                    transform=transforms.Compose(
-                        [
-                            transforms.Resize(args.train_resolution),
-                            transforms.CenterCrop(args.train_resolution),
-                            transforms.ToTensor(),
-                        ]
+                    transform=AlbumentationsTorchTransform(
+                        a.Compose(
+                            [
+                                a.Resize(
+                                    args.inference_resolution, args.inference_resolution
+                                ),
+                                a.RandomCrop(
+                                    args.train_resolution, args.train_resolution
+                                ),
+                                a.ToFloat(max_value=255.0),
+                            ]
+                        )
                     ),
                 )
                 assert (
@@ -208,21 +280,7 @@ def setup_pysyft(args, hook, verbose=False):
                 ), "We can only handle data that has 3 classes: normal, bacterial and viral"
                 mean, std = calc_mean_std(stats_dataset, save_folder=data_dir,)
                 del stats_dataset
-                train_tf = [
-                    transforms.RandomVerticalFlip(p=args.vertical_flip_prob),
-                    transforms.RandomAffine(
-                        degrees=args.rotation,
-                        translate=(args.translate, args.translate),
-                        scale=(1.0 - args.scale, 1.0 + args.scale),
-                        shear=args.shear,
-                        #    fillcolor=0,
-                    ),
-                    transforms.Resize(args.inference_resolution),
-                    transforms.RandomCrop(args.train_resolution),
-                    transforms.ToTensor(),
-                    transforms.Normalize(mean, std),
-                    AddGaussianNoise(mean=0.0, std=args.noise_std, p=args.noise_prob),
-                ]
+
                 target_tf = None
                 if args.mixup or args.weight_classes:
                     target_tf = [
@@ -235,8 +293,10 @@ def setup_pysyft(args, hook, verbose=False):
                     # else
                     data_dir,
                     loader=loader,
-                    transform=transforms.Compose(train_tf),
-                    target_transform=transforms.Compose(target_tf),
+                    transform=create_albu_transform(args, mean, std),
+                    target_transform=transforms.Compose(target_tf)
+                    if target_tf
+                    else None,
                 )
                 assert (
                     len(dataset.classes) == 3
@@ -459,111 +519,29 @@ def main(args, verbose=True, optuna_trial=None):
         else:
             # Different train and inference resolution only works with adaptive
             # pooling in model activated
-            train_tf = [
-                transforms.RandomVerticalFlip(p=args.vertical_flip_prob),
-                transforms.RandomAffine(
-                    degrees=args.rotation,
-                    translate=(args.translate, args.translate),
-                    scale=(1.0 - args.scale, 1.0 + args.scale),
-                    shear=args.shear,
-                    #    fillcolor=0,
-                ),
-                transforms.Resize(args.inference_resolution),
-                transforms.RandomCrop(args.train_resolution),
-                transforms.ToTensor(),
-            ]
+            stats_tf = AlbumentationsTorchTransform(
+                a.Compose(
+                    [
+                        a.Resize(args.inference_resolution, args.inference_resolution),
+                        a.RandomCrop(args.train_resolution, args.train_resolution),
+                        a.ToFloat(max_value=255.0),
+                    ]
+                )
+            )
             # dataset = PPPP(
             #     "data/Labels.csv",
             loader = CombinedLoader()
             if not args.pretrained:
                 loader.change_channels(1)
             dataset = datasets.ImageFolder(
-                args.data_dir, transform=transforms.Compose(train_tf), loader=loader,
+                args.data_dir, transform=stats_tf, loader=loader,
             )
             assert (
                 len(dataset.classes) == 3
             ), "Dataset must have exactly 3 classes: normal, bacterial and viral"
             val_mean_std = calc_mean_std(dataset)
             mean, std = val_mean_std
-            train_tf = transforms.Compose(
-                [
-                    transforms.RandomAffine(
-                        degrees=args.rotation,
-                        translate=(args.translate, args.translate),
-                        scale=(1.0 - args.scale, 1.0 + args.scale),
-                        shear=args.shear,
-                        #    fillcolor=0,
-                    )
-                ]
-            )
-            train_tf_albu = [
-                a.VerticalFlip(p=args.vertical_flip_prob),
-                a.Resize(args.inference_resolution, args.inference_resolution),
-                a.RandomCrop(args.train_resolution, args.inference_resolution),
-            ]
-
-            if args.clahe:
-                train_tf_albu.extend(
-                    [
-                        a.FromFloat(dtype="uint8", max_value=1.0),
-                        a.CLAHE(always_apply=True),
-                    ]
-                )
-            if args.randomgamma:
-                train_tf_albu.append(a.RandomGamma())
-            if args.randombrightness:
-                train_tf_albu.append(a.RandomBrightness())
-            if args.blur:
-                train_tf_albu.append(a.Blur())
-            if args.elastic:
-                train_tf_albu.append(a.ElasticTransform())
-            if args.optical_distortion:
-                train_tf_albu.append(a.OpticalDistortion())
-            if args.grid_distortion:
-                train_tf_albu.append(a.GridDistortion())
-            if args.grid_shuffle:
-                train_tf_albu.append(a.RandomGridShuffle())
-            if args.hsv:
-                train_tf_albu.append(a.HueSaturationValue())
-            if args.invert:
-                train_tf_albu.append(a.InvertImg())
-            if args.cutout:
-                train_tf_albu.append(
-                    a.Cutout(num_holes=5, max_h_size=80, max_w_size=80)
-                )
-            if args.shadow:
-                assert args.pretrained, "RandomShadows needs 3 channels"
-                train_tf_albu.append(a.RandomShadow())
-            if args.fog:
-                assert args.pretrained, "RandomFog needs 3 channels"
-                train_tf_albu.append(a.RandomFog())
-            if args.sun_flare:
-                assert args.pretrained, "RandomSunFlare needs 3 channels"
-                train_tf_albu.append(a.RandomSunFlare())
-            if args.solarize:
-                train_tf_albu.append(a.Solarize())
-            if args.equalize:
-                train_tf_albu.append(a.Equalize())
-            if args.grid_dropout:
-                train_tf_albu.append(a.GridDropout())
-            train_tf_albu.append(
-                a.GaussNoise(var_limit=args.noise_std ** 2, p=args.noise_prob)
-            )
-            train_tf_albu.append(
-                a.Normalize(
-                    mean[None, None, :], std[None, None, :], max_pixel_value=1.0
-                )
-            )
-            train_tf_albu = AlbumentationsTorchTransform(
-                a.Compose(train_tf_albu, p=args.albu_prop)
-            )
-            dataset.transform = transforms.Compose(
-                [
-                    train_tf,
-                    train_tf_albu,
-                    transforms.Lambda(lambda x: x.permute(2, 0, 1)),  # why?
-                ]
-            )
+            dataset.transform = create_albu_transform(args, mean, std)
             class_names = dataset.classes
             # occurances = dataset.get_class_occurances()
 
@@ -924,7 +902,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--data_dir",
         type=str,
-        required=True,
+        # required=True,
         default="data/train",
         help='Select a data folder [if "mnist" is passed, the torchvision MNIST dataset will be downloaded and used].',
     )
@@ -952,7 +930,7 @@ if __name__ == "__main__":
 
     args = Arguments(cmd_args, config, mode="train")
     if args.websockets:
-        if args.train_federated:
+        if not args.train_federated:
             raise RuntimeError("WebSockets can only be used when in federated mode.")
     if args.cuda and args.train_federated:
         warn(

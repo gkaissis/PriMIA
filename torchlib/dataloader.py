@@ -23,16 +23,23 @@ from torchvision.datasets.folder import default_loader
 
 class AlbumentationsTorchTransform:
     def __init__(self, transform, **kwargs):
+        # print("init albu transform wrapper")
         self.transform = transform
         self.kwargs = kwargs
 
     def __call__(self, img):
+        # print("call albu transform wrapper")
         if Image.isImageType(img):
             img = np.array(img)
         elif is_tensor(img):
-            img = img.numpy()
+            img = img.cpu().numpy()
         img = self.transform(image=img, **self.kwargs)["image"]
-        return from_numpy(a.augmentations.functional.to_float(img, max_value=255.0))
+        # if img.max() > 1:
+        #     img = a.augmentations.functional.to_float(img, max_value=255)
+        img = from_numpy(img)
+        if img.shape[-1] < img.shape[0]:
+            img = img.permute(2, 0, 1)
+        return img
 
 
 def calc_mean_std(dataset, save_folder=None):

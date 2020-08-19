@@ -4,6 +4,7 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 import torch
 import configparser
 import argparse
+import albumentations as a
 from torchvision import datasets, transforms, models
 from argparse import Namespace
 from tqdm import tqdm
@@ -12,6 +13,7 @@ from numpy import newaxis
 from torchlib.utils import stats_table, Arguments  # pylint:disable=import-error
 from torchlib.models import vgg16, resnet18, conv_at_resolution
 from torchlib.dicomtools import CombinedLoader
+from torchlib.dataloader import AlbumentationsTorchTransform
 
 
 if __name__ == "__main__":
@@ -64,8 +66,8 @@ if __name__ == "__main__":
         )
     )
     mean, std = val_mean_std
-    mean = mean.to(device)
-    std = std.to(device)
+    # mean = mean.to(device)
+    # std = std.to(device)
     if args.data_dir == "mnist":
         num_classes = 10
         testset = datasets.MNIST(
@@ -81,20 +83,30 @@ if __name__ == "__main__":
         )
     else:
         num_classes = 3
+
         tf = [
-            # transforms.Lambda(lambda x: adaptive_hist_equalization_on_PIL(x)),
-            transforms.Resize(args.inference_resolution),
-            transforms.CenterCrop(args.inference_resolution),
-            transforms.ToTensor(),
-            transforms.Normalize(mean, std),
+            a.Resize(args.inference_resolution, args.inference_resolution),
+            a.CenterCrop(args.inference_resolution, args.inference_resolution),
         ]
+        if hasattr(args, "clahe") and args.clahe:
+            tf.append(a.CLAHE(always_apply=True))
+        tf.extend(
+            [
+                a.ToFloat(max_value=255.0),
+                a.Normalize(
+                    mean.cpu().numpy()[None, None, :],
+                    std.cpu().numpy()[None, None, :],
+                    max_pixel_value=1.0,
+                ),
+            ]
+        )
+        tf = AlbumentationsTorchTransform(a.Compose(tf))
+        # transforms.Lambda(lambda x: x.permute(2, 0, 1)),
 
         loader = CombinedLoader()
         if not args.pretrained:
             loader.change_channels(1)
-        testset = datasets.ImageFolder(
-            cmd_args.data_dir, transform=transforms.Compose(tf), loader=loader
-        )
+        testset = datasets.ImageFolder(cmd_args.data_dir, transform=tf, loader=loader)
         assert (
             len(testset.classes) == 3
         ), "We can only handle data that has 3 classes: normal, bacterial and viral"
