@@ -10,6 +10,7 @@ from argparse import Namespace
 from tqdm import tqdm
 from sklearn import metrics as mt
 from numpy import newaxis
+from random import seed as rseed
 from torchlib.utils import stats_table, Arguments  # pylint:disable=import-error
 from torchlib.models import vgg16, resnet18, conv_at_resolution
 from torchlib.dicomtools import CombinedLoader
@@ -45,7 +46,7 @@ if __name__ == "__main__":
         args = Arguments.from_namespace(args)
     args.from_previous_checkpoint(cmd_args)
     print(str(args))
-
+    rseed(args.seed)
     torch.manual_seed(args.seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
@@ -88,8 +89,8 @@ if __name__ == "__main__":
             a.Resize(args.inference_resolution, args.inference_resolution),
             a.CenterCrop(args.inference_resolution, args.inference_resolution),
         ]
-        if hasattr(args, "clahe") and args.clahe:
-            tf.append(a.CLAHE(always_apply=True))
+        # if hasattr(args, "clahe") and args.clahe:
+        #     tf.append(a.CLAHE(always_apply=True, p=1.0))
         tf.extend(
             [
                 a.ToFloat(max_value=255.0),
@@ -110,7 +111,7 @@ if __name__ == "__main__":
         assert (
             len(testset.classes) == 3
         ), "We can only handle data that has 3 classes: normal, bacterial and viral"
-        class_names = {0: "normal", 1: "bacterial pneumonia", 2: "viral pneumonia"}
+        class_names = testset.classes
 
     test_loader = torch.utils.data.DataLoader(
         testset, batch_size=1, shuffle=True, **kwargs
