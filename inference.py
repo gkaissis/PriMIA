@@ -20,11 +20,15 @@ from sklearn import metrics as mt
 from numpy import newaxis
 from os import listdir
 import json
+import albumentations as a
+
+from random import seed as rseed
 
 from torchlib.utils import stats_table, Arguments  # pylint:disable=import-error
 from torchlib.models import vgg16, resnet18, conv_at_resolution
 from torchlib.websocket_utils import read_websocket_config
 from torchlib.dicomtools import CombinedLoader
+from torchlib.dataloader import AlbumentationsTorchTransform
 
 
 class PathDataset(torch.utils.data.Dataset):
@@ -117,6 +121,7 @@ if __name__ == "__main__":
     sys.stderr.write(str(args))
 
     torch.manual_seed(args.seed)
+    rseed(args.seed)
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
@@ -128,13 +133,13 @@ if __name__ == "__main__":
             assert (
                 "crypto_provider" in worker_names and "data_owner" in worker_names
             ), "No crypto_provider and data_owner in websockets config"
-            data_owner = sy.workers.node_client.NodeClient(
+            data_owner = sy.grid.clients.data_centric_fl_client.DataCentricFLClient(
                 hook,
                 "http://{:s}:{:s}".format(
                     worker_dict["data_owner"]["id"], worker_dict["data_owner"]["port"]
                 ),
             )
-            crypto_provider = sy.workers.node_client.NodeClient(
+            crypto_provider = sy.grid.clients.data_centric_fl_client.DataCentricFLClient(
                 hook,
                 "http://{:s}:{:s}".format(
                     worker_dict["crypto_provider"]["id"],
@@ -150,53 +155,70 @@ if __name__ == "__main__":
 
     kwargs = {"num_workers": 1, "pin_memory": True} if use_cuda else {}
     class_names = None
+    val_mean_std = (
+        state["val_mean_std"]
+        if "val_mean_std" in state.keys()
+        else (
+            torch.tensor([0.5]),  # pylint:disable=not-callable
+            torch.tensor([0.2]),  # pylint:disable=not-callable
+        )
+        if args.pretrained
+        else (
+            torch.tensor([0.5, 0.5, 0.5]),  # pylint:disable=not-callable
+            torch.tensor([0.2, 0.2, 0.2]),  # pylint:disable=not-callable
+        )
+    )
+    mean, std = val_mean_std
     if args.data_dir == "mnist":
         num_classes = 10
-        mean, std = torch.tensor([0.1307]), torch.tensor([0.3081])
         tf = transforms.Compose(
             [
-                transforms.Resize(56),
+                transforms.Resize(args.inference_resolution),
                 transforms.ToTensor(),
-                # transforms.Normalize(mean, std),
+                transforms.Normalize(mean, std),
             ]
         )
     else:
         num_classes = 3
-        val_mean_std = (
-            state["val_mean_std"]
-            if "val_mean_std" in state.keys()
-            else (torch.tensor([0.5]), torch.tensor([0.2]))
-            if args.pretrained
-            else (torch.tensor([0.5, 0.5, 0.5]), torch.tensor([0.2, 0.2, 0.2]))
-        )
-        mean, std = val_mean_std
         tf = [
-            transforms.Resize(args.inference_resolution),
-            transforms.CenterCrop(args.inference_resolution),
-            transforms.ToTensor(),
-            # transforms.Normalize(mean.cpu(), std.cpu()),
+            a.Resize(args.inference_resolution, args.inference_resolution),
+            a.CenterCrop(args.inference_resolution, args.inference_resolution),
         ]
+        # CLAHE currently not deterministic. Will be enabled again if solutions is found.
+        # if hasattr(args, "clahe") and args.clahe:
+        #     tf.append(a.CLAHE(always_apply=True))
+        tf.extend(
+            [
+                a.ToFloat(max_value=255.0),
+                a.Normalize(
+                    mean.cpu().numpy()[None, None, :],
+                    std.cpu().numpy()[None, None, :],
+                    max_pixel_value=1.0,
+                ),
+            ]
+        )
+        tf = AlbumentationsTorchTransform(a.Compose(tf))
 
         class_names = {0: "normal", 1: "bacterial pneumonia", 2: "viral pneumonia"}
 
-    mean = mean.to(device)
-    std = std.to(device)
+    # mean = mean.to(device)
+    # std = std.to(device)
 
     loader = CombinedLoader()
     if not args.pretrained:
         loader.change_channels(1)
-    dataset = PathDataset(
-        cmd_args.data_dir, transform=transforms.Compose(tf), loader=loader,
-    )
-    if args.encrypted_inference:
-        if not cmd_args.websockets_config:
+    if not cmd_args.websockets_config:
+        # from torchvision.datasets import ImageFolder
+        # dataset = ImageFolder(cmd_args.data_dir, transform=tf, loader=loader)
+        dataset = PathDataset(cmd_args.data_dir, transform=tf, loader=loader,)
+        if cmd_args.encrypted_inference:
             data = []
             for d in tqdm(dataset, total=len(dataset), leave=False, desc="load data"):
                 data.append(d)
             data = torch.stack(data)
             data.tag("#inference_data")
             data_owner.load_data([data])
-
+    if cmd_args.encrypted_inference:
         grid = sy.PrivateGridNetwork(data_owner)
         data_tensor = grid.search("#inference_data")["data_owner"][0]
         dataset = RemoteTensorDataset(data_tensor)
@@ -241,8 +263,6 @@ if __name__ == "__main__":
     else:
         raise NotImplementedError("model unknown")
     model.load_state_dict(state["model_state_dict"])
-    model.pool, model.relu = model.relu, model.pool
-
     model.to(device)
     if args.encrypted_inference:
         fix_prec_kwargs = {"precision_fractional": 4, "dtype": "long"}
@@ -259,7 +279,6 @@ if __name__ == "__main__":
         )
     # test method
     model.eval()
-    test_loss, TP = 0, 0
     total_pred, total_target, total_scores = [], [], []
     if args.encrypted_inference:
         mean, std = mean.send(data_owner), std.send(data_owner)
@@ -267,6 +286,11 @@ if __name__ == "__main__":
         for data in tqdm(
             dataset, total=len(dataset), desc="performing inference", leave=False,
         ):
+            ## TODO: remove
+            # if type(data) == tuple:
+            #     if data[1] != 1:
+            #         continue
+            #     data = data[0]
             if len(data.shape) > 4:
                 data = data.squeeze()
                 if len(data.shape) > 4:
@@ -275,7 +299,6 @@ if __name__ == "__main__":
                 data = data.unsqueeze(0)
             data = data.to(device)
             ## normalize data
-            data.sub_(mean[:, None, None]).div_(std[:, None, None])
             if args.encrypted_inference:
                 data = (
                     data.fix_precision(precision_fractional=4, dtype="long")
@@ -294,4 +317,7 @@ if __name__ == "__main__":
             total_pred.append(pred.detach().cpu().item())
     pred_dict = {"Inference Results": dict(enumerate(total_pred))}
     sys.stdout.write(json.dumps(pred_dict))
+    from collections import Counter
+
+    print("\n{:s}".format(str(Counter(total_pred))))
 
