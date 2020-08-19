@@ -53,6 +53,9 @@ federated_secure:
 	python train.py --config configs/test_configs/weighted_classes.ini --train_federated --data_dir data/server_simulation
 	@echo Finished Training on VirtualWorkers with SecAgg
 
+federated_gridnode:
+	python train.py --config configs/torch/pneumonia-resnet-pretrained.ini --train_federated --data_dir data/server_simulation --websockets
+
 federated_insecure:
 	@echo Training on VirtualWorkers without SecAgg
 	python train.py --config configs/test_configs/weighted_classes.ini --train_federated --data_dir data/server_simulation --unencrypted_aggregation
@@ -84,3 +87,5 @@ federated_secure_visdom:
 mixup_ablation:
 	python train.py --config configs/test_configs/mixup_ablation.ini --data_dir data/server_simulation/worker1 --visdom --cuda
 	
+gridnode:
+	python torchlib/run_websocket_server.py --data_dir data/server_simulation --config configs/torch/pneumonia-resnet-pretrained.ini
