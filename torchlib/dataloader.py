@@ -62,7 +62,10 @@ def calc_mean_std(dataset, save_folder=None):
         accumulated_data = cat(accumulated_data)
     else:
         raise NotImplementedError("don't know how to process this data input class")
-    dims = (0, *range(2, len(accumulated_data.shape)))
+    if accumulated_data.shape[1] in [1, 3]:  # ugly hack
+        dims = (0, *range(2, len(accumulated_data.shape)))
+    else:
+        dims = (*range(len(accumulated_data.shape)),)
     std, mean = std_mean(accumulated_data, dim=dims)
     if save_folder:
         save(stack([mean, std]), os.path.join(save_folder, "mean_std.pt"))
