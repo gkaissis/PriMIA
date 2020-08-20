@@ -184,9 +184,8 @@ if __name__ == "__main__":
             a.Resize(args.inference_resolution, args.inference_resolution),
             a.CenterCrop(args.inference_resolution, args.inference_resolution),
         ]
-        # CLAHE currently not deterministic. Will be enabled again if solutions is found.
-        # if hasattr(args, "clahe") and args.clahe:
-        #     tf.append(a.CLAHE(always_apply=True))
+        if hasattr(args, "clahe") and args.clahe:
+            tf.append(a.CLAHE(always_apply=True, clip_limit=(1, 1)))
         tf.extend(
             [
                 a.ToFloat(max_value=255.0),
@@ -201,15 +200,10 @@ if __name__ == "__main__":
 
         class_names = {0: "normal", 1: "bacterial pneumonia", 2: "viral pneumonia"}
 
-    # mean = mean.to(device)
-    # std = std.to(device)
-
     loader = CombinedLoader()
     if not args.pretrained:
         loader.change_channels(1)
     if not cmd_args.websockets_config:
-        # from torchvision.datasets import ImageFolder
-        # dataset = ImageFolder(cmd_args.data_dir, transform=tf, loader=loader)
         dataset = PathDataset(cmd_args.data_dir, transform=tf, loader=loader,)
         if cmd_args.encrypted_inference:
             data = []

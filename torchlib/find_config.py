@@ -20,10 +20,10 @@ def objective(trial: opt.trial):
     args = Namespace(
         config="optuna",
         train_federated=cmdln_args.federated,
-        dataset="pneumonia",
+        data_dir="data/server_simulation" if cmdln_args.federated else "data/train",
         visdom=False,
         encrypted_inference=False,
-        no_cuda=cmdln_args.federated,
+        cuda=not cmdln_args.federated,
         websockets=False,
         batch_size=200,
         train_resolution=224,
@@ -56,6 +56,65 @@ def objective(trial: opt.trial):
         mixup=trial.suggest_categorical("mixup", [True, False]),
         repetitions_dataset=repetitions_dataset,
     )
+    apply_albu = trial.suggest_categorical("apply albu transforms", [True, False])
+    args.albu_prop = trial.suggest_float("albu_prop", 0.0, 1.0) if apply_albu else 0.0
+    args.clahe = (
+        trial.suggest_categorical("clahe", [True, False]) if apply_albu else False
+    )
+    args.randomgamma = (
+        trial.suggest_categorical("randomgamma", [True, False]) if apply_albu else False
+    )
+    args.randombrightness = (
+        trial.suggest_categorical("randombrightness", [True, False])
+        if apply_albu
+        else False
+    )
+    args.blur = (
+        trial.suggest_categorical("blur", [True, False]) if apply_albu else False
+    )
+    args.elastic = (
+        trial.suggest_categorical("elastic", [True, False]) if apply_albu else False
+    )
+    args.optical_distortion = (
+        trial.suggest_categorical("optical_distortion", [True, False])
+        if apply_albu
+        else False
+    )
+    args.grid_distortion = (
+        trial.suggest_categorical("grid_distortion", [True, False])
+        if apply_albu
+        else False
+    )
+    args.grid_shuffle = (
+        trial.suggest_categorical("grid_shuffle", [True, False])
+        if apply_albu
+        else False
+    )
+    args.hsv = trial.suggest_categorical("hsv", [True, False]) if apply_albu else False
+    args.invert = (
+        trial.suggest_categorical("invert", [True, False]) if apply_albu else False
+    )
+    args.cutout = (
+        trial.suggest_categorical("cutout", [True, False]) if apply_albu else False
+    )
+    args.shadow = (
+        trial.suggest_categorical("shadow", [True, False]) if apply_albu else False
+    )
+    args.fog = trial.suggest_categorical("fog", [True, False]) if apply_albu else False
+    args.sun_flare = (
+        trial.suggest_categorical("sun_flare", [True, False]) if apply_albu else False
+    )
+    args.solarize = (
+        trial.suggest_categorical("solarize", [True, False]) if apply_albu else False
+    )
+    args.equalize = (
+        trial.suggest_categorical("equalize", [True, False]) if apply_albu else False
+    )
+    args.grid_dropout = (
+        trial.suggest_categorical("grid_dropout", [True, False])
+        if apply_albu
+        else False
+    )
     if args.mixup:  # pylint:disable=no-member
         args.mixup_lambda = trial.suggest_categorical(
             "mixup_lambda",
@@ -63,7 +122,8 @@ def objective(trial: opt.trial):
         )
         args.mixup_prob = trial.suggest_float("mixup_prob", 0.0, 1.0)
     if cmdln_args.federated:
-        args.sync_every_n_batch = 5
+        args.unencrypted_aggregation = False
+        args.sync_every_n_batch = trial.suggest_int("sigma", 1, 5)
         args.wait_interval = 0.1
         args.keep_optim_dict = trial.suggest_categorical(
             "keep_optim_dict", [True, False]
@@ -71,7 +131,7 @@ def objective(trial: opt.trial):
         args.weighted_averaging = trial.suggest_categorical(
             "weighted_averaging", [True, False]
         )
-    best_val_acc = main(args, verbose=cmdln_args.federated, optuna_trial=trial)
+    best_val_acc = main(args, verbose=False, optuna_trial=trial)
     return best_val_acc
 
 
@@ -82,6 +142,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--federated", action="store_true", help="Search on federated setting"
     )
+    parser.add_argument(
+        "--num_trials", default=30, type=int, help="how many trials to perform"
+    )
     cmdln_args = parser.parse_args()
     study = opt.create_study(
         study_name="federated_pneumonia"
@@ -90,6 +153,6 @@ if __name__ == "__main__":
         storage="sqlite:///model_weights/pneumonia_search.db",
         load_if_exists=True,
         direction="maximize",
-        pruner=opt.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=10),
+        # pruner=opt.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=10),
     )
-    study.optimize(objective, n_trials=30)
+    study.optimize(objective, n_trials=cmdln_args.num_trials)
