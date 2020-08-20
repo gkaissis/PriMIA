@@ -80,7 +80,7 @@ def calc_class_weights(args, train_loader, num_classes):
                 target = target.max(dim=1)
                 target = target[1]  # without pysyft it should be target.indices
             for i in range(num_classes):
-                n = target.eq(comparison[i][..., : target.shape[0]]).sum().copy()
+                n = target.eq(comparison[i][..., : target.shape[0]]).sum()
                 if args.train_federated:
                     n = n.get()
                 occurances[i] += n.item()
@@ -103,16 +103,20 @@ def create_albu_transform(args, mean, std):
         shear=args.shear,
         #    fillcolor=0,
     )
-    train_tf_albu = [
-        a.VerticalFlip(p=args.vertical_flip_prob),
+    start_transformations = [
         a.Resize(args.inference_resolution, args.inference_resolution),
         a.RandomCrop(args.train_resolution, args.train_resolution),
     ]
-
     if args.clahe:
-        train_tf_albu.extend(
-            [a.FromFloat(dtype="uint8", max_value=1.0), a.CLAHE(always_apply=True),]
+        start_transformations.extend(
+            [
+                a.FromFloat(dtype="uint8", max_value=1.0),
+                a.CLAHE(always_apply=True, clip_limit=(1, 1)),
+            ]
         )
+    train_tf_albu = [
+        a.VerticalFlip(p=args.vertical_flip_prob),
+    ]
     if args.randomgamma:
         train_tf_albu.append(a.RandomGamma())
     if args.randombrightness:
@@ -149,12 +153,18 @@ def create_albu_transform(args, mean, std):
     if args.grid_dropout:
         train_tf_albu.append(a.GridDropout())
     train_tf_albu.append(a.GaussNoise(var_limit=args.noise_std ** 2, p=args.noise_prob))
-    train_tf_albu.append(a.ToFloat(max_value=255.0))
-    train_tf_albu.append(
-        a.Normalize(mean[None, None, :], std[None, None, :], max_pixel_value=1.0)
-    )
+    end_transformations = [
+        a.ToFloat(max_value=255.0),
+        a.Normalize(mean[None, None, :], std[None, None, :], max_pixel_value=1.0),
+    ]
     train_tf_albu = AlbumentationsTorchTransform(
-        a.Compose(train_tf_albu, p=args.albu_prop)
+        a.Compose(
+            [
+                a.Compose(start_transformations),
+                a.Compose(train_tf_albu, p=args.albu_prop),
+                a.Compose(end_transformations),
+            ]
+        )
     )
     return transforms.Compose([train_tf, train_tf_albu,])
 
@@ -590,7 +600,7 @@ def main(args, verbose=True, optuna_trial=None):
             Y=np.zeros((1, 3)),
             win="loss_win",
             opts={
-                "legend": ["train_loss", "val_loss", "ROC AUC"],
+                "legend": ["train_loss", "val_loss", "matthews coeff"],
                 "xlabel": "epochs",
                 "ylabel": "loss / m coeff [%]",
             },
@@ -718,9 +728,9 @@ def main(args, verbose=True, optuna_trial=None):
         class_names=class_names,
         verbose=verbose,
     )
-    roc_auc_scores = []
+    matthews_scores = []
     model_paths = []
-    if args.train_federated:
+    """if args.train_federated:
         test_params = {
             "device": device,
             "val_loader": val_loader,
@@ -729,9 +739,9 @@ def main(args, verbose=True, optuna_trial=None):
             "class_names": class_names,
             "exp_name": exp_name,
             "optimizer": optimizer,
-            "roc_auc_scores": roc_auc_scores,
+            "matthews_scores": matthews_scores,
             "model_paths": model_paths,
-        }
+        }"""
     for epoch in (
         range(start_at_epoch, args.epochs + 1)
         if verbose
@@ -774,7 +784,9 @@ def main(args, verbose=True, optuna_trial=None):
                     epoch,
                     loss_fn,
                     crypto_provider,
-                    test_params=test_params,
+                    # In future test_params could be changed if testing
+                    # during epoch should be enabled
+                    test_params=None,
                     vis_params=vis_params,
                     verbose=verbose,
                 )
@@ -812,7 +824,7 @@ def main(args, verbose=True, optuna_trial=None):
                 raise e
 
         if (epoch % args.test_interval) == 0:
-            _, roc_auc = test(
+            _, matthews = test(
                 args,
                 model["local_model"] if args.train_federated else model,
                 device,
@@ -835,7 +847,7 @@ def main(args, verbose=True, optuna_trial=None):
             )
             if optuna_trial:
                 optuna_trial.report(
-                    roc_auc,
+                    matthews,
                     epoch
                     * (args.repetitions_dataset if args.repetitions_dataset else 1),
                 )
@@ -843,19 +855,19 @@ def main(args, verbose=True, optuna_trial=None):
                     raise TrialPruned()
 
             save_model(model, optimizer, model_path, args, epoch, val_mean_std)
-            roc_auc_scores.append(roc_auc)
+            matthews_scores.append(matthews)
             model_paths.append(model_path)
     # reversal and formula because we want last occurance of highest value
-    roc_auc_scores = np.array(roc_auc_scores)[::-1]
-    best_auc_idx = np.argmax(roc_auc_scores)
-    highest_acc = len(roc_auc_scores) - best_auc_idx - 1
+    matthews_scores = np.array(matthews_scores)[::-1]
+    best_score_idx = np.argmax(matthews_scores)
+    highest_score = len(matthews_scores) - best_score_idx - 1
     best_epoch = (
-        highest_acc + 1
+        highest_score + 1
     ) * args.test_interval  # actually -1 but we're switching to 1 indexed here
-    best_model_file = model_paths[highest_acc]
+    best_model_file = model_paths[highest_score]
     print(
-        "Highest ROC AUC score was {:.1f}% in epoch {:d}".format(
-            roc_auc_scores[best_auc_idx],
+        "Highest matthews coefficient was {:.1f}% in epoch {:d}".format(
+            matthews_scores[best_score_idx],
             best_epoch * (args.repetitions_dataset if args.train_federated else 1),
         )
     )
@@ -870,7 +882,7 @@ def main(args, verbose=True, optuna_trial=None):
     )
     save_config_results(
         args,
-        roc_auc_scores[best_auc_idx],
+        matthews_scores[best_score_idx],
         timestamp,
         "model_weights/completed_trainings.csv",
     )
@@ -879,7 +891,7 @@ def main(args, verbose=True, optuna_trial=None):
     for model_file in model_paths:
         remove(model_file)
 
-    return roc_auc_scores[best_auc_idx]
+    return matthews_scores[best_score_idx]
 
 
 if __name__ == "__main__":
