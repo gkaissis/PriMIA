@@ -131,7 +131,12 @@ def objective(trial: opt.trial):
         args.weighted_averaging = trial.suggest_categorical(
             "weighted_averaging", [True, False]
         )
-    best_val_acc = main(args, verbose=False, optuna_trial=trial)
+    try:
+        best_val_acc = main(args, verbose=False, optuna_trial=trial)
+    except Exception as e:
+        print(args)
+        print(e)
+        exit()
     return best_val_acc
 
 

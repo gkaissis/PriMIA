@@ -259,12 +259,18 @@ def setup_pysyft(args, hook, verbose=False):
                     root="./data",
                     train=True,
                     download=True,
-                    transform=transforms.Compose(
-                        [
-                            transforms.ToTensor(),
-                            transforms.Normalize((0.1307,), (0.3081,)),
-                        ]
+                    transform=AlbumentationsTorchTransform(
+                        a.Compose(
+                            [
+                                a.ToFloat(max_value=255.0),
+                                a.Lambda(image=lambda x, **kwargs: x[np.newaxis, :, :]),
+                            ]
+                        )
                     ),
+                )
+                mean, std = calc_mean_std(dataset)
+                dataset.transform.transform.transforms.transforms.append(  # beautiful
+                    a.Normalize(mean, std, max_pixel_value=1.0)
                 )
             else:
                 data_dir = path.join(args.data_dir, "worker{:d}".format(i + 1))
@@ -312,9 +318,9 @@ def setup_pysyft(args, hook, verbose=False):
                     len(dataset.classes) == 3
                 ), "We can only handle data that has 3 classes: normal, bacterial and viral"
 
-                mean.tag("#datamean")
-                std.tag("#datastd")
-                worker.load_data([mean, std])
+            mean.tag("#datamean")
+            std.tag("#datastd")
+            worker.load_data([mean, std])
 
             data, targets = [], []
             # repetitions = 1 if worker.id == "validation" else args.repetitions_dataset
@@ -375,60 +381,61 @@ def setup_pysyft(args, hook, verbose=False):
             fed_dataset, batch_size=args.batch_size, shuffle=True
         )
         train_loader[workers[worker]] = tl
-
+    means = [m[0] for m in grid.search("#datamean").values()]
+    stds = [s[0] for s in grid.search("#datastd").values()]
+    if len(means) == len(workers) and len(stds) == len(workers):
+        mean = (
+            means[0]
+            .fix_precision()
+            .share(*workers, crypto_provider=crypto_provider)
+            .get()
+        )
+        std = (
+            stds[0]
+            .fix_precision()
+            .share(*workers, crypto_provider=crypto_provider)
+            .get()
+        )
+        for m, s in zip(means[1:], stds[1:]):
+            mean += (
+                m.fix_precision().share(*workers, crypto_provider=crypto_provider).get()
+            )
+            std += (
+                s.fix_precision().share(*workers, crypto_provider=crypto_provider).get()
+            )
+        mean = mean.get().float_precision() / len(stds)
+        std = std.get().float_precision() / len(stds)
+    else:
+        raise RuntimeError("no datamean/standard deviation was found on (some) worker")
+    val_mean_std = torch.stack([mean, std])  # pylint:disable=no-member
     if args.data_dir == "mnist":
         valset = LabelMNIST(
             labels=list(range(10)),
             root="./data",
             train=False,
             download=True,
-            transform=transforms.Compose(
-                [transforms.ToTensor(), transforms.Normalize((0.1307,), (0.3081,)),]
+            transform=AlbumentationsTorchTransform(
+                a.Compose(
+                    [
+                        a.ToFloat(max_value=255.0),
+                        a.Lambda(image=lambda x, **kwargs: x[np.newaxis, :, :]),
+                        a.Normalize(mean, std, max_pixel_value=1.0),
+                    ]
+                )
             ),
         )
     else:
-        means = [m[0] for m in grid.search("#datamean").values()]
-        stds = [s[0] for s in grid.search("#datastd").values()]
-        if len(means) > 0 and len(stds) > 0 and len(means) == len(stds):
-            mean = (
-                means[0]
-                .fix_precision()
-                .share(*workers, crypto_provider=crypto_provider)
-                .get()
-            )
-            std = (
-                stds[0]
-                .fix_precision()
-                .share(*workers, crypto_provider=crypto_provider)
-                .get()
-            )
-            for m, s in zip(means[1:], stds[1:]):
-                mean += (
-                    m.fix_precision()
-                    .share(*workers, crypto_provider=crypto_provider)
-                    .get()
-                )
-                std += (
-                    s.fix_precision()
-                    .share(*workers, crypto_provider=crypto_provider)
-                    .get()
-                )
-            mean = mean.get().float_precision() / len(stds)
-            std = std.get().float_precision() / len(stds)
-        else:
-            ## default values
-            mean, std = 0.5, 0.2
-        val_mean_std = torch.stack([mean, std])  # pylint:disable=no-member
+
         val_tf = [
-            transforms.Resize(args.inference_resolution),
-            transforms.CenterCrop(args.train_resolution),
-            transforms.ToTensor(),
-            transforms.Normalize(mean, std),
+            a.Resize(args.inference_resolution, args.inference_resolution),
+            a.CenterCrop(args.train_resolution, args.train_resolution),
+            a.ToFloat(max_value=255.0),
+            a.Normalize(mean[None, None, :], std[None, None, :], max_pixel_value=1.0),
         ]
         valset = datasets.ImageFolder(
             path.join(args.data_dir, "validation"),
             loader=loader,
-            transform=transforms.Compose(val_tf),
+            transform=AlbumentationsTorchTransform(a.Compose(val_tf)),
         )
         assert (
             len(valset.classes) == 3
@@ -773,55 +780,54 @@ def main(args, verbose=True, optuna_trial=None):
                 env=vis_env,
             )
 
-        try:
-            if args.train_federated:
-                model = train_federated(
-                    args,
-                    model,
-                    device,
-                    train_loader,
-                    optimizer,
-                    epoch,
-                    loss_fn,
-                    crypto_provider,
-                    # In future test_params could be changed if testing
-                    # during epoch should be enabled
-                    test_params=None,
-                    vis_params=vis_params,
-                    verbose=verbose,
-                )
+        if args.train_federated:
+            model = train_federated(
+                args,
+                model,
+                device,
+                train_loader,
+                optimizer,
+                epoch,
+                loss_fn,
+                crypto_provider,
+                # In future test_params could be changed if testing
+                # during epoch should be enabled
+                test_params=None,
+                vis_params=vis_params,
+                verbose=verbose,
+            )
 
-            else:
-                model = train(
-                    args,
-                    model,
-                    device,
-                    train_loader,
-                    optimizer,
-                    epoch,
-                    loss_fn,
-                    num_classes,
-                    vis_params=vis_params,
-                    verbose=verbose,
-                )
-        except Exception as e:
-            if args.websockets:
-                warn("An exception occured - restarting websockets")
-                try:
-                    (
-                        train_loader,
-                        val_loader,
-                        total_L,
-                        workers,
-                        worker_names,
-                        crypto_provider,
-                        val_mean_std,
-                    ) = setup_pysyft(args, hook, verbose=cmd_args.verbose)
-                except Exception as e:
-                    print("restarting failed")
-                    raise e
-            else:
-                raise e
+        else:
+            model = train(
+                args,
+                model,
+                device,
+                train_loader,
+                optimizer,
+                epoch,
+                loss_fn,
+                num_classes,
+                vis_params=vis_params,
+                verbose=verbose,
+            )
+        # except Exception as e:
+        #     if args.websockets:
+        #         warn("An exception occured - restarting websockets")
+        #         try:
+        #             (
+        #                 train_loader,
+        #                 val_loader,
+        #                 total_L,
+        #                 workers,
+        #                 worker_names,
+        #                 crypto_provider,
+        #                 val_mean_std,
+        #             ) = setup_pysyft(args, hook, verbose=cmd_args.verbose)
+        #         except Exception as e:
+        #             print("restarting failed")
+        #             raise e
+        #     else:
+        #         raise e
 
         if (epoch % args.test_interval) == 0:
             _, matthews = test(
