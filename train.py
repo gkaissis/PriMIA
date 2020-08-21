@@ -205,6 +205,7 @@ def setup_pysyft(args, hook, verbose=False):
                 "http://{:s}:{:s}".format(worker["host"], worker["port"]),
                 id=worker["id"],
                 verbose=verbose,
+                is_client_worker=True,
             )
             for _, worker in worker_dict.items()
         }
@@ -216,7 +217,9 @@ def setup_pysyft(args, hook, verbose=False):
                 ),
                 id=crypto_provider_data["id"],
                 verbose=verbose,
+                is_client_worker=True,
             )
+            workers["crypto_provider"] = crypto_provider
 
     else:
         workers = {
@@ -427,9 +430,9 @@ def setup_pysyft(args, hook, verbose=False):
     val_loader = torch.utils.data.DataLoader(
         valset, batch_size=args.test_batch_size, shuffle=False
     )
-    assert len(train_loader.keys()) == (
-        len(workers.keys())
-    ), "data was not correctly loaded"
+    # assert len(train_loader.keys()) == (
+    #     len(workers.keys())
+    # ), "data was not correctly loaded"
 
     print(
         "Found a total dataset with {:d} samples on remote workers".format(
@@ -793,23 +796,25 @@ def main(args, verbose=True, optuna_trial=None):
                     verbose=verbose,
                 )
         except Exception as e:
-            if args.websockets:
-                warn("An exception occured - restarting websockets")
-                try:
-                    (
-                        train_loader,
-                        val_loader,
-                        total_L,
-                        workers,
-                        worker_names,
-                        crypto_provider,
-                        val_mean_std,
-                    ) = setup_pysyft(args, hook, verbose=cmd_args.verbose)
-                except Exception as e:
-                    print("restarting failed")
-                    raise e
-            else:
-                raise e
+            print(str(e))
+            exit()
+            # if args.websockets:
+            #     warn("An exception occured - restarting websockets")
+            #     try:
+            #         (
+            #             train_loader,
+            #             val_loader,
+            #             total_L,
+            #             workers,
+            #             worker_names,
+            #             crypto_provider,
+            #             val_mean_std,
+            #         ) = setup_pysyft(args, hook, verbose=cmd_args.verbose)
+            #     except Exception as e:
+            #         print("restarting failed")
+            #         raise e
+            # else:
+            #     raise e
 
         if (epoch % args.test_interval) == 0:
             _, roc_auc = test(
