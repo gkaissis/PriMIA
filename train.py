@@ -194,8 +194,7 @@ def setup_pysyft(args, hook, verbose=False):
     if args.websockets:
         if args.weight_classes or (args.mixup and args.data_dir == "mnist"):
             raise NotImplementedError(
-                "weighted loss as well as mixup in combination"
-                " with mnist are not implemented currently"
+                "Weighted loss/ MixUp in combination with MNIST are currently not implemented."
             )
         workers = {
             worker[

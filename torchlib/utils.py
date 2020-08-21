@@ -680,16 +680,28 @@ def secure_aggregation(
     return local_model
 
 
-def send_new_models(local_model, models):
+def send_new_models(local_model, models):  # terrible illegal hack
     for worker in models.keys():
-        if worker == "local_model":
+        if worker in ["local_model", "crypto_provider"]:
             continue
         if local_model.location:
             local_model.get()
-        local_model.send(worker)
+        models[worker].get()
         models[worker].load_state_dict(local_model.state_dict())
-    local_model.get()
+        models[worker].send(worker)
     return models
+
+
+# def send_new_models(local_model, models): #original version
+#     for worker in models.keys():
+#         if worker == "local_model":
+#             continue
+#         if local_model.location:
+#             local_model.get()
+#         local_model.send(worker)
+#         models[worker].load_state_dict(local_model.state_dict())
+#     local_model.get()
+#     return models
 
 
 def secure_aggregation_epoch(
