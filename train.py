@@ -204,7 +204,6 @@ def setup_pysyft(args, hook, verbose=False):
                 "http://{:s}:{:s}".format(worker["host"], worker["port"]),
                 id=worker["id"],
                 verbose=verbose,
-                is_client_worker=True,
             )
             for _, worker in worker_dict.items()
         }
@@ -216,9 +215,8 @@ def setup_pysyft(args, hook, verbose=False):
                 ),
                 id=crypto_provider_data["id"],
                 verbose=verbose,
-                is_client_worker=True,
             )
-            workers["crypto_provider"] = crypto_provider
+            #workers["crypto_provider"] = crypto_provider
 
     else:
         workers = {
@@ -350,7 +348,7 @@ def setup_pysyft(args, hook, verbose=False):
             selected_targets.tag("#traintargets",)
             worker.load_data([selected_data, selected_targets])
 
-    grid: sy.PrivateGridNetwork = sy.PrivateGridNetwork(*workers.values())
+    grid: sy.PrivateGridNetwork = sy.PrivateGridNetwork(*(list(workers.values()) + [crypto_provider]))
     data = grid.search("#traindata")
     target = grid.search("#traintargets")
     train_loader = {}
