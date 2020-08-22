@@ -1,0 +1,16 @@
+python torchlib/run_websocket_server.py --data_dir data/server_simulation --config configs/torch/pneumonia-resnet-pretrained.ini
+modified Clients!
+registered 12 samples of data/server_simulation/worker2/ data
+modified Clients!
+registered 12 samples of data/server_simulation/worker1/ data
+modified Clients!
+registered 12 samples of data/server_simulation/worker3/ data
+Instantiating modified DCFLC
+Instantiating modified DCFLC
+Instantiating modified DCFLC
+Instantiating modified DCFLC
+Instantiating modified DCFLC
+Instantiating modified DCFLC
+Instantiating modified DCFLC
+Instantiating modified DCFLC
+Instantiating modified DCFLC

@@ -639,69 +639,57 @@ def tensor_iterator(model):
 def secure_aggregation(
     local_model, models, workers, crypto_provider, args, test_params
 ):
-    with torch.no_grad():
-        for local_iter, *remote_iter in zip(
-            *(
-                [tensor_iterator(local_model)]
-                + [
-                    tensor_iterator(model)
-                    for key, model in models.items()
-                    if key != "local_model"
-                ]
-            )
-        ):
-            for local_param, *remote_params in zip(
-                *([local_iter()] + [r() for r in remote_iter])
-            ):
-                dt = remote_params[0].dtype
-                ## num_batches tracked are ints
-                ## -> irrelevant cause batch norm momentum is on by default
-                if dt != torch.float:
-                    continue
-                param_stack = torch.sum(
-                    torch.stack(
-                        [
-                            r.data.copy()
-                            .fix_prec()
-                            .share(
-                                *workers,
-                                crypto_provider=crypto_provider,
-                                protocol="fss"
-                            )
-                            .get()
-                            for r in remote_params
-                        ]
-                    ),
-                    dim=0,
-                )
-                param_stack = param_stack.get().float_prec()
-                param_stack /= len(remote_params)
-                local_param.set_(param_stack)
+    # with torch.no_grad():
+    #     for local_iter, *remote_iter in zip(
+    #         *(
+    #             [tensor_iterator(local_model)]
+    #             + [
+    #                 tensor_iterator(model)
+    #                 for key, model in models.items()
+    #                 if key != "local_model"
+    #             ]
+    #         )
+    #     ):
+    #         for local_param, *remote_params in zip(
+    #             *([local_iter()] + [r() for r in remote_iter])
+    #         ):
+    #             dt = remote_params[0].dtype
+    #             ## num_batches tracked are ints
+    #             ## -> irrelevant cause batch norm momentum is on by default
+    #             if dt != torch.float:
+    #                 continue
+    #             param_stack = torch.sum(
+    #                 torch.stack(
+    #                     [
+    #                         r.data.copy()
+    #                         .fix_prec()
+    #                         .share(
+    #                             *workers,
+    #                             crypto_provider=crypto_provider,
+    #                             protocol="fss"
+    #                         )
+    #                         .get()
+    #                         for r in remote_params
+    #                     ]
+    #                 ),
+    #                 dim=0,
+    #             )
+    #             param_stack = param_stack.get().float_prec()
+    #             param_stack /= len(remote_params)
+    #             local_param.set_(param_stack)
     return local_model
 
 
-def send_new_models(local_model, models):  # terrible illegal hack
+def send_new_models(local_model, models):  # original version
     for worker in models.keys():
-        if worker in ["local_model", "crypto_provider"]:
+        if worker == "local_model":
             continue
         if local_model.location:
             local_model.get()
-        models[worker].get()
+        local_model.send(worker)
         models[worker].load_state_dict(local_model.state_dict())
-        models[worker].send(worker)
+    local_model.get()
     return models
-
-
-# def send_new_models(local_model, models): #original version
-#     for worker in models.keys():
-#         if worker == "local_model":
-#             continue
-#         if local_model.location:
-#             local_model.get()
-#         local_model.send(worker)
-#         models[worker].load_state_dict(local_model.state_dict())
-#     local_model.get()
-#     return models
 
 
 def secure_aggregation_epoch(

@@ -216,7 +216,7 @@ def setup_pysyft(args, hook, verbose=False):
                 id=crypto_provider_data["id"],
                 verbose=verbose,
             )
-            #workers["crypto_provider"] = crypto_provider
+            # workers["crypto_provider"] = crypto_provider
 
     else:
         workers = {
@@ -348,7 +348,9 @@ def setup_pysyft(args, hook, verbose=False):
             selected_targets.tag("#traintargets",)
             worker.load_data([selected_data, selected_targets])
 
-    grid: sy.PrivateGridNetwork = sy.PrivateGridNetwork(*(list(workers.values()) + [crypto_provider]))
+    grid: sy.PrivateGridNetwork = sy.PrivateGridNetwork(
+        *(list(workers.values()) + [crypto_provider])
+    )
     data = grid.search("#traindata")
     target = grid.search("#traintargets")
     train_loader = {}
@@ -427,9 +429,9 @@ def setup_pysyft(args, hook, verbose=False):
     val_loader = torch.utils.data.DataLoader(
         valset, batch_size=args.test_batch_size, shuffle=False
     )
-    # assert len(train_loader.keys()) == (
-    #     len(workers.keys())
-    # ), "data was not correctly loaded"
+    assert len(train_loader.keys()) == (
+        len(workers.keys())
+    ), "data was not correctly loaded"
 
     print(
         "Found a total dataset with {:d} samples on remote workers".format(
@@ -793,8 +795,9 @@ def main(args, verbose=True, optuna_trial=None):
                     verbose=verbose,
                 )
         except Exception as e:
-            print(str(e))
-            exit()
+            raise e
+            # print(str(e))
+            # exit()
             # if args.websockets:
             #     warn("An exception occured - restarting websockets")
             #     try:
