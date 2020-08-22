@@ -639,44 +639,73 @@ def tensor_iterator(model):
 def secure_aggregation(
     local_model, models, workers, crypto_provider, args, test_params
 ):
-    # with torch.no_grad():
-    #     for local_iter, *remote_iter in zip(
-    #         *(
-    #             [tensor_iterator(local_model)]
-    #             + [
-    #                 tensor_iterator(model)
-    #                 for key, model in models.items()
-    #                 if key != "local_model"
-    #             ]
-    #         )
-    #     ):
-    #         for local_param, *remote_params in zip(
-    #             *([local_iter()] + [r() for r in remote_iter])
-    #         ):
-    #             dt = remote_params[0].dtype
-    #             ## num_batches tracked are ints
-    #             ## -> irrelevant cause batch norm momentum is on by default
-    #             if dt != torch.float:
-    #                 continue
-    #             param_stack = torch.sum(
-    #                 torch.stack(
-    #                     [
-    #                         r.data.copy()
-    #                         .fix_prec()
-    #                         .share(
-    #                             *workers,
-    #                             crypto_provider=crypto_provider,
-    #                             protocol="fss"
-    #                         )
-    #                         .get()
-    #                         for r in remote_params
-    #                     ]
-    #                 ),
-    #                 dim=0,
-    #             )
-    #             param_stack = param_stack.get().float_prec()
-    #             param_stack /= len(remote_params)
-    #             local_param.set_(param_stack)
+    with torch.no_grad():
+
+        # local_tensor_iterator = tensor_iterator(local_model)
+        # remote_tensor_iterator = [tensor_iterator(model)for key, model in models.items()if key != "local_model"]
+        for local_iter, *remote_iter in zip(
+            *(
+                [tensor_iterator(local_model)]
+                + [
+                    tensor_iterator(model)
+                    for key, model in models.items()
+                    if key != "local_model"
+                ]
+            )
+        ):
+            i = 0
+            for local_param, *remote_params in zip(
+                *([local_iter()] + [r() for r in remote_iter])
+            ):
+                i += 1
+                dt = remote_params[0].dtype
+                ## num_batches tracked are ints
+                ## -> irrelevant cause batch norm momentum is on by default
+                if dt != torch.float:
+                    continue
+
+                results = []
+                j = 0
+                for r in remote_params:
+                    j += 1
+                    r_copy = r.data.copy()
+                    fixed_p = r_copy.fix_prec()
+                    shared = fixed_p.share(
+                        *workers, crypto_provider=crypto_provider, protocol="fss"
+                    )
+                    gotten = shared.get()
+                    results.append(gotten)
+
+                try:
+                    stacked = torch.stack(results)
+                except Exception as e:
+                    print("stack exception", e, "i", i, "j", j)
+                    raise e
+                try:
+                    param_stack = torch.sum(stacked, dim=0)
+                except Exception as e:
+                    print("sum exception", e)
+                    raise e
+
+                # param_stack = torch.sum(
+                #     torch.stack(
+                #         [
+                #             r.data.copy()
+                #             .fix_prec()
+                #             .share(
+                #                 *workers,
+                #                 crypto_provider=crypto_provider,
+                #                 protocol="fss"
+                #             )
+                #             .get()
+                #             for r in remote_params
+                #         ]
+                #     ),
+                #     dim=0,
+                # )
+                param_stack = param_stack.get().float_prec()
+                param_stack /= len(remote_params)
+                local_param.set_(param_stack)
     return local_model
 
 
