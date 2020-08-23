@@ -4,6 +4,8 @@ from flask_sockets import Sockets
 import syft as sy
 import numpy as np
 import torch
+
+torch.set_num_threads(1)
 from torchvision import transforms
 
 from torchvision.datasets import ImageFolder

@@ -12,6 +12,8 @@ from warnings import warn
 import numpy as np
 import syft as sy
 import torch
+
+torch.set_num_threads(1)
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
@@ -347,7 +349,7 @@ def setup_pysyft(args, hook, verbose=False):
             selected_data.tag("#traindata",)
             selected_targets.tag("#traintargets",)
             worker.load_data([selected_data, selected_targets])
-    if crypto_provider:
+    if crypto_provider is not None:
         grid = sy.PrivateGridNetwork(*(list(workers.values()) + [crypto_provider]))
     else:
         grid = sy.PrivateGridNetwork(*list(workers.values()))

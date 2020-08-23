@@ -5,6 +5,8 @@ from random import randint, sample
 
 import syft as sy
 import torch as th
+
+th.set_num_threads(1)
 import torch.nn.functional as F
 import numpy as np
 

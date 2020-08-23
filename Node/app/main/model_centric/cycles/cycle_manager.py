@@ -8,6 +8,7 @@ from functools import reduce
 
 import torch as th
 
+th.set_num_threads(1)
 from ...core.exceptions import CycleNotFoundError
 
 # PyGrid modules
