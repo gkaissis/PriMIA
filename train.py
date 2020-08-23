@@ -218,7 +218,6 @@ def setup_pysyft(args, hook, verbose=False):
                 id=crypto_provider_data["id"],
                 verbose=verbose,
             )
-            # workers["crypto_provider"] = crypto_provider
 
     else:
         workers = {
