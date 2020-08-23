@@ -8,6 +8,8 @@ from typing import List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 import torch
+
+torch.set_num_threads(1)
 import tqdm
 from sklearn import metrics as mt
 import syft.frameworks.torch.fl.utils as syft_fl_utils

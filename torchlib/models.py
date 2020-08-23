@@ -1,4 +1,6 @@
 import torch
+
+torch.set_num_threads(1)
 from syft import Plan
 from numpy import prod
 from torch import nn
