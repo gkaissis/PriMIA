@@ -1,4 +1,6 @@
 import torch
+
+torch.set_num_threads(1)
 import syft as sy
 import numpy as np
 from tqdm import tqdm

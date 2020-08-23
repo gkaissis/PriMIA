@@ -8,6 +8,8 @@ import os
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
 import torch
+
+torch.set_num_threads(1)
 import configparser
 import argparse
 import syft as sy
