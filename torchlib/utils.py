@@ -631,7 +631,8 @@ def train_federated(
 
 
 def tensor_iterator(model: "torch.Model") -> "Sequence[Iterator]":
-    """adding relavant iterators for the tensor elements"""
+    """adding relavant iterators for the tensor elements
+    """
     iterators = [
         "parameters",
         "buffers",
@@ -642,8 +643,7 @@ def tensor_iterator(model: "torch.Model") -> "Sequence[Iterator]":
 def secure_aggregation(
     local_model, models, workers, crypto_provider, args, test_params
 ):
-    """Safe Version of the original secure aggregation relying on actually 
-    checking the parameter names and shapes before trying to load them into the model.
+    """(Very) defensive version of the original secure aggregation relying on actually checking the parameter names and shapes before trying to load them into the model.
     """
 
     local_keys = local_model.state_dict().keys()
