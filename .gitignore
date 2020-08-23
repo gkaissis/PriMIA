@@ -153,3 +153,4 @@ one_test_sample/
 src/
 ignore_files/
 PySyft
+*syft*
