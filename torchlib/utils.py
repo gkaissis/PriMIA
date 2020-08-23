@@ -643,7 +643,7 @@ def secure_aggregation(
     local_model, models, workers, crypto_provider, args, test_params
 ):
     """Safe Version of the original secure aggregation relying on actually 
-    checking the parameter names before trying to load them into the model.
+    checking the parameter names and shapes before trying to load them into the model.
     """
 
     local_keys = local_model.state_dict().keys()
