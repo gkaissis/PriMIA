@@ -13,6 +13,7 @@ from sklearn import metrics as mt
 import syft.frameworks.torch.fl.utils as syft_fl_utils
 from syft.frameworks.torch.fl.utils import add_model, scale_model
 from tabulate import tabulate
+from collections import Counter
 
 
 class LearningRateScheduler:
@@ -627,7 +628,7 @@ def train_federated(
     return model
 
 
-def tensor_iterator(model):
+def tensor_iterator(model: "torch.Model") -> "Sequence[Iterator]":
     """adding relavant iterators for the tensor elements"""
     iterators = [
         "parameters",
@@ -639,73 +640,116 @@ def tensor_iterator(model):
 def secure_aggregation(
     local_model, models, workers, crypto_provider, args, test_params
 ):
-    with torch.no_grad():
 
-        # local_tensor_iterator = tensor_iterator(local_model)
-        # remote_tensor_iterator = [tensor_iterator(model)for key, model in models.items()if key != "local_model"]
-        for local_iter, *remote_iter in zip(
-            *(
-                [tensor_iterator(local_model)]
-                + [
-                    tensor_iterator(model)
-                    for key, model in models.items()
-                    if key != "local_model"
-                ]
+    local_keys = local_model.state_dict().keys()
+
+    # make sure we're not getting cheated and some model has been changed behind our backs
+    ids = [name.id for name in workers]
+    remote_keys = []
+    for id_ in ids:
+        remote_keys.extend(list(models[id_].state_dict().keys()))
+
+    c = Counter(remote_keys)
+    assert np.all(
+        list(c.values()) == np.full_like(list(c.values()), len(workers))
+    ) and list(c.keys()) == list(local_keys)
+    # ok we're sure now
+
+    fresh_state_dict = dict()
+    problematic = []
+    for key in list(local_keys):  # which are same as remote_keys for sure now
+        if "num_batches_tracked" in key:
+            continue
+        remote_param_list = []
+        for worker in workers:
+            remote_param_list.append(
+                models[worker.id]
+                .state_dict()[key]
+                .data.copy()
+                .fix_prec()
+                .share(*workers, crypto_provider=crypto_provider, protocol="fss")
+                .get()
             )
-        ):
-            i = 0
-            for local_param, *remote_params in zip(
-                *([local_iter()] + [r() for r in remote_iter])
-            ):
-                i += 1
-                dt = remote_params[0].dtype
-                ## num_batches tracked are ints
-                ## -> irrelevant cause batch norm momentum is on by default
-                if dt != torch.float:
-                    continue
+        remote_shapes = [p.shape for p in remote_param_list]
+        if not len(set(remote_shapes)) == 1:  # parameters have different shapes
+            fresh_state_dict[key] = local_model.state_dict()[
+                key
+            ]  # keep the local version
+            problematic.append(key)
+        else:
+            sumstacked = (
+                torch.sum(torch.stack(remote_param_list), dim=0).get().float_prec()
+            )
+            averaged = sumstacked / len(workers)
+            fresh_state_dict[key] = averaged
+    print(f"Skipped aggregating the following problematic values: {problematic}")
+    local_model.load_state_dict(fresh_state_dict)
 
-                results = []
-                j = 0
-                for r in remote_params:
-                    j += 1
-                    r_copy = r.data.copy()
-                    fixed_p = r_copy.fix_prec()
-                    shared = fixed_p.share(
-                        *workers, crypto_provider=crypto_provider, protocol="fss"
-                    )
-                    gotten = shared.get()
-                    results.append(gotten)
+    # # local_tensor_iterator = tensor_iterator(local_model)
+    # # remote_tensor_iterator = [tensor_iterator(model)for key, model in models.items()if key != "local_model"]
+    # for local_iter, *remote_iter in zip(
+    #     *(
+    #         [tensor_iterator(local_model)]
+    #         + [
+    #             tensor_iterator(model)
+    #             for key, model in models.items()
+    #             if key != "local_model"
+    #         ]
+    #     )
+    # ):
+    #     i = 0
+    #     for local_param, *remote_params in zip(
+    #         *([local_iter()] + [r() for r in remote_iter])
+    #     ):
+    #         i += 1
+    #         dt = remote_params[0].dtype
+    #         ## num_batches tracked are ints
+    #         ## -> irrelevant cause batch norm momentum is on by default
+    #         if dt != torch.float:
+    #             continue
 
-                try:
-                    stacked = torch.stack(results)
-                except Exception as e:
-                    print("stack exception", e, "i", i, "j", j)
-                    raise e
-                try:
-                    param_stack = torch.sum(stacked, dim=0)
-                except Exception as e:
-                    print("sum exception", e)
-                    raise e
+    #         results = []
+    #         j = 0
+    #         for r in remote_params:
+    #             j += 1
+    #             r_copy = r.data.copy()
+    #             fixed_p = r_copy.fix_prec()
+    #             shared = fixed_p.share(
+    #                 *workers, crypto_provider=crypto_provider, protocol="fss"
+    #             )
+    #             gotten = shared.get()
+    #             results.append(gotten)
 
-                # param_stack = torch.sum(
-                #     torch.stack(
-                #         [
-                #             r.data.copy()
-                #             .fix_prec()
-                #             .share(
-                #                 *workers,
-                #                 crypto_provider=crypto_provider,
-                #                 protocol="fss"
-                #             )
-                #             .get()
-                #             for r in remote_params
-                #         ]
-                #     ),
-                #     dim=0,
-                # )
-                param_stack = param_stack.get().float_prec()
-                param_stack /= len(remote_params)
-                local_param.set_(param_stack)
+    #         try:
+    #             stacked = torch.stack(results)
+    #         except Exception as e:
+    #             print("stack exception", e, "i", i, "j", j)
+    #             raise e
+    #         try:
+    #             param_stack = torch.sum(stacked, dim=0)
+    #         except Exception as e:
+    #             print("sum exception", e)
+    #             raise e
+
+    #         # param_stack = torch.sum(
+    #         #     torch.stack(
+    #         #         [
+    #         #             r.data.copy()
+    #         #             .fix_prec()
+    #         #             .share(
+    #         #                 *workers,
+    #         #                 crypto_provider=crypto_provider,
+    #         #                 protocol="fss"
+    #         #             )
+    #         #             .get()
+    #         #             for r in remote_params
+    #         #         ]
+    #         #     ),
+    #         #     dim=0,
+    #         # )
+    #         param_stack = param_stack.get().float_prec()
+    #         param_stack /= len(remote_params)
+    #         local_param.set_(param_stack)
     return local_model
 
 

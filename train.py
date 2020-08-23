@@ -347,10 +347,10 @@ def setup_pysyft(args, hook, verbose=False):
             selected_data.tag("#traindata",)
             selected_targets.tag("#traintargets",)
             worker.load_data([selected_data, selected_targets])
-
-    grid: sy.PrivateGridNetwork = sy.PrivateGridNetwork(
-        *(list(workers.values()) + [crypto_provider])
-    )
+    if crypto_provider:
+        grid = sy.PrivateGridNetwork(*(list(workers.values()) + [crypto_provider]))
+    else:
+        grid = sy.PrivateGridNetwork(*list(workers.values()))
     data = grid.search("#traindata")
     target = grid.search("#traintargets")
     train_loader = {}
