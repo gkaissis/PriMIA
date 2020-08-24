@@ -68,6 +68,10 @@ parser.add_argument(
     "--config", type=str, help="Path to config",
 )
 
+parser.add_argument(
+    "--mean_std_file", type=str, help="Path to mean std file for inference data."
+)
+
 parser.set_defaults(use_test_config=False)
 
 if __name__ == "__main__":
@@ -82,6 +86,7 @@ if __name__ == "__main__":
         test_config={"SQLALCHEMY_DATABASE_URI": db_path},
         data_dir=args.data_directory,
         config_file=args.config,
+        mean_std_file=args.mean_std_file,
     )
     # else:
     # app = create_app(

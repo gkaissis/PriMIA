@@ -390,21 +390,21 @@ def setup_pysyft(args, hook, verbose=False):
         mean = (
             means[0]
             .fix_precision()
-            .share(*workers, crypto_provider=crypto_provider)
+            .share(*workers, crypto_provider=crypto_provider, protocol='fss')
             .get()
         )
         std = (
             stds[0]
             .fix_precision()
-            .share(*workers, crypto_provider=crypto_provider)
+            .share(*workers, crypto_provider=crypto_provider, protocol='fss')
             .get()
         )
         for m, s in zip(means[1:], stds[1:]):
             mean += (
-                m.fix_precision().share(*workers, crypto_provider=crypto_provider).get()
+                m.fix_precision().share(*workers, crypto_provider=crypto_provider, protocol='fss').get()
             )
             std += (
-                s.fix_precision().share(*workers, crypto_provider=crypto_provider).get()
+                s.fix_precision().share(*workers, crypto_provider=crypto_provider, protocol='fss').get()
             )
         mean = mean.get().float_precision() / len(stds)
         std = std.get().float_precision() / len(stds)
@@ -496,6 +496,14 @@ def main(args, verbose=True, optuna_trial=None):
     class_names = None
     # Dataset creation and definition
     if args.train_federated:
+        if args.websockets and not args.unencrypted_aggregation:
+            raise NotImplementedError(
+                "Unfortunately PySyft doesn't support"
+                " this currently without turning off the garbage collector and "
+                "several other issues. Therefore we are not supporting this yet. "
+                "To still train on real nodes turn off secure aggregation with the "
+                "--unencrypted_aggregation flag."
+                )
 
         hook = sy.TorchHook(torch)
         (

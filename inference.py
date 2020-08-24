@@ -88,7 +88,7 @@ class RemoteTensorDataset(torch.utils.data.Dataset):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data_dir", required=True, help="data to classify")
+    parser.add_argument("--data_dir", default=None, help="data to classify")
     parser.add_argument(
         "--model_weights",
         type=str,
@@ -127,27 +127,33 @@ if __name__ == "__main__":
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-    if cmd_args.encrypted_inference:
+    if cmd_args.encrypted_inference or cmd_args.websockets_config:
         hook = sy.TorchHook(torch)
         if cmd_args.websockets_config:
-            worker_dict = read_websocket_config(cmd_args.websocket_config)
-            worker_names = [id_dict["id"] for _, id_dict in worker_dict.items()]
-            assert (
-                "crypto_provider" in worker_names and "data_owner" in worker_names
-            ), "No crypto_provider and data_owner in websockets config"
+            worker_dict = read_websocket_config(cmd_args.websockets_config)
+            accessible_dict = dict()
+            for key, value in worker_dict.items():
+                accessible_dict[value["id"]] = value
+            worker_dict = accessible_dict
+            worker_names = [name for name in worker_dict.keys()]
+            assert "data_owner" in worker_names, "No data_owner in websockets config"
             data_owner = sy.grid.clients.data_centric_fl_client.DataCentricFLClient(
                 hook,
                 "http://{:s}:{:s}".format(
-                    worker_dict["data_owner"]["id"], worker_dict["data_owner"]["port"]
+                    worker_dict["data_owner"]["host"], worker_dict["data_owner"]["port"]
                 ),
             )
-            crypto_provider = sy.grid.clients.data_centric_fl_client.DataCentricFLClient(
-                hook,
-                "http://{:s}:{:s}".format(
-                    worker_dict["crypto_provider"]["id"],
-                    worker_dict["crypto_provider"]["port"],
-                ),
-            )
+            if cmd_args.encrypted_inference:
+                assert (
+                    "crypto_provider" in worker_names
+                ), "No crypto_provider in websockets config"
+                crypto_provider = sy.grid.clients.data_centric_fl_client.DataCentricFLClient(
+                    hook,
+                    "http://{:s}:{:s}".format(
+                        worker_dict["crypto_provider"]["host"],
+                        worker_dict["crypto_provider"]["port"],
+                    ),
+                )
         else:
             data_owner = sy.VirtualWorker(hook, id="data_owner")
             crypto_provider = sy.VirtualWorker(hook, id="crypto_provider")
@@ -214,8 +220,8 @@ if __name__ == "__main__":
             data = torch.stack(data)
             data.tag("#inference_data")
             data_owner.load_data([data])
-    if cmd_args.encrypted_inference:
-        grid = sy.PrivateGridNetwork(data_owner)
+    if cmd_args.websockets_config or cmd_args.encrypted_inference:
+        grid = sy.PrivateGridNetwork(data_owner, crypto_provider, model_owner)
         data_tensor = grid.search("#inference_data")["data_owner"][0]
         dataset = RemoteTensorDataset(data_tensor)
 
@@ -279,8 +285,11 @@ if __name__ == "__main__":
     if args.encrypted_inference:
         mean, std = mean.send(data_owner), std.send(data_owner)
     with torch.no_grad():
-        for data in tqdm(
-            dataset, total=len(dataset), desc="performing inference", leave=False,
+        for i, data in tqdm(
+            enumerate(dataset),
+            total=len(dataset),
+            desc="performing inference",
+            leave=False,
         ):
             ## TODO: remove
             # if type(data) == tuple:
@@ -295,7 +304,7 @@ if __name__ == "__main__":
                 data = data.unsqueeze(0)
             data = data.to(device)
             ## normalize data
-            if args.encrypted_inference:
+            if cmd_args.encrypted_inference:
                 data = (
                     data.fix_precision(precision_fractional=4, dtype="long")
                     .share(
@@ -306,11 +315,16 @@ if __name__ == "__main__":
                     )
                     .get()
                 )
+            elif cmd_args.websockets_config is not None:
+                data = data.copy().get()
             output = model(data)
             if args.encrypted_inference:
                 output = output.get().float_prec()
             pred = output.argmax(dim=1)
             total_pred.append(pred.detach().cpu().item())
+            ## should be unneccessary but somehow required
+            if len(dataset) == i + 1:
+                break
     pred_dict = {"Inference Results": dict(enumerate(total_pred))}
     sys.stdout.write(json.dumps(pred_dict))
     from collections import Counter

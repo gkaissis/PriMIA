@@ -686,7 +686,7 @@ def secure_aggregation(
                 .state_dict()[key]
                 .data.copy()
                 .fix_prec()
-                .share(*workers, crypto_provider=crypto_provider)
+                .share(*workers, crypto_provider=crypto_provider, protocol='fss')
                 .get()
             )
         remote_shapes = [p.shape for p in remote_param_list]
