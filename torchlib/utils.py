@@ -671,12 +671,12 @@ def secure_aggregation(
         assert len(set(remote_shapes)) == 1 and local_shape == next(
             iter(set(remote_shapes))
         ), "Shape mismatch BEFORE sending and getting"
-
+    # print(list(local_keys))
     # If we have reached here, we are pretty sure the models are identical down to the shapes
     fresh_state_dict = dict()
     for key in list(local_keys):  # which are same as remote_keys for sure now
         if "num_batches_tracked" in str(key):
-            # print(f"Skipping loading {key}")
+            print(f"Skipping loading {key}")
             continue
         local_shape = local_model.state_dict()[key].shape
         remote_param_list = []
@@ -686,7 +686,7 @@ def secure_aggregation(
                 .state_dict()[key]
                 .data.copy()
                 .fix_prec()
-                .share(*workers, crypto_provider=crypto_provider, protocol="fss")
+                .share(*workers, crypto_provider=crypto_provider)
                 .get()
             )
         remote_shapes = [p.shape for p in remote_param_list]

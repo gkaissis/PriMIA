@@ -11,7 +11,7 @@ doc_install:
 #Cleanup
 clean_python:
 	rm -rf .mypy_cache
-	rm -rf torchlib/__pycache__
+	rm -rf torchlib/__pycache__ __pycache__
 
 clean_weights:
 	rm -rf model_weights
