@@ -109,7 +109,7 @@ class Arguments:
             "config", "weight_classes", fallback=False
         )
         self.vertical_flip_prob = config.getfloat(
-            "augmentation", "vertical_flip_prob", fallback=0.0
+            "albumentations", "vertical_flip_prob", fallback=0.0
         )
         self.rotation = config.getfloat("augmentation", "rotation", fallback=0.0)
         self.translate = config.getfloat("augmentation", "translate", fallback=0.0)
@@ -407,7 +407,7 @@ class To_one_hot(torch.nn.Module):
         return one_hot
 
 
-def save_config_results(args, roc_auc: float, timestamp: str, table: str):
+def save_config_results(args, score: float, timestamp: str, table: str):
     members = [
         attr
         for attr in dir(args)
@@ -420,7 +420,7 @@ def save_config_results(args, roc_auc: float, timestamp: str, table: str):
         df = pd.read_csv(table)
     new_row = dict(zip(members, [getattr(args, x) for x in members]))
     new_row["timestamp"] = timestamp
-    new_row["best_validation_roc_auc"] = roc_auc
+    new_row["best_validation_score"] = score
     df = df.append(new_row, ignore_index=True)
     df.to_csv(table, index=False)
 
@@ -626,7 +626,8 @@ def train_federated(
             env=vis_params["vis_env"],
         )
     else:
-        print("Train Epoch: {} \tLoss: {:.6f}".format(epoch, avg_loss,))
+        if verbose:
+            print("Train Epoch: {} \tLoss: {:.6f}".format(epoch, avg_loss,))
     return model
 
 
@@ -874,7 +875,7 @@ def synchronizer(  # never gets called on websockets
             )
         if test_params and cur_batch > (save_after * save_iter):
             model = avg_model.copy()
-            _, roc_auc = test(
+            _, score = test(
                 args,
                 model,
                 test_params["device"],
@@ -893,7 +894,7 @@ def synchronizer(  # never gets called on websockets
             )
 
             save_model(model, test_params["optimizer"], model_path, args, epoch)
-            test_params["roc_auc_scores"].append(roc_auc)
+            test_params["scores"].append(score)
             test_params["model_paths"].append(model_path)
 
             save_iter += 1"""
@@ -1138,7 +1139,8 @@ def test(
         total_scores = total_scores / total_scores.sum(axis=1)[:, np.newaxis]
 
         roc_auc = mt.roc_auc_score(total_target, total_scores, multi_class="ovo")
-        objective = 100.0 * roc_auc
+        matthews_coeff = mt.matthews_corrcoef(total_target, total_pred)
+        objective = 100.0 * matthews_coeff
         if verbose:
             conf_matrix = mt.confusion_matrix(total_target, total_pred)
             report = mt.classification_report(
@@ -1149,7 +1151,7 @@ def test(
                     conf_matrix,
                     report,
                     roc_auc=roc_auc,
-                    matthews_coeff=mt.matthews_corrcoef(total_target, total_pred),
+                    matthews_coeff=matthews_coeff,
                     class_names=class_names,
                     epoch=epoch,
                 )
@@ -1167,7 +1169,7 @@ def test(
                 X=np.asarray([epoch]),
                 Y=np.asarray([objective / 100.0]),
                 win="loss_win",
-                name="ROC AUC",
+                name="matthews coeff",
                 update="append",
                 env=vis_params["vis_env"],
             )

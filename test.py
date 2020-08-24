@@ -91,8 +91,8 @@ if __name__ == "__main__":
             a.Resize(args.inference_resolution, args.inference_resolution),
             a.CenterCrop(args.inference_resolution, args.inference_resolution),
         ]
-        # if hasattr(args, "clahe") and args.clahe:
-        #     tf.append(a.CLAHE(always_apply=True, p=1.0))
+        if hasattr(args, "clahe") and args.clahe:
+            tf.append(a.CLAHE(always_apply=True, clip_limit=(1, 1)))
         tf.extend(
             [
                 a.ToFloat(max_value=255.0),
