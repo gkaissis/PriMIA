@@ -676,7 +676,6 @@ def secure_aggregation(
     fresh_state_dict = dict()
     for key in list(local_keys):  # which are same as remote_keys for sure now
         if "num_batches_tracked" in str(key):
-            print(f"Skipping loading {key}")
             continue
         local_shape = local_model.state_dict()[key].shape
         remote_param_list = []

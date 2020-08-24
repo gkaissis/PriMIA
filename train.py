@@ -766,53 +766,52 @@ def main(args, verbose=True, optuna_trial=None):
                 env=vis_env,
             )
 
-        try:
-            if args.train_federated:
-                model = train_federated(
-                    args,
-                    model,
-                    device,
-                    train_loader,
-                    optimizer,
-                    epoch,
-                    loss_fn,
-                    crypto_provider,
-                    test_params=test_params,
-                    vis_params=vis_params,
-                    verbose=verbose,
-                )
+        if args.train_federated:
+            model = train_federated(
+                args,
+                model,
+                device,
+                train_loader,
+                optimizer,
+                epoch,
+                loss_fn,
+                crypto_provider,
+                test_params=test_params,
+                vis_params=vis_params,
+                verbose=verbose,
+            )
 
-            else:
-                model = train(
-                    args,
-                    model,
-                    device,
-                    train_loader,
-                    optimizer,
-                    epoch,
-                    loss_fn,
-                    num_classes,
-                    vis_params=vis_params,
-                    verbose=verbose,
-                )
-        except Exception as e:
-            if args.websockets:
-                warn("An exception occured - restarting websockets")
-                try:
-                    (
-                        train_loader,
-                        val_loader,
-                        total_L,
-                        workers,
-                        worker_names,
-                        crypto_provider,
-                        val_mean_std,
-                    ) = setup_pysyft(args, hook, verbose=cmd_args.verbose)
-                except Exception as e:
-                    print("restarting failed")
-                    raise e
-            else:
-                raise e
+        else:
+            model = train(
+                args,
+                model,
+                device,
+                train_loader,
+                optimizer,
+                epoch,
+                loss_fn,
+                num_classes,
+                vis_params=vis_params,
+                verbose=verbose,
+            )
+        # except Exception as e:
+        # if args.websockets:
+        #     warn("An exception occured - restarting websockets")
+        #     try:
+        #         (
+        #             train_loader,
+        #             val_loader,
+        #             total_L,
+        #             workers,
+        #             worker_names,
+        #             crypto_provider,
+        #             val_mean_std,
+        #         ) = setup_pysyft(args, hook, verbose=cmd_args.verbose)
+        #     except Exception as e:
+        #         print("restarting failed")
+        #         raise e
+        # else:
+        #     raise e
 
         if (epoch % args.test_interval) == 0:
             _, roc_auc = test(
