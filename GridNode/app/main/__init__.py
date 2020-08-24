@@ -3,6 +3,8 @@ from flask import Blueprint
 import syft as sy
 import torch as th
 
+th.set_num_threads(1)
+
 from typing import List
 from typing import Tuple
 from typing import Union

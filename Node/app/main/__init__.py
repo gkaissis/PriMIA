@@ -1,5 +1,7 @@
 import syft as sy
 import torch as th
+
+th.set_num_threads(1)
 from flask import Blueprint
 
 from .. import db, BaseModel, executor

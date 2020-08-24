@@ -4,6 +4,8 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 import syft as sy
 import torch
 
+torch.set_num_threads(1)
+
 hook = sy.TorchHook(torch)
 client = sy.workers.node_client.NodeClient(hook, "http://127.0.0.1:8777", id="alice")
 print(client)

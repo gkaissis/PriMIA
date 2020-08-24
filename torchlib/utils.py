@@ -8,11 +8,14 @@ from typing import List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 import torch
+
+torch.set_num_threads(1)
 import tqdm
 from sklearn import metrics as mt
 import syft.frameworks.torch.fl.utils as syft_fl_utils
 from syft.frameworks.torch.fl.utils import add_model, scale_model
 from tabulate import tabulate
+from collections import Counter
 
 
 class LearningRateScheduler:
@@ -601,7 +604,7 @@ def train_federated(
 
         avg_loss = np.average([l["final"] for l in loss_dict.values()], weights=weights)
 
-    else:
+    else:  # encrypted aggregation
         model, avg_loss = secure_aggregation_epoch(
             args,
             model,
@@ -628,8 +631,9 @@ def train_federated(
     return model
 
 
-def tensor_iterator(model):
-    """adding relavant iterators for the tensor elements"""
+def tensor_iterator(model: "torch.Model") -> "Sequence[Iterator]":
+    """adding relavant iterators for the tensor elements
+    """
     iterators = [
         "parameters",
         "buffers",
@@ -640,57 +644,73 @@ def tensor_iterator(model):
 def secure_aggregation(
     local_model, models, workers, crypto_provider, args, test_params
 ):
-    with torch.no_grad():
-        for local_iter, *remote_iter in zip(
-            *(
-                [tensor_iterator(local_model)]
-                + [
-                    tensor_iterator(model)
-                    for key, model in models.items()
-                    if key != "local_model"
-                ]
+    """(Very) defensive version of the original secure aggregation relying on actually checking the parameter names and shapes before trying to load them into the model.
+    """
+
+    local_keys = local_model.state_dict().keys()
+
+    # make sure we're not getting cheated and some key or shape has been changed behind our backs
+    ids = [name.id for name in workers]
+    remote_keys = []
+    for id_ in ids:
+        remote_keys.extend(list(models[id_].state_dict().keys()))
+
+    c = Counter(remote_keys)
+    assert np.all(
+        list(c.values()) == np.full_like(list(c.values()), len(workers))
+    ) and list(c.keys()) == list(
+        local_keys
+    )  # we know that the keys match exactly and are all present
+
+    for key in list(local_keys):
+        if "num_batches_tracked" in key:
+            continue
+        local_shape = local_model.state_dict()[key].shape
+        remote_shapes = [
+            models[worker.id].state_dict()[key].shape for worker in workers
+        ]
+        assert len(set(remote_shapes)) == 1 and local_shape == next(
+            iter(set(remote_shapes))
+        ), "Shape mismatch BEFORE sending and getting"
+    # print(list(local_keys))
+    # If we have reached here, we are pretty sure the models are identical down to the shapes
+    fresh_state_dict = dict()
+    for key in list(local_keys):  # which are same as remote_keys for sure now
+        if "num_batches_tracked" in str(key):
+            print(f"Skipping loading {key}")
+            continue
+        local_shape = local_model.state_dict()[key].shape
+        remote_param_list = []
+        for worker in workers:
+            remote_param_list.append(
+                models[worker.id]
+                .state_dict()[key]
+                .data.copy()
+                .fix_prec()
+                .share(*workers, crypto_provider=crypto_provider)
+                .get()
             )
-        ):
-            for local_param, *remote_params in zip(
-                *([local_iter()] + [r() for r in remote_iter])
-            ):
-                dt = remote_params[0].dtype
-                ## num_batches tracked are ints
-                ## -> irrelevant cause batch norm momentum is on by default
-                if dt != torch.float:
-                    continue
-                param_stack = torch.sum(
-                    torch.stack(
-                        [
-                            r.data.copy()
-                            .fix_prec()
-                            .share(
-                                *workers,
-                                crypto_provider=crypto_provider,
-                                protocol="fss"
-                            )
-                            .get()
-                            for r in remote_params
-                        ]
-                    ),
-                    dim=0,
-                )
-                param_stack = param_stack.get().float_prec()
-                param_stack /= len(remote_params)
-                local_param.set_(param_stack)
+        remote_shapes = [p.shape for p in remote_param_list]
+        assert len(set(remote_shapes)) == 1 and local_shape == next(
+            iter(set(remote_shapes))
+        ), "Shape mismatch AFTER sending and getting"
+        sumstacked = torch.sum(torch.stack(remote_param_list), dim=0).get().float_prec()
+        averaged = sumstacked / len(workers)
+        fresh_state_dict[key] = averaged
+    local_model.load_state_dict(fresh_state_dict)
     return local_model
 
 
-def send_new_models(local_model, models):
+def send_new_models(local_model, models):  # original version
     for worker in models.keys():
         if worker == "local_model":
             continue
-        if local_model.location:
+        if local_model.location is not None:  # local model is at worker
             local_model.get()
         local_model.send(worker)
         models[worker].load_state_dict(local_model.state_dict())
     local_model.get()
-    return models
+    return models  # returns models updated on workers
 
 
 def secure_aggregation_epoch(
@@ -706,12 +726,18 @@ def secure_aggregation_epoch(
     verbose=True,
 ):
     for worker in train_loaders.keys():
-        if models[worker.id].location:
-            continue
-        models[worker.id].send(worker)
-        loss_fns[worker.id] = loss_fns[worker.id].send(worker)
-    # 1. Send new version of the model
-    models = send_new_models(models["local_model"], models)
+        if models[worker.id].location is not None:
+            continue  # model + loss already at a worker, 783/784 don't happen
+        else:  # location is None -> local model
+            models[worker.id].send(worker)
+            loss_fns[worker.id] = loss_fns[worker.id].send(
+                worker
+            )  # stuff sent to worker
+
+    models = send_new_models(
+        models["local_model"], models
+    )  # stuff sent to worker again (on 1st epoch it's irrelevant, afterwards it's the model updating)
+    # @a1302z we could refactor this to be more elegant and not do this twice in the first epoch
 
     if not args.keep_optim_dict:
         for worker in optimizers.keys():
@@ -719,7 +745,9 @@ def secure_aggregation_epoch(
             ## TODO implement for SGD (also in train_federated)
             if args.optimizer == "Adam":
                 kwargs["betas"] = (args.beta1, args.beta2)
-            optimizers[worker] = torch.optim.Adam(models[worker].parameters(), **kwargs)
+            optimizers[worker] = torch.optim.Adam(
+                models[worker].parameters(), **kwargs
+            )  # no send operation here?
 
     avg_loss = []
 
@@ -768,31 +796,6 @@ def secure_aggregation_epoch(
                     optimizers[worker] = torch.optim.Adam(
                         models[worker].parameters(), **kwargs
                     )
-    # 2. Train remotely the models
-    # for worker in tqdm.tqdm(
-    #     train_loaders.keys(),
-    #     total=len(train_loaders),
-    #     desc="Training with secure aggregation",
-    #     leave=False,
-    # ):
-    #     model = models[worker.id]
-    #     optimizer = optimizers[worker.id]
-    #     dataloader = train_loaders[worker]
-    #     loss_fn = loss_fns[worker.id]
-    #     for (data, target) in tqdm.tqdm(
-    #         dataloader,
-    #         total=len(dataloader),
-    #         desc="train on {:s}".format(worker.id),
-    #         leave=False,
-    #     ):
-    #         optimizer.zero_grad()
-    #         pred = model(data)
-    #         loss = loss_fn(pred, target)
-    #         loss.backward()
-    #         optimizer.step()
-    #         avg_loss.append(loss.detach().cpu().get().item())
-
-    # 3. Secure aggregation of the updated models
 
     models["local_model"] = secure_aggregation(
         models["local_model"],
@@ -807,7 +810,7 @@ def secure_aggregation_epoch(
     return models, avg_loss
 
 
-def synchronizer(
+def synchronizer(  # never gets called on websockets
     args,
     result_dict,
     waiting_for_sync_dict,
@@ -899,7 +902,7 @@ def synchronizer(
         sync_completed.value = True
 
 
-def train_on_server(
+def train_on_server(  # never gets called on websockets
     args,
     model,
     worker,
@@ -960,7 +963,7 @@ def train_on_server(
     # optim.optimizers[worker.id] = optimizer
 
 
-def train(
+def train(  # never called on websockets
     args,
     model,
     device,

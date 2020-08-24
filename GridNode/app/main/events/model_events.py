@@ -1,6 +1,8 @@
 import json
 import torch as th
 
+th.set_num_threads(1)
+
 import syft as sy
 from syft.codes import RESPONSE_MSG
 from syft.generic.pointers.pointer_tensor import PointerTensor

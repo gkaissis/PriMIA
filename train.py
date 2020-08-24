@@ -12,6 +12,8 @@ from warnings import warn
 import numpy as np
 import syft as sy
 import torch
+
+torch.set_num_threads(1)
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
@@ -204,8 +206,7 @@ def setup_pysyft(args, hook, verbose=False):
     if args.websockets:
         if args.weight_classes or (args.mixup and args.data_dir == "mnist"):
             raise NotImplementedError(
-                "weighted loss as well as mixup in combination"
-                " with mnist are not implemented currently"
+                "Weighted loss/ MixUp in combination with MNIST are currently not implemented."
             )
         workers = {
             worker[
@@ -363,8 +364,10 @@ def setup_pysyft(args, hook, verbose=False):
             selected_data.tag("#traindata",)
             selected_targets.tag("#traintargets",)
             worker.load_data([selected_data, selected_targets])
-
-    grid: sy.PrivateGridNetwork = sy.PrivateGridNetwork(*workers.values())
+    if crypto_provider is not None:
+        grid = sy.PrivateGridNetwork(*(list(workers.values()) + [crypto_provider]))
+    else:
+        grid = sy.PrivateGridNetwork(*list(workers.values()))
     data = grid.search("#traindata")
     target = grid.search("#traintargets")
     train_loader = {}
