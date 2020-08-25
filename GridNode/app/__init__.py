@@ -38,6 +38,7 @@ def create_app(
     database_url=None,
     data_dir: str = None,
     config_file: str = None,
+    mean_std_file: str = None,
 ):
     """ Create / Configure flask socket application instance.
         
@@ -76,7 +77,11 @@ def create_app(
     # add data
     if data_dir:
         import configparser
+        import albumentations as a
+        from inference import PathDataset
         from torchlib.utils import Arguments
+        from torchlib.dicomtools import CombinedLoader
+        from torchlib.dataloader import AlbumentationsTorchTransform
         from os import path
         from argparse import Namespace
         from random import seed as r_seed
@@ -99,7 +104,45 @@ def create_app(
         np.random.seed(args.seed)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
-        if args.dataset == "mnist":
+        if node_id == "data_owner":
+            print("setting up an data to be remotely classified.")
+            tf = [
+                a.Resize(args.inference_resolution, args.inference_resolution),
+                a.CenterCrop(args.inference_resolution, args.inference_resolution),
+            ]
+            if hasattr(args, "clahe") and args.clahe:
+                tf.append(a.CLAHE(always_apply=True, clip_limit=(1, 1)))
+            if mean_std_file:
+                mean_std = torch.load(mean_std_file)
+                if "val_mean_std" in mean_std:
+                    mean_std = mean_std["val_mean_std"]
+                mean, std = mean_std
+            else:
+                raise RuntimeError(
+                    "To set up a data owner for inference we need a file which tells"
+                    " us how to normalize the data."
+                )
+            tf.extend(
+                [
+                    a.ToFloat(max_value=255.0),
+                    a.Normalize(
+                        mean.cpu().numpy()[None, None, :],
+                        std.cpu().numpy()[None, None, :],
+                        max_pixel_value=1.0,
+                    ),
+                ]
+            )
+            tf = AlbumentationsTorchTransform(a.Compose(tf))
+            loader = CombinedLoader()
+
+            dataset = PathDataset(data_dir, transform=tf, loader=loader,)
+            data = []
+            for d in tqdm(dataset, total=len(dataset), leave=False, desc="load data"):
+                data.append(d)
+            data = torch.stack(data)  # pylint:disable=no-member
+            data.tag("#inference_data")
+            local_worker.load_data([data])
+        elif args.dataset == "mnist":
             node_id = local_worker.id
             KEEP_LABELS_DICT = {
                 "alice": [0, 1, 2, 3],
