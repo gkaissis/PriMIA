@@ -390,21 +390,25 @@ def setup_pysyft(args, hook, verbose=False):
         mean = (
             means[0]
             .fix_precision()
-            .share(*workers, crypto_provider=crypto_provider, protocol='fss')
+            .share(*workers, crypto_provider=crypto_provider, protocol="fss")
             .get()
         )
         std = (
             stds[0]
             .fix_precision()
-            .share(*workers, crypto_provider=crypto_provider, protocol='fss')
+            .share(*workers, crypto_provider=crypto_provider, protocol="fss")
             .get()
         )
         for m, s in zip(means[1:], stds[1:]):
             mean += (
-                m.fix_precision().share(*workers, crypto_provider=crypto_provider, protocol='fss').get()
+                m.fix_precision()
+                .share(*workers, crypto_provider=crypto_provider, protocol="fss")
+                .get()
             )
             std += (
-                s.fix_precision().share(*workers, crypto_provider=crypto_provider, protocol='fss').get()
+                s.fix_precision()
+                .share(*workers, crypto_provider=crypto_provider, protocol="fss")
+                .get()
             )
         mean = mean.get().float_precision() / len(stds)
         std = std.get().float_precision() / len(stds)
@@ -503,7 +507,7 @@ def main(args, verbose=True, optuna_trial=None):
                 "several other issues. Therefore we are not supporting this yet. "
                 "To still train on real nodes turn off secure aggregation with the "
                 "--unencrypted_aggregation flag."
-                )
+            )
 
         hook = sy.TorchHook(torch)
         (
@@ -673,36 +677,28 @@ def main(args, verbose=True, optuna_trial=None):
     else:
         model = model_type(**model_args)
 
+    opt_kwargs = {"lr": args.lr, "weight_decay": args.weight_decay}
     if args.optimizer == "SGD":
-        optimizer = optim.SGD(
-            model.parameters(), lr=args.lr, weight_decay=args.weight_decay,
-        )  # TODO momentum is not supported at the moment
+        opt = optim.SGD
     elif args.optimizer == "Adam":
-        optimizer = (
-            {
-                idt: optim.Adam(
-                    m.parameters(),
-                    lr=args.lr,
-                    betas=(args.beta1, args.beta2),
-                    weight_decay=args.weight_decay,
-                )
-                for idt, m in model.items()
-                if idt not in ["local_model", "crypto_provider"]
-            }
-            if args.train_federated
-            else optim.Adam(
-                model.parameters(),
-                lr=args.lr,
-                betas=(args.beta1, args.beta2),
-                weight_decay=args.weight_decay,
-            )
-        )
+        opt = optim.Adam
+        opt_kwargs["betas"] = (args.beta1, args.beta2)
     else:
         raise NotImplementedError("optimization not implemented")
         # if args.train_federated and not args.secure_aggregation:
         #     from syft.federated.floptimizer import Optims
 
         # optimizer = Optims(worker_names, optimizer)
+
+    optimizer = (
+        {
+            idt: opt(m.parameters(), **opt_kwargs)
+            for idt, m in model.items()
+            if idt not in ["local_model", "crypto_provider"]
+        }
+        if args.train_federated
+        else opt(model.parameters(), **opt_kwargs)
+    )
     loss_args = {"weight": cw, "reduction": "mean"}
     if args.mixup or (args.weight_classes and args.train_federated):
         loss_fn = Cross_entropy_one_hot
@@ -822,7 +818,6 @@ def main(args, verbose=True, optuna_trial=None):
                 verbose=verbose,
             )
         # except Exception as e:
-
 
         if (epoch % args.test_interval) == 0:
             _, matthews = test(

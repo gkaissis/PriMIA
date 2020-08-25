@@ -833,7 +833,12 @@ def secure_aggregation_epoch(
             ## TODO implement for SGD (also in train_federated)
             if args.optimizer == "Adam":
                 kwargs["betas"] = (args.beta1, args.beta2)
-            optimizers[worker] = torch.optim.Adam(
+                opt = torch.optim.Adam
+            elif args.optimizer == "SGD":
+                opt = torch.optim.SGD
+            else:
+                raise NotImplementedError("only Adam or SGD supported.")
+            optimizers[worker] = opt(
                 models[worker].parameters(), **kwargs
             )  # no send operation here?
 
@@ -882,9 +887,12 @@ def secure_aggregation_epoch(
                     ## TODO implement for SGD (also in train_federated)
                     if args.optimizer == "Adam":
                         kwargs["betas"] = (args.beta1, args.beta2)
-                    optimizers[worker] = torch.optim.Adam(
-                        models[worker].parameters(), **kwargs
-                    )
+                        opt = torch.optim.Adam
+                    elif args.optimizer == "SGD":
+                        opt = torch.optim.SGD
+                    else:
+                        raise NotImplementedError("only Adam or SGD supported.")
+                    optimizers[worker] = opt(models[worker].parameters(), **kwargs)
 
     models["local_model"] = aggregation(
         models["local_model"],
