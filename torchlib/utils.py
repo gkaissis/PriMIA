@@ -16,6 +16,7 @@ import syft.frameworks.torch.fl.utils as syft_fl_utils
 from syft.frameworks.torch.fl.utils import add_model, scale_model
 from tabulate import tabulate
 from collections import Counter
+from copy import deepcopy
 
 
 class LearningRateScheduler:
@@ -426,7 +427,7 @@ def save_config_results(args, score: float, timestamp: str, table: str):
 
 
 ## Adaption of federated averaging from syft with option of weights
-def federated_avg(models: dict, weights: Optional[torch.Tensor] = None):
+def federated_avg(models: dict, weights=None):
     """Calculate the federated average of a dictionary containing models.
        The models are extracted from the dictionary
        via the models.values() command.
@@ -440,9 +441,9 @@ def federated_avg(models: dict, weights: Optional[torch.Tensor] = None):
     """
     if weights:
         model = None
-        for id, partial_model in models.items():
+        for idt, partial_model in models.items():
             scaled_model = scale_model(
-                partial_model, weights[id]
+                partial_model, weights[idt]
             )  # @a1302z are we consciously overwriting the id keyword here?
             if model:
                 model = add_model(model, scaled_model)
@@ -499,6 +500,14 @@ def train_federated(
     vis_params=None,
     verbose=True,
 ):
+
+    total_batches = 0
+    total_batches = sum([len(tl) for tl in train_loaders.values()])
+    w_dict = None
+    if args.weighted_averaging:
+        w_dict = {
+            worker.id: len(tl) / total_batches for worker, tl in train_loaders.items()
+        }
     if args.unencrypted_aggregation:
         mng = mp.Manager()
         # model.train()
@@ -517,20 +526,6 @@ def train_federated(
             waiting_for_sync_dict[worker.id] = False
             progress_dict[worker.id] = (0, len(train_loaders[worker]))
 
-        total_batches = 0
-        weights = []
-        for idt, (_, batches) in progress_dict.items():
-            total_batches += batches
-            weights.append(batches)
-        weights = np.array(weights) / total_batches
-        if args.weighted_averaging:
-            w_dict = {}
-            for weight, idt in zip(weights, progress_dict.keys()):
-                w_dict[idt] = weight
-        else:
-            w_dict = {
-                idt: 1.0 / len(progress_dict.keys()) for idt in progress_dict.keys()
-            }
         jobs = [
             mp.Process(
                 name="{:s} training".format(worker.id),
@@ -602,7 +597,10 @@ def train_federated(
                     kwargs["betas"] = (args.beta1, args.beta2)
                 optimizer[w.id].__init__(model[w.id].parameters(), **kwargs)
 
-        avg_loss = np.average([l["final"] for l in loss_dict.values()], weights=weights)
+        avg_loss = np.average(
+            [l["final"] for l in loss_dict.values()],
+            weights=[w_dict[w] for w in loss_dict.keys()] if w_dict else None,
+        )
 
     else:  # encrypted aggregation
         model, avg_loss = secure_aggregation_epoch(
@@ -615,6 +613,7 @@ def train_federated(
             loss_fn,
             crypto_provider,
             test_params=test_params,
+            weights=w_dict,
         )
     if args.visdom:
         vis_params["vis"].line(
@@ -641,8 +640,15 @@ def tensor_iterator(model: "torch.Model") -> "Sequence[Iterator]":
     return [getattr(model, i) for i in iterators]
 
 
-def secure_aggregation(
-    local_model, models, workers, crypto_provider, args, test_params
+def aggregation(
+    local_model,
+    models,
+    workers,
+    crypto_provider,
+    args,
+    test_params,
+    weights=None,
+    secure=True,
 ):
     """(Very) defensive version of the original secure aggregation relying on actually checking the parameter names and shapes before trying to load them into the model.
     """
@@ -650,7 +656,7 @@ def secure_aggregation(
     local_keys = local_model.state_dict().keys()
 
     # make sure we're not getting cheated and some key or shape has been changed behind our backs
-    ids = [name.id for name in workers]
+    ids = [name if type(name) == str else name.id for name in workers]
     remote_keys = []
     for id_ in ids:
         remote_keys.extend(list(models[id_].state_dict().keys()))
@@ -667,7 +673,8 @@ def secure_aggregation(
             continue
         local_shape = local_model.state_dict()[key].shape
         remote_shapes = [
-            models[worker.id].state_dict()[key].shape for worker in workers
+            models[worker if type(worker) == str else worker.id].state_dict()[key].shape
+            for worker in workers
         ]
         assert len(set(remote_shapes)) == 1 and local_shape == next(
             iter(set(remote_shapes))
@@ -681,23 +688,104 @@ def secure_aggregation(
         local_shape = local_model.state_dict()[key].shape
         remote_param_list = []
         for worker in workers:
-            remote_param_list.append(
-                models[worker.id]
-                .state_dict()[key]
-                .data.copy()
-                .fix_prec()
-                .share(*workers, crypto_provider=crypto_provider, protocol='fss')
-                .get()
-            )
+            if secure:
+                remote_param_list.append(
+                    (
+                        models[worker if type(worker) == str else worker.id]
+                        .state_dict()[key]
+                        .data.copy()
+                        * (
+                            weights[worker if type(worker) == str else worker.id]
+                            if weights
+                            else 1
+                        )
+                    )
+                    .fix_prec()
+                    .share(*workers, crypto_provider=crypto_provider, protocol="fss")
+                    .get()
+                )
+            else:
+                remote_param_list.append(
+                    models[worker if type(worker) == str else worker.id]
+                    .state_dict()[key]
+                    .data.copy()
+                    * (
+                        weights[worker if type(worker) == str else worker.id]
+                        if weights
+                        else 1
+                    )
+                )
+
         remote_shapes = [p.shape for p in remote_param_list]
         assert len(set(remote_shapes)) == 1 and local_shape == next(
             iter(set(remote_shapes))
         ), "Shape mismatch AFTER sending and getting"
-        sumstacked = torch.sum(torch.stack(remote_param_list), dim=0).get().float_prec()
-        averaged = sumstacked / len(workers)
-        fresh_state_dict[key] = averaged
+        if secure:
+            sumstacked = (
+                torch.sum(torch.stack(remote_param_list), dim=0).get().float_prec()
+            )
+        else:
+            sumstacked = torch.sum(torch.stack(remote_param_list), dim=0)
+        fresh_state_dict[key] = sumstacked if weights else sumstacked / len(workers)
     local_model.load_state_dict(fresh_state_dict)
     return local_model
+
+
+# def aggregation_old(
+#     local_model,
+#     models,
+#     workers,
+#     crypto_provider,
+#     args,
+#     test_params,
+#     weights=None,
+#     secure=True,
+# ):
+#     with torch.no_grad():
+#         local_iter = tensor_iterator(local_model)[0]
+#         remote_iter = {
+#             key: tensor_iterator(model)[0]()
+#             for key, model in models.items()
+#             if key != "local_model"
+#         }
+#         for local_param in local_iter():
+#             remote_params = {w: next(r) for w, r in remote_iter.items()}
+#             dt = remote_params[list(remote_iter.keys())[0]].dtype
+#             ## num_batches tracked are ints
+#             ## -> irrelevant cause batch norm momentum is on by default
+#             if dt != torch.float:
+#                 continue
+#             if secure:
+#                 param_stack = torch.sum(
+#                     torch.stack(
+#                         [
+#                             r.data.copy()
+#                             .fix_prec()
+#                             .share(
+#                                 *workers,
+#                                 crypto_provider=crypto_provider,
+#                                 protocol="fss"
+#                             )
+#                             .get()
+#                             * weights[w]
+#                             for w, r in remote_params.items()
+#                         ]
+#                     ),
+#                     dim=0,
+#                 )
+#             else:
+#                 param_stack = torch.sum(
+#                     torch.stack(
+#                         [r.data.copy() * weights[w] for w, r in remote_params.items()]
+#                     ),
+#                     dim=0,
+#                 )
+#             if secure:
+#                 param_stack = param_stack.get().float_prec()
+#             if weights is None:
+#                 param_stack /= len(remote_params)
+#             local_param.set_(param_stack)
+#     return local_model
 
 
 def send_new_models(local_model, models):  # original version
@@ -721,6 +809,7 @@ def secure_aggregation_epoch(
     epoch,
     loss_fns,
     crypto_provider,
+    weights=None,
     test_params=None,
     verbose=True,
 ):
@@ -776,13 +865,14 @@ def secure_aggregation_epoch(
             avg_loss.append(loss.detach().cpu().get().item())
         if batch_idx > 0 and batch_idx % args.sync_every_n_batch == 0:
             pbar.set_description_str("Synchronizing")
-            models["local_model"] = secure_aggregation(
+            models["local_model"] = aggregation(
                 models["local_model"],
                 models,
                 train_loaders.keys(),
                 crypto_provider,
                 args,
                 test_params,
+                weights=weights,
             )
             models = send_new_models(models["local_model"], models)
             pbar.set_description_str("Training with secure aggregation")
@@ -796,13 +886,14 @@ def secure_aggregation_epoch(
                         models[worker].parameters(), **kwargs
                     )
 
-    models["local_model"] = secure_aggregation(
+    models["local_model"] = aggregation(
         models["local_model"],
         models,
         train_loaders.keys(),
         crypto_provider,
         args,
         test_params,
+        weights=weights,
     )
     avg_loss = np.mean(avg_loss)
 
@@ -838,9 +929,19 @@ def synchronizer(  # never gets called on websockets
             pass
         else:
             models = {}
-            for id, worker_model in result_dict.items():
-                models[id] = worker_model
-            avg_model = federated_avg(models, weights=weights)
+            for idt, worker_model in result_dict.items():
+                models[idt] = worker_model
+            # avg_model = federated_avg(models, weights=weights)
+            avg_model = aggregation(
+                deepcopy(list(models.values())[0]),
+                models,
+                models.keys(),
+                None,
+                args,
+                test_params,
+                weights=weights,
+                secure=False,
+            )
             sync_dict["model"] = avg_model
         for k in waiting_for_sync_dict.keys():
             waiting_for_sync_dict[k] = False
