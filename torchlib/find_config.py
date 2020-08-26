@@ -46,7 +46,6 @@ def objective(trial: opt.trial):
         pretrained=True,
         weight_classes=trial.suggest_categorical("weight_classes", [True, False]),
         pooling_type="max",
-        vertical_flip_prob=trial.suggest_float("vertical_flip_prob", 0.0, 1.0),
         rotation=trial.suggest_int("rotation", 0, 45),
         translate=0.0,  # trial.suggest_float("translate", 0, 0.2),
         scale=trial.suggest_float("scale", 0.0, 0.5),
@@ -57,7 +56,10 @@ def objective(trial: opt.trial):
         repetitions_dataset=repetitions_dataset,
     )
     apply_albu = trial.suggest_categorical("apply albu transforms", [True, False])
-    args.albu_prop = trial.suggest_float("albu_prop", 0.0, 1.0) if apply_albu else 0.0
+    args.albu_prob = trial.suggest_float("albu_prob", 0.0, 1.0) if apply_albu else 0.0
+    args.individual_albu_probs = (
+        trial.suggest_float("individual_albu_probs", 0.0, 1.0) if apply_albu else 0.0
+    )
     args.clahe = (
         trial.suggest_categorical("clahe", [True, False]) if apply_albu else False
     )
@@ -134,8 +136,8 @@ def objective(trial: opt.trial):
     try:
         best_val_acc = main(args, verbose=False, optuna_trial=trial)
     except Exception as e:
-        print(args)
-        print(e)
+        print(str(args))
+        print(str(e))
         exit()
     return best_val_acc
 

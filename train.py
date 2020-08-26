@@ -117,43 +117,47 @@ def create_albu_transform(args, mean, std):
             ]
         )
     train_tf_albu = [
-        a.VerticalFlip(p=args.vertical_flip_prob),
+        a.VerticalFlip(p=args.individual_albu_probs),
     ]
     if args.randomgamma:
-        train_tf_albu.append(a.RandomGamma())
+        train_tf_albu.append(a.RandomGamma(p=args.individual_albu_probs))
     if args.randombrightness:
-        train_tf_albu.append(a.RandomBrightness())
+        train_tf_albu.append(a.RandomBrightness(p=args.individual_albu_probs))
     if args.blur:
-        train_tf_albu.append(a.Blur())
+        train_tf_albu.append(a.Blur(p=args.individual_albu_probs))
     if args.elastic:
-        train_tf_albu.append(a.ElasticTransform())
+        train_tf_albu.append(a.ElasticTransform(p=args.individual_albu_probs))
     if args.optical_distortion:
-        train_tf_albu.append(a.OpticalDistortion())
+        train_tf_albu.append(a.OpticalDistortion(p=args.individual_albu_probs))
     if args.grid_distortion:
-        train_tf_albu.append(a.GridDistortion())
+        train_tf_albu.append(a.GridDistortion(p=args.individual_albu_probs))
     if args.grid_shuffle:
-        train_tf_albu.append(a.RandomGridShuffle())
+        train_tf_albu.append(a.RandomGridShuffle(p=args.individual_albu_probs))
     if args.hsv:
-        train_tf_albu.append(a.HueSaturationValue())
+        train_tf_albu.append(a.HueSaturationValue(p=args.individual_albu_probs))
     if args.invert:
-        train_tf_albu.append(a.InvertImg())
+        train_tf_albu.append(a.InvertImg(p=args.individual_albu_probs))
     if args.cutout:
-        train_tf_albu.append(a.Cutout(num_holes=5, max_h_size=80, max_w_size=80))
+        train_tf_albu.append(
+            a.Cutout(
+                num_holes=5, max_h_size=80, max_w_size=80, p=args.individual_albu_probs
+            )
+        )
     if args.shadow:
         assert args.pretrained, "RandomShadows needs 3 channels"
-        train_tf_albu.append(a.RandomShadow())
+        train_tf_albu.append(a.RandomShadow(p=args.individual_albu_probs))
     if args.fog:
         assert args.pretrained, "RandomFog needs 3 channels"
-        train_tf_albu.append(a.RandomFog())
+        train_tf_albu.append(a.RandomFog(p=args.individual_albu_probs))
     if args.sun_flare:
         assert args.pretrained, "RandomSunFlare needs 3 channels"
-        train_tf_albu.append(a.RandomSunFlare())
+        train_tf_albu.append(a.RandomSunFlare(p=args.individual_albu_probs))
     if args.solarize:
-        train_tf_albu.append(a.Solarize())
+        train_tf_albu.append(a.Solarize(p=args.individual_albu_probs))
     if args.equalize:
-        train_tf_albu.append(a.Equalize())
+        train_tf_albu.append(a.Equalize(p=args.individual_albu_probs))
     if args.grid_dropout:
-        train_tf_albu.append(a.GridDropout())
+        train_tf_albu.append(a.GridDropout(p=args.individual_albu_probs))
     train_tf_albu.append(a.GaussNoise(var_limit=args.noise_std ** 2, p=args.noise_prob))
     end_transformations = [
         a.ToFloat(max_value=255.0),
@@ -163,7 +167,7 @@ def create_albu_transform(args, mean, std):
         a.Compose(
             [
                 a.Compose(start_transformations),
-                a.Compose(train_tf_albu, p=args.albu_prop),
+                a.Compose(train_tf_albu, p=args.albu_prob),
                 a.Compose(end_transformations),
             ]
         )

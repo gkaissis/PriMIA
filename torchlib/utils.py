@@ -77,84 +77,106 @@ class LearningRateScheduler:
 class Arguments:
     def __init__(self, cmd_args, config, mode: str = "train", verbose: bool = True):
         assert mode in ["train", "inference"], "no other mode known"
-        self.batch_size = config.getint("config", "batch_size", fallback=1)
-        self.test_batch_size = config.getint("config", "test_batch_size", fallback=1)
+        self.batch_size = config.getint("config", "batch_size")  # , fallback=1)
+        self.test_batch_size = config.getint(
+            "config", "test_batch_size"
+        )  # , fallback=1)
         self.train_resolution = config.getint(
-            "config", "train_resolution", fallback=224
-        )
+            "config", "train_resolution"
+        )  # , fallback=224
         self.inference_resolution = config.getint(
             "config", "inference_resolution", fallback=self.train_resolution
         )
-        self.validation_split = config.getint("config", "validation_split", fallback=10)
-        self.epochs = config.getint("config", "epochs", fallback=1)
-        self.lr = config.getfloat("config", "lr", fallback=1e-3)
+        if self.train_resolution != self.inference_resolution:
+            raise FutureWarning(
+                "We are not supporting different train and inference"
+                " resolutions although it works for some scenarios."
+            )
+        self.validation_split = config.getint(
+            "config", "validation_split"
+        )  # , fallback=10)
+        self.epochs = config.getint("config", "epochs")  # , fallback=1)
+        self.lr = config.getfloat("config", "lr")  # , fallback=1e-3)
         self.end_lr = config.getfloat("config", "end_lr", fallback=self.lr)
-        self.restarts = config.getint("config", "restarts", fallback=None)
-        self.momentum = config.getfloat("config", "momentum", fallback=0.5)
         self.deterministic = config.getboolean("config", "deterministic")
+        self.restarts = config.getint("config", "restarts")  # , fallback=None)
         self.seed = config.getint("config", "seed", fallback=1)
         self.test_interval = config.getint("config", "test_interval", fallback=1)
         self.log_interval = config.getint("config", "log_interval", fallback=10)
         # self.save_interval = config.getint("config", "save_interval", fallback=10)
         # self.save_model = config.getboolean("config", "save_model", fallback=False)
-        self.optimizer = config.get("config", "optimizer", fallback="SGD")
+        self.optimizer = config.get("config", "optimizer")  # , fallback="SGD")
         assert self.optimizer in ["SGD", "Adam"], "Unknown optimizer"
         if self.optimizer == "Adam":
             self.beta1 = config.getfloat("config", "beta1", fallback=0.9)
             self.beta2 = config.getfloat("config", "beta2", fallback=0.999)
-        self.model = config.get("config", "model", fallback="simpleconv")
+        self.model = config.get("config", "model")  # , fallback="simpleconv")
         assert self.model in ["simpleconv", "resnet-18", "vgg16"]
-        self.pooling_type = config.get("config", "pooling_type", fallback="avg")
-        self.pretrained = config.getboolean("config", "pretrained", fallback=False)
-        self.weight_decay = config.getfloat("config", "weight_decay", fallback=0.0)
+        self.pooling_type = config.get("config", "pooling_type", fallback="max")
+        self.pretrained = config.getboolean("config", "pretrained")  # , fallback=False)
+        self.weight_decay = config.getfloat("config", "weight_decay")  # , fallback=0.0)
         self.weight_classes = config.getboolean(
-            "config", "weight_classes", fallback=False
-        )
-        self.vertical_flip_prob = config.getfloat(
-            "albumentations", "vertical_flip_prob", fallback=0.0
-        )
-        self.rotation = config.getfloat("augmentation", "rotation", fallback=0.0)
-        self.translate = config.getfloat("augmentation", "translate", fallback=0.0)
-        self.scale = config.getfloat("augmentation", "scale", fallback=0.0)
-        self.shear = config.getfloat("augmentation", "shear", fallback=0.0)
-        self.albu_prop = config.getfloat("albumentations", "overall_prop", fallback=1.0)
-        self.noise_std = config.getfloat("albumentations", "noise_std", fallback=1.0)
-        self.noise_prob = config.getfloat("albumentations", "noise_prob", fallback=0.0)
-        self.clahe = config.getboolean("albumentations", "clahe", fallback=False)
+            "config", "weight_classes"
+        )  # , fallback=False)
+        self.rotation = config.getfloat("augmentation", "rotation")  # , fallback=0.0)
+        self.translate = config.getfloat("augmentation", "translate")  # , fallback=0.0)
+        self.scale = config.getfloat("augmentation", "scale")  # , fallback=0.0)
+        self.shear = config.getfloat("augmentation", "shear")  # , fallback=0.0)
+        self.albu_prob = config.getfloat(
+            "albumentations", "overall_prob"
+        )  # , fallback=1.0)
+        self.individual_albu_probs = config.getfloat(
+            "albumentations", "individual_probs"
+        )  # , fallback=1.0)
+        self.noise_std = config.getfloat(
+            "albumentations", "noise_std"
+        )  # , fallback=1.0)
+        self.noise_prob = config.getfloat(
+            "albumentations", "noise_prob"
+        )  # , fallback=0.0)
+        self.clahe = config.getboolean("albumentations", "clahe")  # , fallback=False)
         self.randomgamma = config.getboolean(
-            "albumentations", "randomgamma", fallback=False
-        )
+            "albumentations", "randomgamma"
+        )  # , fallback=False
         self.randombrightness = config.getboolean(
-            "albumentations", "randombrightness", fallback=False
-        )
-        self.blur = config.getboolean("albumentations", "blur", fallback=False)
-        self.elastic = config.getboolean("albumentations", "elastic", fallback=False)
+            "albumentations", "randombrightness"
+        )  # , fallback=False
+        self.blur = config.getboolean("albumentations", "blur")  # , fallback=False)
+        self.elastic = config.getboolean(
+            "albumentations", "elastic"
+        )  # , fallback=False)
         self.optical_distortion = config.getboolean(
-            "albumentations", "optical_distortion", fallback=False
-        )
+            "albumentations", "optical_distortion"
+        )  # , fallback=False
         self.grid_distortion = config.getboolean(
-            "albumentations", "grid_distortion", fallback=False
-        )
+            "albumentations", "grid_distortion"
+        )  # , fallback=False)
         self.grid_shuffle = config.getboolean(
-            "albumentations", "grid_shuffle", fallback=False
-        )
-        self.hsv = config.getboolean("albumentations", "hsv", fallback=False)
-        self.invert = config.getboolean("albumentations", "invert", fallback=False)
-        self.cutout = config.getboolean("albumentations", "cutout", fallback=False)
-        self.shadow = config.getboolean("albumentations", "shadow", fallback=False)
-        self.fog = config.getboolean("albumentations", "fog", fallback=False)
+            "albumentations", "grid_shuffle"
+        )  # , fallback=False
+        self.hsv = config.getboolean("albumentations", "hsv")  # , fallback=False)
+        self.invert = config.getboolean("albumentations", "invert")  # , fallback=False)
+        self.cutout = config.getboolean("albumentations", "cutout")  # , fallback=False)
+        self.shadow = config.getboolean("albumentations", "shadow")  # , fallback=False)
+        self.fog = config.getboolean("albumentations", "fog")  # , fallback=False)
         self.sun_flare = config.getboolean(
-            "albumentations", "sun_flare", fallback=False
-        )
-        self.solarize = config.getboolean("albumentations", "solarize", fallback=False)
-        self.equalize = config.getboolean("albumentations", "equalize", fallback=False)
+            "albumentations", "sun_flare"
+        )  # , fallback=False
+        self.solarize = config.getboolean(
+            "albumentations", "solarize"
+        )  # , fallback=False)
+        self.equalize = config.getboolean(
+            "albumentations", "equalize"
+        )  # , fallback=False)
         self.grid_dropout = config.getboolean(
-            "albumentations", "grid_dropout", fallback=False
-        )
-        self.mixup = config.getboolean("albumentations", "mixup", fallback=False)
-        self.mixup_prob = config.getfloat("albumentations", "mixup_prob", fallback=None)
+            "albumentations", "grid_dropout"
+        )  # , fallback=False
+        self.mixup = config.getboolean("augmentation", "mixup")  # , fallback=False)
+        self.mixup_prob = config.getfloat(
+            "augmentation", "mixup_prob"
+        )  # , fallback=None)
         self.mixup_lambda = config.getfloat(
-            "albumentations", "mixup_lambda", fallback=None
+            "augmentation", "mixup_lambda", fallback=None
         )
         if self.mixup and self.mixup_prob == 1.0:
             self.batch_size *= 2
@@ -165,17 +187,17 @@ class Arguments:
         )
         if self.train_federated:
             self.sync_every_n_batch = config.getint(
-                "federated", "sync_every_n_batch", fallback=10
-            )
+                "federated", "sync_every_n_batch"
+            )  # , fallback=10
             self.wait_interval = config.getfloat(
                 "federated", "wait_interval", fallback=0.1
             )
             self.keep_optim_dict = config.getboolean(
-                "federated", "keep_optim_dict", fallback=False
-            )
+                "federated", "keep_optim_dict"
+            )  # , fallback=False
             self.repetitions_dataset = config.getint(
-                "federated", "repetitions_dataset", fallback=1
-            )
+                "federated", "repetitions_dataset"
+            )  # , fallback=1
             if self.repetitions_dataset > 1:
                 self.epochs = int(self.epochs / self.repetitions_dataset)
                 if verbose:
@@ -186,8 +208,8 @@ class Arguments:
                         )
                     )
             self.weighted_averaging = config.getboolean(
-                "federated", "weighted_averaging", fallback=False
-            )
+                "federated", "weighted_averaging"
+            )  # , fallback=False
 
         self.visdom = cmd_args.visdom if mode == "train" else False
         self.encrypted_inference = (

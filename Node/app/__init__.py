@@ -242,7 +242,7 @@ def create_app(
                 tf.append(a.CLAHE(always_apply=True, clip_limit=(1, 1)))
             if mean_std_file:
                 mean_std = torch.load(mean_std_file)
-                if "val_mean_std" in mean_std:
+                if type(mean_std) == dict and "val_mean_std" in mean_std:
                     mean_std = mean_std["val_mean_std"]
                 mean, std = mean_std
             else:
