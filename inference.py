@@ -122,10 +122,11 @@ if __name__ == "__main__":
     args.from_previous_checkpoint(cmd_args)
     sys.stderr.write(str(args))
 
-    torch.manual_seed(args.seed)
-    rseed(args.seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    if not args.websockets:
+        torch.manual_seed(args.seed)
+        rseed(args.seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
     if cmd_args.encrypted_inference or cmd_args.websockets_config:
         hook = sy.TorchHook(torch)
@@ -154,10 +155,17 @@ if __name__ == "__main__":
                         worker_dict["crypto_provider"]["port"],
                     ),
                 )
+            model_owner = sy.grid.clients.data_centric_fl_client.DataCentricFLClient(
+                hook,
+                "http://{:s}:{:s}".format(
+                    worker_dict["model_owner"]["host"],
+                    worker_dict["model_owner"]["port"],
+                ),
+            )
         else:
             data_owner = sy.VirtualWorker(hook, id="data_owner")
             crypto_provider = sy.VirtualWorker(hook, id="crypto_provider")
-        model_owner = sy.VirtualWorker(hook, id="model_owner")
+            model_owner = sy.VirtualWorker(hook, id="model_owner")
         workers = [model_owner, data_owner]
         sy.local_worker.clients = [model_owner, data_owner]
 
@@ -221,7 +229,10 @@ if __name__ == "__main__":
             data.tag("#inference_data")
             data_owner.load_data([data])
     if cmd_args.websockets_config or cmd_args.encrypted_inference:
-        grid = sy.PrivateGridNetwork(data_owner, crypto_provider, model_owner)
+        if cmd_args.encrypted_inference:
+            grid = sy.PrivateGridNetwork(data_owner, crypto_provider, model_owner)
+        else:
+            grid = sy.PrivateGridNetwork(data_owner, model_owner)
         data_tensor = grid.search("#inference_data")["data_owner"][0]
         dataset = RemoteTensorDataset(data_tensor)
 
@@ -273,6 +284,7 @@ if __name__ == "__main__":
             "protocol": "fss",
             "requires_grad": False,
         }
+        # model.send(model_owner)
         model.fix_precision(precision_fractional=4, dtype="long").share(
             *workers,
             crypto_provider=crypto_provider,

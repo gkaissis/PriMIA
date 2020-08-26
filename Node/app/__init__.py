@@ -227,11 +227,11 @@ def create_app(
             unencrypted_aggregation=False,
         )
         args = Arguments(cmd_args, config, mode="train", verbose=False)
-        torch.manual_seed(args.seed)
-        r_seed(args.seed)
-        np.random.seed(args.seed)
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
+        # torch.manual_seed(args.seed)
+        # r_seed(args.seed)
+        # np.random.seed(args.seed)
+        # torch.backends.cudnn.deterministic = True
+        # torch.backends.cudnn.benchmark = False
         if node_id == "data_owner":
             print("setting up an data to be remotely classified.")
             tf = [
@@ -270,6 +270,7 @@ def create_app(
             data = torch.stack(data)  # pylint:disable=no-member
             data.tag("#inference_data")
             local_worker.load_data([data])
+            print("Loaded {:d} samples as inference data".format(data.shape[0]))
         else:
             if args.data_dir == "mnist":
                 node_id = local_worker.id
