@@ -859,7 +859,7 @@ def secure_aggregation_epoch(
             leave=False,
             desc="Train batch {:d}".format(batch_idx),
         ):
-            if batch_idx > num_batches[worker.id]:
+            if batch_idx >= num_batches[worker.id]:
                 continue
             optimizers[worker.id].zero_grad()
             data, target = next(dataloader)
