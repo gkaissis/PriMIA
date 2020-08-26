@@ -89,3 +89,17 @@ mixup_ablation:
 	
 gridnode:
 	python torchlib/run_websocket_server.py --data_dir data/server_simulation --config configs/torch/pneumonia-resnet-pretrained.ini
+
+######## ENCRYPTED INFERENCE
+data_owner:
+	python -m Node --id data_owner --port 8770 --data_dir .inference --config configs/torch/pneumonia-resnet-pretrained.ini --mean_std_file data/server_simulation/worker1/mean_std.pt
+
+crypto_provider:
+	python -m Node --id crypto_provider --port 8780
+
+model_owner:
+	python -m Node --id crypto_provider --port 8771
+
+inference_setup: 
+	make data_owner & make crypto_provider & make model_owner
+
