@@ -479,12 +479,18 @@ def setup_pysyft(args, hook, verbose=False):
 def main(args, verbose=True, optuna_trial=None):
 
     use_cuda = args.cuda and torch.cuda.is_available()
-
-    torch.manual_seed(args.seed)
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    if args.deterministic:
+        if args.websockets:
+            warn(
+                "Training with GridNodes is not compatible with deterministic training."
+            )
+            args.deterministic = False
+        torch.manual_seed(args.seed)
+        random.seed(args.seed)
+        np.random.seed(args.seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
+        exit()
 
     device = torch.device("cuda" if use_cuda else "cpu")  # pylint: disable=no-member
 

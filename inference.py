@@ -143,6 +143,7 @@ if __name__ == "__main__":
                 "http://{:s}:{:s}".format(
                     worker_dict["data_owner"]["host"], worker_dict["data_owner"]["port"]
                 ),
+                is_client_worker=True,
             )
             if cmd_args.encrypted_inference:
                 assert (
@@ -154,6 +155,7 @@ if __name__ == "__main__":
                         worker_dict["crypto_provider"]["host"],
                         worker_dict["crypto_provider"]["port"],
                     ),
+                    is_client_worker=True,
                 )
             model_owner = sy.grid.clients.data_centric_fl_client.DataCentricFLClient(
                 hook,
@@ -161,6 +163,7 @@ if __name__ == "__main__":
                     worker_dict["model_owner"]["host"],
                     worker_dict["model_owner"]["port"],
                 ),
+                is_client_worker=True,
             )
         else:
             data_owner = sy.VirtualWorker(hook, id="data_owner")
@@ -279,23 +282,18 @@ if __name__ == "__main__":
     model.to(device)
     if args.encrypted_inference:
         fix_prec_kwargs = {"precision_fractional": 4, "dtype": "long"}
-        share_kwags = {
+        share_kwargs = {
             "crypto_provider": crypto_provider,
             "protocol": "fss",
             "requires_grad": False,
         }
         # model.send(model_owner)
-        model.fix_precision(precision_fractional=4, dtype="long").share(
-            *workers,
-            crypto_provider=crypto_provider,
-            protocol="fss",
-            requires_grad=False
-        )
+        model.fix_precision(**fix_prec_kwargs).share(*workers, **share_kwargs)
     # test method
     model.eval()
     total_pred, total_target, total_scores = [], [], []
-    if args.encrypted_inference:
-        mean, std = mean.send(data_owner), std.send(data_owner)
+    # if args.encrypted_inference:
+    #     mean, std = mean.send(data_owner), std.send(data_owner)
     with torch.no_grad():
         for i, data in tqdm(
             enumerate(dataset),
@@ -318,13 +316,8 @@ if __name__ == "__main__":
             ## normalize data
             if cmd_args.encrypted_inference:
                 data = (
-                    data.fix_precision(precision_fractional=4, dtype="long")
-                    .share(
-                        *workers,
-                        crypto_provider=crypto_provider,
-                        protocol="fss",
-                        requires_grad=False
-                    )
+                    data.fix_precision(**fix_prec_kwargs)
+                    .share(*workers, **share_kwargs)
                     .get()
                 )
             elif cmd_args.websockets_config is not None:

@@ -91,6 +91,7 @@ class Arguments:
         self.end_lr = config.getfloat("config", "end_lr", fallback=self.lr)
         self.restarts = config.getint("config", "restarts", fallback=None)
         self.momentum = config.getfloat("config", "momentum", fallback=0.5)
+        self.deterministic = config.getboolean("config", "deterministic")
         self.seed = config.getint("config", "seed", fallback=1)
         self.test_interval = config.getint("config", "test_interval", fallback=1)
         self.log_interval = config.getint("config", "log_interval", fallback=10)
