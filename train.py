@@ -17,6 +17,7 @@ torch.set_num_threads(1)
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import torchdp as tdp
 import tqdm
 import visdom
 import albumentations as a
@@ -483,18 +484,18 @@ def setup_pysyft(args, hook, verbose=False):
 def main(args, verbose=True, optuna_trial=None):
 
     use_cuda = args.cuda and torch.cuda.is_available()
+    if args.deterministic and args.websockets:
+        warn(
+            "Training with GridNodes is not compatible with deterministic training.\n"
+            "Switching deterministic flag to False"
+        )
+        args.deterministic = False
     if args.deterministic:
-        if args.websockets:
-            warn(
-                "Training with GridNodes is not compatible with deterministic training."
-            )
-            args.deterministic = False
         torch.manual_seed(args.seed)
         random.seed(args.seed)
         np.random.seed(args.seed)
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
-        exit()
 
     device = torch.device("cuda" if use_cuda else "cpu")  # pylint: disable=no-member
 
@@ -709,6 +710,39 @@ def main(args, verbose=True, optuna_trial=None):
         if args.train_federated
         else opt(model.parameters(), **opt_kwargs)
     )
+    privacy_engines = None
+    if args.differentially_private:
+        if type(optimizer) == dict:
+            warn(
+                "Unfortunately differential privacy has"
+                " lots of limitations right now, including non federated "
+                "training and models without BatchNorm."
+            )
+            exit()
+            privacy_engines = {
+                idt.id: tdp.PrivacyEngine(
+                    model[idt.id],
+                    args.batch_size,
+                    len(tl.federated_dataset),
+                    alphas=[1, 10, 100],
+                    noise_multiplier=1.3,
+                    max_grad_norm=1.0,
+                )
+                for idt, tl in train_loader.items()
+                if idt.id not in ["local_model", "crypto_provider"]
+            }
+            for w, pe in privacy_engines.items():
+                pe.attach(optimizer[w])
+        else:
+            privacy_engine = tdp.PrivacyEngine(
+                model,
+                args.batch_size,
+                len(train_loader.dataset),
+                alphas=[1, 10, 100],
+                noise_multiplier=1.3,
+                max_grad_norm=1.0,
+            )
+            privacy_engine.attach(optimizer)
     loss_args = {"weight": cw, "reduction": "mean"}
     if args.mixup or (args.weight_classes and args.train_federated):
         loss_fn = Cross_entropy_one_hot
@@ -812,6 +846,7 @@ def main(args, verbose=True, optuna_trial=None):
                 test_params=None,
                 vis_params=vis_params,
                 verbose=verbose,
+                privacy_engines=privacy_engines,
             )
 
         else:

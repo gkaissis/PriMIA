@@ -106,6 +106,9 @@ class Arguments:
         # self.save_interval = config.getint("config", "save_interval", fallback=10)
         # self.save_model = config.getboolean("config", "save_model", fallback=False)
         self.optimizer = config.get("config", "optimizer")  # , fallback="SGD")
+        self.differentially_private = config.getboolean(
+            "config", "differentially_private", fallback=False
+        )
         assert self.optimizer in ["SGD", "Adam"], "Unknown optimizer"
         if self.optimizer == "Adam":
             self.beta1 = config.getfloat("config", "beta1", fallback=0.9)
@@ -522,6 +525,7 @@ def train_federated(
     test_params=None,
     vis_params=None,
     verbose=True,
+    privacy_engines=None,
 ):
 
     total_batches = 0
@@ -835,6 +839,7 @@ def secure_aggregation_epoch(
     weights=None,
     test_params=None,
     verbose=True,
+    privacy_engines=None,
 ):
     for worker in train_loaders.keys():
         if models[worker.id].location is not None:
@@ -864,6 +869,8 @@ def secure_aggregation_epoch(
             optimizers[worker] = opt(
                 models[worker].parameters(), **kwargs
             )  # no send operation here?
+            if privacy_engines:
+                privacy_engines[worker].attach(optimizers[worker])
 
     avg_loss = []
 
@@ -1269,8 +1276,13 @@ def test(
         )
         total_scores -= total_scores.min(axis=1)[:, np.newaxis]
         total_scores = total_scores / total_scores.sum(axis=1)[:, np.newaxis]
-
-        roc_auc = mt.roc_auc_score(total_target, total_scores, multi_class="ovo")
+        try:
+            roc_auc = mt.roc_auc_score(total_target, total_scores, multi_class="ovo")
+        except ValueError:
+            raise UserWarning(
+                "ROC AUC score could not be calculated and was set to zero."
+            )
+            roc_auc = 0.0
         matthews_coeff = mt.matthews_corrcoef(total_target, total_pred)
         objective = 100.0 * matthews_coeff
         if verbose:
