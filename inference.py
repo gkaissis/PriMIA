@@ -141,7 +141,9 @@ if __name__ == "__main__":
             data_owner = sy.grid.clients.data_centric_fl_client.DataCentricFLClient(
                 hook,
                 "http://{:s}:{:s}".format(
-                    worker_dict["data_owner"]["host"], worker_dict["data_owner"]["port"]
+                    worker_dict["data_owner"]["host"],
+                    worker_dict["data_owner"]["port"],
+                    is_client_worker=True,
                 ),
             )
             if cmd_args.encrypted_inference:
@@ -153,6 +155,7 @@ if __name__ == "__main__":
                     "http://{:s}:{:s}".format(
                         worker_dict["crypto_provider"]["host"],
                         worker_dict["crypto_provider"]["port"],
+                        is_client_worker=True,
                     ),
                 )
             model_owner = sy.grid.clients.data_centric_fl_client.DataCentricFLClient(
@@ -160,6 +163,7 @@ if __name__ == "__main__":
                 "http://{:s}:{:s}".format(
                     worker_dict["model_owner"]["host"],
                     worker_dict["model_owner"]["port"],
+                    is_client_worker=True,
                 ),
             )
         else:
@@ -284,18 +288,12 @@ if __name__ == "__main__":
             "protocol": "fss",
             "requires_grad": False,
         }
-        # model.send(model_owner)
         model.fix_precision(precision_fractional=4, dtype="long").share(
-            *workers,
-            crypto_provider=crypto_provider,
-            protocol="fss",
-            requires_grad=False
+            *workers, crypto_provider=crypto_provider, requires_grad=False
         )
     # test method
     model.eval()
     total_pred, total_target, total_scores = [], [], []
-    if args.encrypted_inference:
-        mean, std = mean.send(data_owner), std.send(data_owner)
     with torch.no_grad():
         for i, data in tqdm(
             enumerate(dataset),
@@ -322,8 +320,8 @@ if __name__ == "__main__":
                     .share(
                         *workers,
                         crypto_provider=crypto_provider,
-                        protocol="fss",
-                        requires_grad=False
+                        requires_grad=False,
+                        protocol="fss"
                     )
                     .get()
                 )
