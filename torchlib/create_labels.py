@@ -1,6 +1,6 @@
 import torch
 
-torch.set_num_threads(1)
+
 from argparse import ArgumentParser
 from os import listdir
 import re

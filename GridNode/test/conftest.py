@@ -1,7 +1,7 @@
 import pytest
 import torch
 
-torch.set_num_threads(1)
+
 from multiprocessing import Process
 import os
 import sys
