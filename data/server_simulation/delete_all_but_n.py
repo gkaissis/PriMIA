@@ -6,6 +6,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "n", type=int, help="How many images to leave.",
     )
+    parser.add_argument(
+        "--spare_validation", action="store_true", help="Don't apply to validation set."
+    )
     args = parser.parse_args()
     cur_path = os.path.abspath(os.getcwd())
 
@@ -23,6 +26,8 @@ if __name__ == "__main__":
 
     i = 0
     for dirpath, dirnames, filenames in os.walk("."):
+        if args.spare_validation and "validation" in dirpath:
+            continue
         d = dirpath.split("/")
         if len(d) == 3:  # and not any(exception in d[-2] for exception in [])
             img_files = [f for f in filenames if f.endswith(".jpeg")]

@@ -4,7 +4,7 @@ import csv
 from time import sleep
 from copy import deepcopy
 from argparse import Namespace, ArgumentParser
-from sigma import writefile
+from sigma import writefile, visualize_file
 
 sys.path.insert(0, os.path.split(sys.path[0])[0])
 
@@ -25,28 +25,7 @@ if __name__ == "__main__":
     parser.add_argument("--num_runs", type=int, help="How many runs for each lambda?")
     cmd_args = parser.parse_args()
     if cmd_args.visualize:
-        import pandas as pd
-        from matplotlib import pyplot as plt
-
-        df = pd.read_csv("figure_scripts/lambda_results.csv").rename(
-            columns={"None": "random"}
-        )
-        mean, std = df.mean(axis=0), df.std(axis=0)
-
-        # plt.ylim(0.0, 100.0)
-        plt.xticks(range(len(mean.index)), mean.index)
-        plt.fill_between(range(len(mean.index)), mean - std, mean + std)
-        plt.errorbar(
-            range(len(mean.index)),
-            mean,
-            yerr=2 * std,
-            fmt="o",
-            color="black",
-            ecolor="lightblue",
-            elinewidth=3,
-            capsize=0,
-        )
-        plt.show()
+        visualize_file("figure_scripts/lambda_results.csv")
         exit()
     args = Namespace(
         config="lambdafigure",
