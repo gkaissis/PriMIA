@@ -139,8 +139,7 @@ def objective(trial: opt.trial):
         best_val_acc = main(args, verbose=False, optuna_trial=trial)
     except Exception as e:
         print(str(args))
-        print(str(e))
-        exit()
+        raise e
     return best_val_acc
 
 
@@ -154,6 +153,9 @@ if __name__ == "__main__":
     parser.add_argument(
         "--num_trials", default=30, type=int, help="how many trials to perform"
     )
+    parser.add_argument(
+        "--visualize", action="store_true", help="Visualize optuna results."
+    )
     cmdln_args = parser.parse_args()
     study = opt.create_study(
         study_name="federated_pneumonia"
@@ -162,6 +164,28 @@ if __name__ == "__main__":
         storage="sqlite:///model_weights/pneumonia_search.db",
         load_if_exists=True,
         direction="maximize",
+        pruner=opt.pruners.NopPruner()
+        # pruner=opt.pruners.PercentilePruner(
+        #     0.95, n_startup_trials=10, n_warmup_steps=10
+        # )
         # pruner=opt.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=10),
     )
-    study.optimize(objective, n_trials=cmdln_args.num_trials)
+    if cmdln_args.visualize:
+
+        vis = opt.visualization.plot_param_importances(study)
+        vis.show()
+        vis = opt.visualization.plot_slice(study)
+        vis.show()
+        # vis = opt.visualization.plot_contour(study)
+        # vis.show()
+        vis = opt.visualization.plot_edf(study)
+        vis.show()
+        vis = opt.visualization.plot_optimization_history(study)
+        vis.show()
+        vis = opt.visualization.plot_parallel_coordinate(study)
+        vis.show()
+        vis = opt.visualization.plot_intermediate_values(study)
+        vis.show()
+
+    else:
+        study.optimize(objective, n_trials=cmdln_args.num_trials)

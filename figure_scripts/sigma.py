@@ -5,6 +5,8 @@ from argparse import Namespace, ArgumentParser
 import sys, os.path
 import pandas as pd
 from matplotlib import pyplot as plt
+from torch import set_num_threads
+
 
 sys.path.insert(0, os.path.split(sys.path[0])[0])
 
@@ -48,7 +50,9 @@ if __name__ == "__main__":
         "--visualize", action="store_true", help="just visuallize the results so far."
     )
     parser.add_argument("--num_runs", type=int, help="How many runs for each lambda?")
+    parser.add_argument("--num_threads", type=int, help="How threads to use?")
     cmd_args = parser.parse_args()
+    set_num_threads(args.num_threads)
     if cmd_args.visualize:
         visualize_file("figure_scripts/sigmas.csv")
         visualize_file("figure_scripts/sigma_times.csv")
@@ -76,7 +80,7 @@ if __name__ == "__main__":
         beta1=0.5,
         beta2=0.99,
         weight_decay=5e-4,
-        deterministic=False,
+        deterministic=True,
         seed=42,
         log_interval=10,
         optimizer="Adam",
