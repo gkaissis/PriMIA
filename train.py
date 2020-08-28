@@ -13,7 +13,8 @@ import numpy as np
 import syft as sy
 import torch
 
-#
+# torch.set_num_threads(36)
+
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim

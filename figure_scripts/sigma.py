@@ -45,7 +45,7 @@ def visualize_file(file_name: str):
 if __name__ == "__main__":
     parser = ArgumentParser()
     parser.add_argument(
-        "--visualize", action="store_true", help="just visuallize the results so far."
+        "--visualize", action="store_true", help="just visualize the results so far."
     )
     parser.add_argument("--num_runs", type=int, help="How many runs for each lambda?")
     cmd_args = parser.parse_args()
@@ -76,7 +76,7 @@ if __name__ == "__main__":
         beta1=0.5,
         beta2=0.99,
         weight_decay=5e-4,
-        deterministic=False,
+        deterministic=True,
         seed=42,
         log_interval=10,
         optimizer="Adam",
