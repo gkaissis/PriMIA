@@ -7,7 +7,7 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
 import torch
 
-torch.set_num_threads(1)
+#
 from torchvision import transforms
 from torchvision.datasets import ImageFolder
 from tqdm import tqdm

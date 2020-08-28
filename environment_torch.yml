@@ -132,6 +132,7 @@ dependencies:
   - zlib=1.2.11=h7b6447c_3
   - zstd=1.4.4=h0b5b093_3
   - albumentations=0.4.6
+  - pytorch-dp=0.1b1
   - pip:
     - absl-py==0.9.0
     - aioice==0.6.18
@@ -197,4 +198,4 @@ dependencies:
     - zope-interface==5.1.0
     - tensorflow-io==0.15.0
     - git+https://github.com/facebookresearch/CrypTen.git@cdecc8de1514d7f36a5268a50c714caba5e57318#egg=crypten
-    - git+https://github.com/OpenMined/PySyft.git@80155352ad99265742d03165aa78bfb279810549#egg=syft
+    - git+https://github.com/OpenMined/PySyft.git@9dc09f3d3c2d78390adffe847d0b44a8afbc5f90#egg=syft

@@ -155,3 +155,4 @@ ignore_files/
 PySyft
 *syft*
 .inference
+figure_scripts/*.csv

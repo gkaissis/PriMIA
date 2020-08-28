@@ -7,7 +7,7 @@ import os
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 import torch
 
-torch.set_num_threads(1)  # pylint:disable=no-member
+# pylint:disable=no-member
 import crypten
 from math import ceil
 from time import time

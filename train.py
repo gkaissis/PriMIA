@@ -13,10 +13,11 @@ import numpy as np
 import syft as sy
 import torch
 
-torch.set_num_threads(1)
+#
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import torchdp as tdp
 import tqdm
 import visdom
 import albumentations as a
@@ -117,43 +118,47 @@ def create_albu_transform(args, mean, std):
             ]
         )
     train_tf_albu = [
-        a.VerticalFlip(p=args.vertical_flip_prob),
+        a.VerticalFlip(p=args.individual_albu_probs),
     ]
     if args.randomgamma:
-        train_tf_albu.append(a.RandomGamma())
+        train_tf_albu.append(a.RandomGamma(p=args.individual_albu_probs))
     if args.randombrightness:
-        train_tf_albu.append(a.RandomBrightness())
+        train_tf_albu.append(a.RandomBrightness(p=args.individual_albu_probs))
     if args.blur:
-        train_tf_albu.append(a.Blur())
+        train_tf_albu.append(a.Blur(p=args.individual_albu_probs))
     if args.elastic:
-        train_tf_albu.append(a.ElasticTransform())
+        train_tf_albu.append(a.ElasticTransform(p=args.individual_albu_probs))
     if args.optical_distortion:
-        train_tf_albu.append(a.OpticalDistortion())
+        train_tf_albu.append(a.OpticalDistortion(p=args.individual_albu_probs))
     if args.grid_distortion:
-        train_tf_albu.append(a.GridDistortion())
+        train_tf_albu.append(a.GridDistortion(p=args.individual_albu_probs))
     if args.grid_shuffle:
-        train_tf_albu.append(a.RandomGridShuffle())
+        train_tf_albu.append(a.RandomGridShuffle(p=args.individual_albu_probs))
     if args.hsv:
-        train_tf_albu.append(a.HueSaturationValue())
+        train_tf_albu.append(a.HueSaturationValue(p=args.individual_albu_probs))
     if args.invert:
-        train_tf_albu.append(a.InvertImg())
+        train_tf_albu.append(a.InvertImg(p=args.individual_albu_probs))
     if args.cutout:
-        train_tf_albu.append(a.Cutout(num_holes=5, max_h_size=80, max_w_size=80))
+        train_tf_albu.append(
+            a.Cutout(
+                num_holes=5, max_h_size=80, max_w_size=80, p=args.individual_albu_probs
+            )
+        )
     if args.shadow:
         assert args.pretrained, "RandomShadows needs 3 channels"
-        train_tf_albu.append(a.RandomShadow())
+        train_tf_albu.append(a.RandomShadow(p=args.individual_albu_probs))
     if args.fog:
         assert args.pretrained, "RandomFog needs 3 channels"
-        train_tf_albu.append(a.RandomFog())
+        train_tf_albu.append(a.RandomFog(p=args.individual_albu_probs))
     if args.sun_flare:
         assert args.pretrained, "RandomSunFlare needs 3 channels"
-        train_tf_albu.append(a.RandomSunFlare())
+        train_tf_albu.append(a.RandomSunFlare(p=args.individual_albu_probs))
     if args.solarize:
-        train_tf_albu.append(a.Solarize())
+        train_tf_albu.append(a.Solarize(p=args.individual_albu_probs))
     if args.equalize:
-        train_tf_albu.append(a.Equalize())
+        train_tf_albu.append(a.Equalize(p=args.individual_albu_probs))
     if args.grid_dropout:
-        train_tf_albu.append(a.GridDropout())
+        train_tf_albu.append(a.GridDropout(p=args.individual_albu_probs))
     train_tf_albu.append(a.GaussNoise(var_limit=args.noise_std ** 2, p=args.noise_prob))
     end_transformations = [
         a.ToFloat(max_value=255.0),
@@ -163,7 +168,7 @@ def create_albu_transform(args, mean, std):
         a.Compose(
             [
                 a.Compose(start_transformations),
-                a.Compose(train_tf_albu, p=args.albu_prop),
+                a.Compose(train_tf_albu, p=args.albu_prob),
                 a.Compose(end_transformations),
             ]
         )
@@ -479,12 +484,18 @@ def setup_pysyft(args, hook, verbose=False):
 def main(args, verbose=True, optuna_trial=None):
 
     use_cuda = args.cuda and torch.cuda.is_available()
-
-    torch.manual_seed(args.seed)
-    random.seed(args.seed)
-    np.random.seed(args.seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+    if args.deterministic and args.websockets:
+        warn(
+            "Training with GridNodes is not compatible with deterministic training.\n"
+            "Switching deterministic flag to False"
+        )
+        args.deterministic = False
+    if args.deterministic:
+        torch.manual_seed(args.seed)
+        random.seed(args.seed)
+        np.random.seed(args.seed)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
     device = torch.device("cuda" if use_cuda else "cpu")  # pylint: disable=no-member
 
@@ -699,6 +710,39 @@ def main(args, verbose=True, optuna_trial=None):
         if args.train_federated
         else opt(model.parameters(), **opt_kwargs)
     )
+    privacy_engines = None
+    if args.differentially_private:
+        if type(optimizer) == dict:
+            warn(
+                "Unfortunately differential privacy has"
+                " lots of limitations right now, including non federated "
+                "training and models without BatchNorm."
+            )
+            exit()
+            privacy_engines = {
+                idt.id: tdp.PrivacyEngine(
+                    model[idt.id],
+                    args.batch_size,
+                    len(tl.federated_dataset),
+                    alphas=[1, 10, 100],
+                    noise_multiplier=1.3,
+                    max_grad_norm=1.0,
+                )
+                for idt, tl in train_loader.items()
+                if idt.id not in ["local_model", "crypto_provider"]
+            }
+            for w, pe in privacy_engines.items():
+                pe.attach(optimizer[w])
+        else:
+            privacy_engine = tdp.PrivacyEngine(
+                model,
+                args.batch_size,
+                len(train_loader.dataset),
+                alphas=[1, 10, 100],
+                noise_multiplier=1.3,
+                max_grad_norm=1.0,
+            )
+            privacy_engine.attach(optimizer)
     loss_args = {"weight": cw, "reduction": "mean"}
     if args.mixup or (args.weight_classes and args.train_federated):
         loss_fn = Cross_entropy_one_hot
@@ -802,6 +846,7 @@ def main(args, verbose=True, optuna_trial=None):
                 test_params=None,
                 vis_params=vis_params,
                 verbose=verbose,
+                privacy_engines=privacy_engines,
             )
 
         else:
