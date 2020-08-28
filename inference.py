@@ -141,7 +141,9 @@ if __name__ == "__main__":
             data_owner = sy.grid.clients.data_centric_fl_client.DataCentricFLClient(
                 hook,
                 "http://{:s}:{:s}".format(
-                    worker_dict["data_owner"]["host"], worker_dict["data_owner"]["port"]
+                    worker_dict["data_owner"]["host"],
+                    worker_dict["data_owner"]["port"],
+                    is_client_worker=True,
                 ),
                 is_client_worker=True,
             )
@@ -154,6 +156,7 @@ if __name__ == "__main__":
                     "http://{:s}:{:s}".format(
                         worker_dict["crypto_provider"]["host"],
                         worker_dict["crypto_provider"]["port"],
+                        is_client_worker=True,
                     ),
                     is_client_worker=True,
                 )
@@ -162,6 +165,7 @@ if __name__ == "__main__":
                 "http://{:s}:{:s}".format(
                     worker_dict["model_owner"]["host"],
                     worker_dict["model_owner"]["port"],
+                    is_client_worker=True,
                 ),
                 is_client_worker=True,
             )
@@ -287,6 +291,14 @@ if __name__ == "__main__":
             "protocol": "fss",
             "requires_grad": False,
         }
+<<<<<<< HEAD
+        model.fix_precision(precision_fractional=4, dtype="long").share(
+            *workers, crypto_provider=crypto_provider, requires_grad=False
+        )
+    # test method
+    model.eval()
+    total_pred, total_target, total_scores = [], [], []
+=======
         # model.send(model_owner)
         model.fix_precision(**fix_prec_kwargs).share(*workers, **share_kwargs)
     # test method
@@ -294,6 +306,7 @@ if __name__ == "__main__":
     total_pred, total_target, total_scores = [], [], []
     # if args.encrypted_inference:
     #     mean, std = mean.send(data_owner), std.send(data_owner)
+>>>>>>> 1ddfac2a6fa98467045760cfcd7bc80eb4c2bb96
     with torch.no_grad():
         for i, data in tqdm(
             enumerate(dataset),

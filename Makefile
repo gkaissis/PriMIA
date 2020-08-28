@@ -98,7 +98,7 @@ crypto_provider:
 	python -m Node --id crypto_provider --port 8780
 
 model_owner:
-	python -m Node --id crypto_provider --port 8771
+	python -m Node --id model_owner --port 8771
 
 inference_setup: 
 	make data_owner & make crypto_provider & make model_owner
