@@ -152,10 +152,10 @@ if __name__ == "__main__":
         warn(
             "Running with 'stochastic' turned off means all executions of the script will be run with a fixed random seed of 1, potentially leading to low variance between executions. If this is not desired, set the 'stochastic' flag at execution."
         )
-    else:
-        args.seed = random.randint(1, 10_000)
-        print(Fore.RED + f"Random seed set to {args.seed}.")
     for i in trange(cmd_args.num_runs, ncols=60, desc=Fore.CYAN + f"Run no."):
+        if cmd_args.stochastic:
+            args.seed = random.randint(1, 10_000)
+            print(Fore.RED + f"(Seed {args.seed})")
         results_dict = {}
         time_dict = {}
         for s in tqdm(sigmas, ncols=45, desc=Fore.GREEN + f"Sigma"):
