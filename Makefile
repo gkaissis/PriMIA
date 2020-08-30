@@ -11,7 +11,7 @@ doc_install:
 #Cleanup
 clean_python:
 	rm -rf .mypy_cache
-	rm -rf torchlib/__pycache__ __pycache__
+	rm -rf torchlib/__pycache__ __pycache__ Node/__pycache__
 
 clean_weights:
 	rm -rf model_weights
@@ -53,13 +53,13 @@ federated_secure:
 	python train.py --config configs/test_configs/weighted_classes.ini --train_federated --data_dir data/server_simulation
 	@echo Finished Training on VirtualWorkers with SecAgg
 
-federated_gridnode:
-	python train.py --config configs/torch/pneumonia-resnet-pretrained.ini --train_federated --data_dir data/server_simulation --websockets
-
 federated_insecure:
 	@echo Training on VirtualWorkers without SecAgg
 	python train.py --config configs/test_configs/weighted_classes.ini --train_federated --data_dir data/server_simulation --unencrypted_aggregation
 	@echo Finished Training on VirtualWorkers without SecAgg
+
+federated_gridnode:
+	python train.py --config configs/torch/pneumonia-resnet-pretrained.ini --train_federated --data_dir data/server_simulation --websockets
 
 local:
 	@echo Training Locally
@@ -102,4 +102,12 @@ model_owner:
 
 inference_setup: 
 	make data_owner & make crypto_provider & make model_owner
+
+encrypted_inference_local:
+	@echo Make sure to use the inference environment for this to work!
+	python inference.py --data_dir .inference --model_weights model_weights/final_federated_dataserver_simulation_2020-08-30_16-01-38.pt --encrypted_inference
+
+encrypted_inference_http:
+	@echo Make sure to use the inference environment for this to work!
+	python inference.py --data_dir .inference --model_weights model_weights/final_federated_dataserver_simulation_2020-08-30_16-01-38.pt --encrypted_inference --websockets_config configs/websetting/config_inference.csv
 

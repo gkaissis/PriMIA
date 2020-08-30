@@ -31,6 +31,7 @@ from torchlib.models import vgg16, resnet18, conv_at_resolution
 from torchlib.websocket_utils import read_websocket_config
 from torchlib.dicomtools import CombinedLoader
 from torchlib.dataloader import AlbumentationsTorchTransform
+from collections import Counter
 
 
 class PathDataset(torch.utils.data.Dataset):
@@ -143,9 +144,7 @@ if __name__ == "__main__":
                 "http://{:s}:{:s}".format(
                     worker_dict["data_owner"]["host"],
                     worker_dict["data_owner"]["port"],
-                    is_client_worker=True,
                 ),
-                is_client_worker=True,
             )
             if cmd_args.encrypted_inference:
                 assert (
@@ -156,18 +155,14 @@ if __name__ == "__main__":
                     "http://{:s}:{:s}".format(
                         worker_dict["crypto_provider"]["host"],
                         worker_dict["crypto_provider"]["port"],
-                        is_client_worker=True,
                     ),
-                    is_client_worker=True,
                 )
             model_owner = sy.grid.clients.data_centric_fl_client.DataCentricFLClient(
                 hook,
                 "http://{:s}:{:s}".format(
                     worker_dict["model_owner"]["host"],
                     worker_dict["model_owner"]["port"],
-                    is_client_worker=True,
                 ),
-                is_client_worker=True,
             )
         else:
             data_owner = sy.VirtualWorker(hook, id="data_owner")
@@ -291,22 +286,10 @@ if __name__ == "__main__":
             "protocol": "fss",
             "requires_grad": False,
         }
-<<<<<<< HEAD
-        model.fix_precision(precision_fractional=4, dtype="long").share(
-            *workers, crypto_provider=crypto_provider, requires_grad=False
-        )
-    # test method
-    model.eval()
-    total_pred, total_target, total_scores = [], [], []
-=======
-        # model.send(model_owner)
         model.fix_precision(**fix_prec_kwargs).share(*workers, **share_kwargs)
     # test method
     model.eval()
     total_pred, total_target, total_scores = [], [], []
-    # if args.encrypted_inference:
-    #     mean, std = mean.send(data_owner), std.send(data_owner)
->>>>>>> 1ddfac2a6fa98467045760cfcd7bc80eb4c2bb96
     with torch.no_grad():
         for i, data in tqdm(
             enumerate(dataset),
@@ -314,11 +297,6 @@ if __name__ == "__main__":
             desc="performing inference",
             leave=False,
         ):
-            ## TODO: remove
-            # if type(data) == tuple:
-            #     if data[1] != 1:
-            #         continue
-            #     data = data[0]
             if len(data.shape) > 4:
                 data = data.squeeze()
                 if len(data.shape) > 4:
@@ -345,7 +323,6 @@ if __name__ == "__main__":
                 break
     pred_dict = {"Inference Results": dict(enumerate(total_pred))}
     sys.stdout.write(json.dumps(pred_dict))
-    from collections import Counter
 
     print("\n{:s}".format(str(Counter(total_pred))))
 
