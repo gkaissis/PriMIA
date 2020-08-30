@@ -6,11 +6,31 @@ import sys, os.path
 import pandas as pd
 from matplotlib import pyplot as plt
 from torch import set_num_threads
+import random
+from warnings import warn
+import colorama
+from colorama import Fore
 
+colorama.init(autoreset=True)
 
 sys.path.insert(0, os.path.split(sys.path[0])[0])
 
 from train import main
+
+from contextlib import contextmanager
+import sys, os
+from tqdm import trange, tqdm
+
+
+@contextmanager
+def shutup():
+    with open(os.devnull, "w") as devnull:
+        old_stderr, old_stdout = sys.stderr, sys.stdout
+        sys.stderr, sys.stdout = devnull, devnull
+        try:
+            yield
+        finally:
+            sys.stderr, sys.stdout = old_stderr, old_stdout
 
 
 def writefile(file_name: str, input_dict: dict, headers: list):
@@ -49,10 +69,15 @@ if __name__ == "__main__":
     parser.add_argument(
         "--visualize", action="store_true", help="just visualize the results so far."
     )
-    parser.add_argument("--num_runs", type=int, help="How many runs for each lambda?")
-    parser.add_argument("--num_threads", type=int, help="How threads to use?")
+    parser.add_argument("--num_runs", type=int, help="How many runs for each sigma?")
+    parser.add_argument("--num_threads", type=int, help="How many threads to use?")
+    parser.add_argument(
+        "--stochastic",
+        action="store_true",
+        help="Choose a random seed for the 'num_runs' runs. If not set, the seed will default to 1 for every execution of the script.",
+    )
     cmd_args = parser.parse_args()
-    set_num_threads(args.num_threads)
+    set_num_threads(cmd_args.num_threads)
     if cmd_args.visualize:
         visualize_file("figure_scripts/sigmas.csv")
         visualize_file("figure_scripts/sigma_times.csv")
@@ -81,7 +106,7 @@ if __name__ == "__main__":
         beta2=0.99,
         weight_decay=5e-4,
         deterministic=True,
-        seed=42,
+        seed=1,
         log_interval=10,
         optimizer="Adam",
         model="resnet-18",
@@ -123,18 +148,25 @@ if __name__ == "__main__":
         weighted_averaging=False,
     )
     sigmas = range(1, 8)
-    for i in range(cmd_args.num_runs):
-        processes = []
+    if not cmd_args.stochastic:
+        warn(
+            "Running with 'stochastic' turned off means all executions of the script will be run with a fixed random seed of 1, potentially leading to low variance between executions. If this is not desired, set the 'stochastic' flag at execution."
+        )
+    else:
+        args.seed = random.randint(1, 10_000)
+        print(Fore.RED + f"Random seed set to {args.seed}.")
+    for i in trange(cmd_args.num_runs, ncols=60, desc=Fore.CYAN + f"Run no."):
         results_dict = {}
         time_dict = {}
-        for s in sigmas:
+        for s in tqdm(sigmas, ncols=45, desc=Fore.GREEN + f"Sigma"):
             args_copy = deepcopy(args)
             args_copy.sync_every_n_batch = s
             t1 = time()
-            results_dict[str(s)] = main(args_copy, verbose=False)
+            with shutup():
+                results_dict[str(s)] = main(args_copy, verbose=False)
             t = time() - t1
             time_dict[str(s)] = t
-        writefile("figure_scripts/sigmas.csv", results_dict, sigmas)
-        writefile("figure_scripts/sigma_times.csv", time_dict, sigmas)
-        print("Finished {:d} repetition".format(i + 1))
+        writefile("figure_scripts/sigmas.csv", results_dict, list(sigmas))
+        writefile("figure_scripts/sigma_times.csv", time_dict, list(sigmas))
+        print(Fore.CYAN + "Finished {:d} repetition".format(i + 1))
 

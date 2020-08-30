@@ -512,15 +512,6 @@ def main(args, verbose=True, optuna_trial=None):
     class_names = None
     # Dataset creation and definition
     if args.train_federated:
-        if args.websockets and not args.unencrypted_aggregation:
-            raise NotImplementedError(
-                "Unfortunately PySyft doesn't support"
-                " this currently without turning off the garbage collector and "
-                "several other issues. Therefore we are not supporting this yet. "
-                "To still train on real nodes turn off secure aggregation with the "
-                "--unencrypted_aggregation flag."
-            )
-
         hook = sy.TorchHook(torch)
         (
             train_loader,
@@ -679,7 +670,9 @@ def main(args, verbose=True, optuna_trial=None):
             "pooling": args.pooling_type,
         }
     else:
-        raise NotImplementedError("model unknown")
+        raise ValueError(
+            "Model name not understood. Please choose one of 'vgg16, 'simpleconv', resnet-18'."
+        )
     if args.train_federated:
         model = model_type(**model_args)
         model = {
@@ -696,7 +689,9 @@ def main(args, verbose=True, optuna_trial=None):
         opt = optim.Adam
         opt_kwargs["betas"] = (args.beta1, args.beta2)
     else:
-        raise NotImplementedError("optimization not implemented")
+        raise ValueError(
+            "Optimizer name not understood. Please use one of 'SGD' or 'Adam'."
+        )
         # if args.train_federated and not args.secure_aggregation:
         #     from syft.federated.floptimizer import Optims
 
@@ -715,9 +710,7 @@ def main(args, verbose=True, optuna_trial=None):
     if args.differentially_private:
         if type(optimizer) == dict:
             warn(
-                "Unfortunately differential privacy has"
-                " lots of limitations right now, including non federated "
-                "training and models without BatchNorm."
+                "Differential Privacy is currently only implemented for local training and models without BatchNorm."
             )
             exit()
             privacy_engines = {
