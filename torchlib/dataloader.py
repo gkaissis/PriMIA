@@ -13,8 +13,12 @@ from torch import (  # pylint:disable=no-name-in-module
     save,
     is_tensor,
     from_numpy,
+    randperm,
+    default_generator,
 )
+from torch._utils import _accumulate
 import albumentations as a
+from copy import deepcopy
 from torch.utils import data as torchdata
 from torchvision.datasets import MNIST
 from torchvision import transforms
@@ -194,6 +198,32 @@ class PPPP(torchdata.Dataset):
         calc_mean_std(
             self, save_folder="data",
         )
+
+
+##This is from torch.data.utils and adapted for our purposes
+class Subset(torchdata.Dataset):
+    def __init__(self, dataset, indices):
+        self.dataset = deepcopy(dataset)
+        self.indices = indices
+
+    def __getitem__(self, idx):
+        return self.dataset[self.indices[idx]]
+
+    def __len__(self):
+        return len(self.indices)
+
+
+def random_split(dataset, lengths, generator=default_generator):
+    if sum(lengths) != len(dataset):
+        raise ValueError(
+            "Sum of input lengths does not equal the length of the input dataset!"
+        )
+
+    indices = randperm(sum(lengths), generator=generator).tolist()
+    return [
+        Subset(dataset, indices[offset - length : offset])
+        for offset, length in zip(_accumulate(lengths), lengths)
+    ]
 
 
 if __name__ == "__main__":

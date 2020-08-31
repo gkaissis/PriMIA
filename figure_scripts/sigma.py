@@ -70,7 +70,9 @@ if __name__ == "__main__":
         "--visualize", action="store_true", help="just visualize the results so far."
     )
     parser.add_argument("--num_runs", type=int, help="How many runs for each sigma?")
-    parser.add_argument("--num_threads", type=int, help="How many threads to use?")
+    parser.add_argument(
+        "--num_threads", type=int, default=16, help="How many threads to use?"
+    )
     parser.add_argument(
         "--stochastic",
         action="store_true",
@@ -146,6 +148,9 @@ if __name__ == "__main__":
         keep_optim_dict=False,
         repetitions_dataset=5,
         weighted_averaging=False,
+        num_threads=16,
+        save_file=None,
+        name="sigma",
     )
     sigmas = range(1, 8)
     if not cmd_args.stochastic:

@@ -29,6 +29,7 @@ from torchlib.dataloader import (
     LabelMNIST,
     calc_mean_std,
     AlbumentationsTorchTransform,
+    random_split,
 )  # pylint:disable=import-error
 from torchlib.models import (
     conv_at_resolution,  # pylint:disable=import-error
@@ -333,7 +334,7 @@ def setup_pysyft(args, hook, verbose=False):
             # repetitions = 1 if worker.id == "validation" else args.repetitions_dataset
             if args.mixup:
                 dataset = torch.utils.data.DataLoader(
-                    dataset, batch_size=1, shuffle=True
+                    dataset, batch_size=1, shuffle=True, num_workers=args.num_threads,
                 )
                 mixup = MixUp(λ=args.mixup_lambda, p=args.mixup_prob)
                 last_set = None
@@ -455,7 +456,10 @@ def setup_pysyft(args, hook, verbose=False):
         ), "We can only handle data that has 3 classes: normal, bacterial and viral"
 
     val_loader = torch.utils.data.DataLoader(
-        valset, batch_size=args.test_batch_size, shuffle=False
+        valset,
+        batch_size=args.test_batch_size,
+        shuffle=False,
+        num_workers=args.num_threads,
     )
     assert len(train_loader.keys()) == (
         len(workers.keys())
@@ -500,7 +504,7 @@ def main(args, verbose=True, optuna_trial=None):
 
     device = torch.device("cuda" if use_cuda else "cpu")  # pylint: disable=no-member
 
-    kwargs = {"num_workers": 1, "pin_memory": True} if use_cuda else {}
+    kwargs = {"num_workers": args.num_threads, "pin_memory": True,} if use_cuda else {}
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     exp_name = "{:s}_{:s}_{:s}".format(
@@ -530,7 +534,9 @@ def main(args, verbose=True, optuna_trial=None):
         )
     else:
         if args.data_dir == "mnist":
-            val_mean_std = torch.tensor([[0.1307], [0.3081]])
+            val_mean_std = torch.tensor(  # pylint:disable=not-callable
+                [[0.1307], [0.3081]]
+            )
             mean, std = val_mean_std
             train_tf = [
                 transforms.Resize(args.train_resolution),
@@ -582,12 +588,25 @@ def main(args, verbose=True, optuna_trial=None):
 
         total_L = total_L if args.train_federated else len(dataset)
         fraction = 1.0 / args.validation_split
-        dataset, valset = torch.utils.data.random_split(
+        dataset, valset = random_split(
             dataset,
             [int(round(total_L * (1.0 - fraction))), int(round(total_L * fraction))],
         )
         train_loader = torch.utils.data.DataLoader(
             dataset, batch_size=args.batch_size, shuffle=True, **kwargs
+        )
+        mean, std = val_mean_std
+        valset.dataset.transform = AlbumentationsTorchTransform(
+            a.Compose(
+                [
+                    a.Resize(args.inference_resolution, args.inference_resolution),
+                    a.RandomCrop(args.train_resolution, args.train_resolution),
+                    a.ToFloat(max_value=255.0),
+                    a.Normalize(
+                        mean[None, None, :], std[None, None, :], max_pixel_value=1.0
+                    ),
+                ]
+            )
         )
         val_loader = torch.utils.data.DataLoader(
             valset, batch_size=args.test_batch_size, shuffle=False, **kwargs,
@@ -915,12 +934,10 @@ def main(args, verbose=True, optuna_trial=None):
     shutil.copyfile(
         best_model_file, "model_weights/final_{:s}.pt".format(exp_name),
     )
-    save_config_results(
-        args,
-        matthews_scores[best_score_idx],
-        timestamp,
-        "model_weights/completed_trainings.csv",
-    )
+    if args.save_file:
+        save_config_results(
+            args, matthews_scores[best_score_idx], timestamp, args.save_file,
+        )
 
     # delete old model weights
     for model_file in model_paths:
@@ -968,6 +985,18 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--verbose", action="store_true", help="Sets Syft workers to verbose mode"
+    )
+    parser.add_argument(
+        "--save_file",
+        type=str,
+        default="model_weights/completed_trainings.csv",
+        help="Store args and result in csv file.",
+    )
+    parser.add_argument(
+        "--training_name",
+        default=None,
+        type=str,
+        help="Optional name to be stored in csv file to later identify training.",
     )
     cmd_args = parser.parse_args()
 

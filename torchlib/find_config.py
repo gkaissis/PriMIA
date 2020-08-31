@@ -30,7 +30,7 @@ def objective(trial: opt.trial):
         inference_resolution=224,
         test_batch_size=10,
         test_interval=1,
-        validation_split=10,
+        validation_split=5,
         epochs=epochs,
         lr=lr,
         end_lr=trial.suggest_loguniform("end_lr", 1e-6, lr),
@@ -56,8 +56,13 @@ def objective(trial: opt.trial):
         noise_prob=trial.suggest_float("noise_prob", 0.0, 1.0),
         mixup=trial.suggest_categorical("mixup", [True, False]),
         repetitions_dataset=repetitions_dataset,
+        num_threads=0,  ## somehow necessary for optuna
+        save_file="model_weights/completed_trainings.csv",
+        name="optuna",
     )
-    apply_albu = trial.suggest_categorical("apply albu transforms", [True, False])
+    apply_albu = (
+        True  # trial.suggest_categorical("apply albu transforms", [True, False])
+    )
     args.albu_prob = trial.suggest_float("albu_prob", 0.0, 1.0) if apply_albu else 0.0
     args.individual_albu_probs = (
         trial.suggest_float("individual_albu_probs", 0.0, 1.0) if apply_albu else 0.0

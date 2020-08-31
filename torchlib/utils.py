@@ -77,6 +77,16 @@ class LearningRateScheduler:
 class Arguments:
     def __init__(self, cmd_args, config, mode: str = "train", verbose: bool = True):
         assert mode in ["train", "inference"], "no other mode known"
+        self.name = (
+            cmd_args.training_name
+            if hasattr(cmd_args, "training_name") and cmd_args.training_name
+            else "default"
+        )
+        self.save_file = (
+            cmd_args.save_file
+            if hasattr(cmd_args, "save_file")
+            else "model_weights/completed_trainings.csv"
+        )
         self.batch_size = config.getint("config", "batch_size")  # , fallback=1)
         self.test_batch_size = config.getint(
             "config", "test_batch_size"
@@ -223,6 +233,7 @@ class Arguments:
         self.websockets = cmd_args.websockets if mode == "train" else False
         if self.websockets:
             assert self.train_federated, "If you use websockets it must be federated"
+        self.num_threads = config.getint("system", "num_threads", fallback=0)
 
     @classmethod
     def from_namespace(cls, args):
@@ -385,13 +396,15 @@ class Cross_entropy_one_hot(torch.nn.Module):
 
     def forward(self, output: torch.Tensor, target: torch.Tensor):
         if self.reduction == "mean":
-            loss = torch.mean(
+            loss = torch.mean(  # pylint:disable=no-member
                 (
-                    torch.sum(self.weight * target, dim=1)
+                    torch.sum(self.weight * target, dim=1)  # pylint:disable=no-member
                     if self.weight is not None
                     else 1.0
                 )
-                * torch.sum(-target * self.logsoftmax(output), dim=1)
+                * torch.sum(  # pylint:disable=no-member
+                    -target * self.logsoftmax(output), dim=1
+                )
             )
         elif self.reduction == "sum":
             loss = torch.sum(  # pylint:disable=no-member
@@ -749,10 +762,16 @@ def aggregation(
         ), "Shape mismatch AFTER sending and getting"
         if secure:
             sumstacked = (
-                torch.sum(torch.stack(remote_param_list), dim=0).get().float_prec()
+                torch.sum(  # pylint:disable=no-member
+                    torch.stack(remote_param_list), dim=0  # pylint:disable=no-member
+                )
+                .get()
+                .float_prec()
             )
         else:
-            sumstacked = torch.sum(torch.stack(remote_param_list), dim=0)
+            sumstacked = torch.sum(  # pylint:disable=no-member
+                torch.stack(remote_param_list), dim=0  # pylint:disable=no-member
+            )
         fresh_state_dict[key] = sumstacked if weights else sumstacked / len(workers)
     local_model.load_state_dict(fresh_state_dict)
     return local_model
