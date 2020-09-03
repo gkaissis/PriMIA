@@ -132,9 +132,10 @@ def objective(trial: opt.trial):
         args.unencrypted_aggregation = False
         args.sync_every_n_batch = trial.suggest_int("sigma", 1, 5)
         args.wait_interval = 0.1
-        args.keep_optim_dict = trial.suggest_categorical(
-            "keep_optim_dict", [True, False]
-        )
+        args.keep_optim_dict = False
+        # trial.suggest_categorical(
+        #     "keep_optim_dict", [True, False]
+        # )
         args.weighted_averaging = trial.suggest_categorical(
             "weighted_averaging", [True, False]
         )

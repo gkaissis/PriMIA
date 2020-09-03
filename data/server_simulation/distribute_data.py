@@ -93,6 +93,12 @@ if __name__ == "__main__":
             else:
                 copyfile(src_file, target_file)
     test_imgs = ImageFolder(args.test_data_src)
+
+    for c in train_imgs.classes:
+        for ps in ["validation"]:
+            p = os.path.join(ps, c)
+            if not os.path.isdir(p):
+                os.makedirs(p)
     for path, class_idx in tqdm(
         test_imgs.samples, total=len(test_imgs), desc="create test folder", leave=False,
     ):

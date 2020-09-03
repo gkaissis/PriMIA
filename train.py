@@ -563,7 +563,12 @@ def main(args, verbose=True, optuna_trial=None):
                 download=True,
                 transform=transforms.Compose(train_tf),
             )
-
+            total_L = len(dataset)
+            fraction = 1.0 / args.validation_split
+            dataset, valset = random_split(
+                dataset,
+                [int(ceil(total_L * (1.0 - fraction))), int(floor(total_L * fraction))],
+            )
         else:
             # Different train and inference resolution only works with adaptive
             # pooling in model activated
