@@ -51,7 +51,7 @@ def objective(trial: opt.trial):
         rotation=trial.suggest_int("rotation", 0, 90),
         translate=0.0,  # trial.suggest_float("translate", 0, 0.2),
         scale=trial.suggest_float("scale", 0.0, 0.5),
-        shear=trial.suggest_int("shear", 0, 3),
+        shear=trial.suggest_int("shear", 0, 10),
         noise_std=trial.suggest_float("noise_std", 0.0, 0.1),
         noise_prob=trial.suggest_float("noise_prob", 0.0, 1.0),
         mixup=trial.suggest_categorical("mixup", [True, False]),
@@ -60,9 +60,7 @@ def objective(trial: opt.trial):
         save_file="model_weights/completed_trainings.csv",
         name="optuna",
     )
-    apply_albu = (
-        True  # trial.suggest_categorical("apply albu transforms", [True, False])
-    )
+    apply_albu = trial.suggest_categorical("apply albu transforms", [True, False])
     args.albu_prob = trial.suggest_float("albu_prob", 0.0, 1.0) if apply_albu else 0.0
     args.individual_albu_probs = (
         trial.suggest_float("individual_albu_probs", 0.0, 1.0) if apply_albu else 0.0

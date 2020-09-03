@@ -25,6 +25,7 @@ import albumentations as a
 from tabulate import tabulate
 from torchvision import datasets, models, transforms
 from optuna import TrialPruned
+from math import ceil, floor
 from torchlib.dataloader import (
     LabelMNIST,
     calc_mean_std,
@@ -164,8 +165,12 @@ def create_albu_transform(args, mean, std):
     train_tf_albu.append(a.GaussNoise(var_limit=args.noise_std ** 2, p=args.noise_prob))
     end_transformations = [
         a.ToFloat(max_value=255.0),
-        a.Normalize(mean[None, None, :], std[None, None, :], max_pixel_value=1.0),
+        a.Normalize(mean, std, max_pixel_value=1.0),
     ]
+    if not args.pretrained:
+        end_transformations.append(
+            a.Lambda(image=lambda x, **kwargs: x[:, :, np.newaxis])
+        )
     train_tf_albu = AlbumentationsTorchTransform(
         a.Compose(
             [
@@ -271,7 +276,7 @@ def setup_pysyft(args, hook, verbose=False):
                         a.Compose(
                             [
                                 a.ToFloat(max_value=255.0),
-                                a.Lambda(image=lambda x, **kwargs: x[np.newaxis, :, :]),
+                                a.Lambda(image=lambda x, **kwargs: x[:, :, np.newaxis]),
                             ]
                         )
                     ),
@@ -432,7 +437,7 @@ def setup_pysyft(args, hook, verbose=False):
                 a.Compose(
                     [
                         a.ToFloat(max_value=255.0),
-                        a.Lambda(image=lambda x, **kwargs: x[np.newaxis, :, :]),
+                        a.Lambda(image=lambda x, **kwargs: x[:, :, np.newaxis]),
                         a.Normalize(mean, std, max_pixel_value=1.0),
                     ]
                 )
@@ -538,6 +543,8 @@ def main(args, verbose=True, optuna_trial=None):
                 [[0.1307], [0.3081]]
             )
             mean, std = val_mean_std
+            if args.pretrained:
+                mean, std = mean[None, None, :], std[None, None, :]
             train_tf = [
                 transforms.Resize(args.train_resolution),
                 transforms.ToTensor(),
@@ -582,36 +589,42 @@ def main(args, verbose=True, optuna_trial=None):
             ), "Dataset must have exactly 3 classes: normal, bacterial and viral"
             val_mean_std = calc_mean_std(dataset)
             mean, std = val_mean_std
+            if args.pretrained:
+                mean, std = mean[None, None, :], std[None, None, :]
             dataset.transform = create_albu_transform(args, mean, std)
             class_names = dataset.classes
+            stats_tf.transform.transforms.transforms.append(
+                a.Normalize(mean, std, max_pixel_value=1.0)
+            )
+            valset = datasets.ImageFolder(
+                "data/test", transform=stats_tf, loader=loader
+            )
             # occurances = dataset.get_class_occurances()
 
-        total_L = total_L if args.train_federated else len(dataset)
-        fraction = 1.0 / args.validation_split
-        dataset, valset = random_split(
-            dataset,
-            [int(round(total_L * (1.0 - fraction))), int(round(total_L * fraction))],
-        )
+        # total_L = total_L if args.train_federated else len(dataset)
+        # fraction = 1.0 / args.validation_split
+        # dataset, valset = random_split(
+        #     dataset,
+        #     [int(ceil(total_L * (1.0 - fraction))), int(floor(total_L * fraction))],
+        # )
         train_loader = torch.utils.data.DataLoader(
             dataset, batch_size=args.batch_size, shuffle=True, **kwargs
         )
-        mean, std = val_mean_std
-        valset.dataset.transform = AlbumentationsTorchTransform(
-            a.Compose(
-                [
-                    a.Resize(args.inference_resolution, args.inference_resolution),
-                    a.RandomCrop(args.train_resolution, args.train_resolution),
-                    a.ToFloat(max_value=255.0),
-                    a.Normalize(
-                        mean[None, None, :], std[None, None, :], max_pixel_value=1.0
-                    ),
-                ]
-            )
-        )
+
+        # val_tf = [
+        #     a.Resize(args.inference_resolution, args.inference_resolution),
+        #     a.CenterCrop(args.inference_resolution, args.inference_resolution),
+        #     a.ToFloat(max_value=255.0),
+        #     a.Normalize(mean, std, max_pixel_value=1.0),
+        # ]
+        # if not args.pretrained:
+        #     val_tf.append(a.Lambda(image=lambda x, **kwargs: x[:, :, np.newaxis]))
+        # valset.dataset.transform = AlbumentationsTorchTransform(a.Compose(val_tf))
+
         val_loader = torch.utils.data.DataLoader(
             valset, batch_size=args.test_batch_size, shuffle=False, **kwargs,
         )
-        del total_L, fraction
+        # del total_L, fraction
 
     cw = None
     if args.weight_classes:

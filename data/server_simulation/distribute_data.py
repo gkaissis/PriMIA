@@ -33,12 +33,12 @@ if __name__ == "__main__":
         type=str,
         help="Source data folder for training data.",
     )
-    # parser.add_argument(
-    #     "--test_data_src",
-    #     default="../test",
-    #     type=str,
-    #     help="Source data folder for test data.",
-    # )
+    parser.add_argument(
+        "--test_data_src",
+        default="../test",
+        type=str,
+        help="Source data folder for test data.",
+    )
     parser.add_argument
     args = parser.parse_args()
     cur_path = os.path.abspath(os.getcwd())
@@ -66,11 +66,12 @@ if __name__ == "__main__":
     shuffle(shuffled_idcs)
     split_idx = len(shuffled_idcs) // 10
     ## first ten per cent are validation set
-    train_idcs, val_idcs = shuffled_idcs[split_idx:], shuffled_idcs[:split_idx]
+    train_idcs = shuffled_idcs
+    # train_idcs, val_idcs = shuffled_idcs[split_idx:], shuffled_idcs[:split_idx]
     for i in range(args.num_workers):
         idcs_worker = train_idcs[i :: args.num_workers]
         worker_imgs["worker{:d}".format(i + 1)] = idcs_worker
-    worker_imgs["validation"] = val_idcs
+    # worker_imgs["validation"] = val_idcs
     for c in train_imgs.classes:
         # for ps in ["train_total", "test"]:
         #     p = os.path.join(ps, c)
@@ -91,15 +92,15 @@ if __name__ == "__main__":
                 os.symlink(os.path.abspath(src_file), target_file)
             else:
                 copyfile(src_file, target_file)
-    # test_imgs = ImageFolder(args.test_data_src)
-    # for path, class_idx in tqdm(
-    #     test_imgs.samples, total=len(test_imgs), desc="create test folder", leave=False,
-    # ):
-    #     src_file = path
-    #     file_name = os.path.split(src_file)[1]
-    #     dst_file = os.path.join("test", test_imgs.classes[class_idx], file_name)
-    #     print("Copy {:s} to \t{:s}".format(src_file, dst_file))
-    #     if args.symbolic:
-    #         os.symlink(os.path.abspath(src_file), dst_file)
-    #     else:
-    #         copyfile(src_file, dst_file)
+    test_imgs = ImageFolder(args.test_data_src)
+    for path, class_idx in tqdm(
+        test_imgs.samples, total=len(test_imgs), desc="create test folder", leave=False,
+    ):
+        src_file = path
+        file_name = os.path.split(src_file)[1]
+        dst_file = os.path.join("validation", test_imgs.classes[class_idx], file_name)
+        # print("Copy {:s} to \t{:s}".format(src_file, dst_file))
+        if args.symbolic:
+            os.symlink(os.path.abspath(src_file), dst_file)
+        else:
+            copyfile(src_file, dst_file)

@@ -109,5 +109,5 @@ encrypted_inference_local:
 
 encrypted_inference_http:
 	@echo Make sure to use the inference environment for this to work!
-	python inference.py --data_dir .inference --model_weights model_weights/final_federated_dataserver_simulation_2020-08-30_16-01-38.pt --encrypted_inference --websockets_config configs/websetting/config_inference.csv
+	python inference.py --data_dir .inference --model_weights ~/Downloads/good_resnet.pt --encrypted_inference --websockets_config configs/websetting/config_inference.csv
 
