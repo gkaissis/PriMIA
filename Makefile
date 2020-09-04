@@ -32,7 +32,7 @@ server_folders:
 	cd data/server_simulation && python distribute_data.py && cd ../..
 
 symbolic_server_folders:
-	cd data/server_simulation && python distribute_data.py -s && cd ../..
+	cd data/server_simulation && python distribute_data.py -s && python calc_class_distribution.py && cd ../..
 
 minimal_server_folders: symbolic_server_folders
 	cd data/server_simulation && python delete_all_but_n.py 4 && python calc_class_distribution.py && cd ../..
