@@ -145,6 +145,7 @@ if __name__ == "__main__":
                     worker_dict["data_owner"]["host"],
                     worker_dict["data_owner"]["port"],
                 ),
+                http_protocol=True,
             )
             if cmd_args.encrypted_inference:
                 assert (
@@ -156,6 +157,7 @@ if __name__ == "__main__":
                         worker_dict["crypto_provider"]["host"],
                         worker_dict["crypto_provider"]["port"],
                     ),
+                    http_protocol=True,
                 )
             model_owner = sy.grid.clients.data_centric_fl_client.DataCentricFLClient(
                 hook,
@@ -163,6 +165,7 @@ if __name__ == "__main__":
                     worker_dict["model_owner"]["host"],
                     worker_dict["model_owner"]["port"],
                 ),
+                http_protocol=True,
             )
         else:
             data_owner = sy.VirtualWorker(hook, id="data_owner")
