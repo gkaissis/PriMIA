@@ -192,4 +192,11 @@ if __name__ == "__main__":
         vis.show()
 
     else:
-        study.optimize(objective, n_trials=cmdln_args.num_trials)
+        study.optimize(
+            objective,
+            n_trials=cmdln_args.num_trials,
+            catch=(Exception,),
+            gc_after_trial=True,
+            n_jobs=-1,
+        )
+
