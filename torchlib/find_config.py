@@ -1,6 +1,9 @@
 import optuna as opt
 from argparse import Namespace
 import sys, os.path
+import torch
+
+torch.set_num_threads(36)
 
 sys.path.insert(0, os.path.split(sys.path[0])[0])
 
@@ -142,8 +145,8 @@ def objective(trial: opt.trial):
     try:
         best_val_acc = main(args, verbose=False, optuna_trial=trial)
     except Exception as e:
-        print(str(args))
-        raise e
+        print(f"Trial failed with exception {e} and arguments {str(args)}.")
+        return 0
     return best_val_acc
 
 
@@ -174,6 +177,7 @@ if __name__ == "__main__":
         # )
         # pruner=opt.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=10),
     )
+
     if cmdln_args.visualize:
 
         vis = opt.visualization.plot_param_importances(study)
@@ -193,10 +197,6 @@ if __name__ == "__main__":
 
     else:
         study.optimize(
-            objective,
-            n_trials=cmdln_args.num_trials,
-            catch=(Exception,),
-            gc_after_trial=True,
-            n_jobs=-1,
+            objective, n_trials=cmdln_args.num_trials, catch=(Exception,), n_jobs=1
         )
 
