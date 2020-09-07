@@ -930,7 +930,13 @@ def secure_aggregation_epoch(
             )
             models = send_new_models(models["local_model"], models)
             pbar.set_description_str("Training with secure aggregation")
-            if not args.keep_optim_dict:
+            if args.keep_optim_dict:
+                # In the future we'd like to have a method here that aggregates
+                # the stats of all optimizers just as we do with models.
+                # However, this is a complex task and we currently have not
+                # the capacities for this.
+                pass
+            else:
                 for worker in optimizers.keys():
                     kwargs = {"lr": args.lr, "weight_decay": args.weight_decay}
                     ## TODO implement for SGD (also in train_federated)
