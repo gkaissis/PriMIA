@@ -17,6 +17,7 @@ from syft.frameworks.torch.fl.utils import add_model, scale_model
 from tabulate import tabulate
 from collections import Counter
 from copy import deepcopy
+from warnings import warn
 
 
 class LearningRateScheduler:
@@ -719,8 +720,6 @@ def aggregation(
         assert len(set(remote_shapes)) == 1 and local_shape == next(
             iter(set(remote_shapes))
         ), "Shape mismatch BEFORE sending and getting"
-    # print(list(local_keys))
-    # If we have reached here, we are pretty sure the models are identical down to the shapes
     fresh_state_dict = dict()
     for key in list(local_keys):  # which are same as remote_keys for sure now
         if "num_batches_tracked" in str(key):
@@ -740,7 +739,7 @@ def aggregation(
                             else 1
                         )
                     )
-                    .fix_prec()
+                    .fix_prec(precision_fractional=16)
                     .share(*workers, crypto_provider=crypto_provider, protocol="fss")
                     .get()
                 )
@@ -1304,8 +1303,9 @@ def test(
         try:
             roc_auc = mt.roc_auc_score(total_target, total_scores, multi_class="ovo")
         except ValueError:
-            raise UserWarning(
-                "ROC AUC score could not be calculated and was set to zero."
+            warn(
+                "ROC AUC score could not be calculated and was set to zero.",
+                category=UserWarning,
             )
             roc_auc = 0.0
         matthews_coeff = mt.matthews_corrcoef(total_target, total_pred)

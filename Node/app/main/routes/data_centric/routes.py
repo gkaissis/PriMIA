@@ -131,15 +131,12 @@ def syft_commands():
         response = local_worker._recv_msg(serialized_msg)
 
         decoded_response = response.decode(encoding)
-    except (
-        EmptyCryptoPrimitiveStoreError,
-        ResponseSignatureError,
-    ) as e:
+    except (EmptyCryptoPrimitiveStoreError, ResponseSignatureError,) as e:
+        # print(e)
         decoded_response = serialize(e)
         decoded_response = decoded_response.decode(encoding)
     response = {"payload": decoded_response}
     return Response(json.dumps(response), status=200, mimetype="application/json")
-
 
 
 @data_centric_routes.route("/models/", methods=["GET"])
