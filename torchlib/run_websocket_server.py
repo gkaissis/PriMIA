@@ -1,11 +1,12 @@
 import argparse
-import sys
-import os.path
 
-sys.path.append(
-    os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
-)
-from torchlib.websocket_utils import read_websocket_config
+from pandas import read_csv
+
+
+def read_websocket_config(path: str):
+    df = read_csv(path, header=None, index_col=0)
+    return df.to_dict()
+
 
 if __name__ == "__main__":
     from subprocess import Popen

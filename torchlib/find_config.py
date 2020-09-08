@@ -163,12 +163,18 @@ if __name__ == "__main__":
     parser.add_argument(
         "--visualize", action="store_true", help="Visualize optuna results."
     )
+    parser.add_argument(
+        "--db_file",
+        type=str,
+        default="sqlite:///model_weights/pneumonia_search.db",
+        help="Database file to store results.",
+    )
     cmdln_args = parser.parse_args()
     study = opt.create_study(
         study_name="federated_pneumonia"
         if cmdln_args.federated
         else "vanilla_pneumonia",
-        storage="sqlite:///model_weights/pneumonia_search.db",
+        storage=cmdln_args.db_file,
         load_if_exists=True,
         direction="maximize",
         pruner=opt.pruners.NopPruner()

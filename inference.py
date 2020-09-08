@@ -28,7 +28,7 @@ from random import seed as rseed
 
 from torchlib.utils import stats_table, Arguments  # pylint:disable=import-error
 from torchlib.models import vgg16, resnet18, conv_at_resolution
-from torchlib.websocket_utils import read_websocket_config
+from torchlib.run_websocket_server import read_websocket_config
 from torchlib.dicomtools import CombinedLoader
 from torchlib.dataloader import AlbumentationsTorchTransform
 from collections import Counter

@@ -184,7 +184,7 @@ def create_albu_transform(args, mean, std):
 
 
 def setup_pysyft(args, hook, verbose=False):
-    from torchlib.websocket_utils import (  # pylint:disable=import-error
+    from torchlib.run_websocket_server import (  # pylint:disable=import-error
         read_websocket_config,
     )
 

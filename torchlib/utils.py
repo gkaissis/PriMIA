@@ -482,9 +482,7 @@ def federated_avg(models: dict, weights=None):
     if weights:
         model = None
         for idt, partial_model in models.items():
-            scaled_model = scale_model(
-                partial_model, weights[idt]
-            )  # @a1302z are we consciously overwriting the id keyword here?
+            scaled_model = scale_model(partial_model, weights[idt])
             if model:
                 model = add_model(model, scaled_model)
             else:
@@ -841,7 +839,8 @@ def send_new_models(local_model, models):  # original version
             local_model.get()
         local_model.send(worker)
         models[worker].load_state_dict(local_model.state_dict())
-    local_model.get()
+    if local_model.location is not None:
+        local_model.get()
     return models  # returns models updated on workers
 
 
@@ -867,11 +866,6 @@ def secure_aggregation_epoch(
             loss_fns[worker.id] = loss_fns[worker.id].send(
                 worker
             )  # stuff sent to worker
-
-    models = send_new_models(
-        models["local_model"], models
-    )  # stuff sent to worker again (on 1st epoch it's irrelevant, afterwards it's the model updating)
-    # @a1302z we could refactor this to be more elegant and not do this twice in the first epoch
 
     if not args.keep_optim_dict:
         for worker in optimizers.keys():
@@ -927,7 +921,16 @@ def secure_aggregation_epoch(
                 test_params,
                 weights=weights,
             )
-            models = send_new_models(models["local_model"], models)
+            updated_models = send_new_models(
+                models["local_model"],
+                {
+                    w: model
+                    for w, model in models.items()
+                    if w in num_batches and num_batches[w] > batch_idx
+                },
+            )
+            for w, model in updated_models.items():
+                models[w] = model
             pbar.set_description_str("Training with secure aggregation")
             if args.keep_optim_dict:
                 # In the future we'd like to have a method here that aggregates
@@ -957,6 +960,7 @@ def secure_aggregation_epoch(
         test_params,
         weights=weights,
     )
+    models = send_new_models(models["local_model"], models)
     avg_loss = np.mean(avg_loss)
 
     return models, avg_loss
