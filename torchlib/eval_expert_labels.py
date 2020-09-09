@@ -11,8 +11,7 @@ sys.path.append(
     os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
 )
 from torchlib.utils import stats_table
-from torchlib.dataloader import AlbumentationsTorchTransform
-from torchlib.dicomtools import CombinedLoader
+from torchlib.dataloader import AlbumentationsTorchTransform, CombinedLoader
 from torchlib.models import vgg16, resnet18, conv_at_resolution
 
 if __name__ == "__main__":

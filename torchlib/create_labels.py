@@ -14,30 +14,7 @@ from os import path as ospath
 
 syspath.append(ospath.abspath(ospath.join(ospath.dirname(__file__), ospath.pardir)))
 from torchlib.models import vgg16, resnet18, conv_at_resolution
-from torchlib.dataloader import single_channel_loader
-
-
-class PathDataset(torch.utils.data.Dataset):
-    def __init__(self, root, transform=None, loader=default_loader):
-        super(PathDataset, self).__init__()
-        self.root = root
-        self.transform = transform
-
-        self.imgs = [
-            f
-            for f in listdir(root)
-            if re.search(r".*\.(jpg|jpeg|png|JPG|JPEG)$", f) and not f.startswith("._")
-        ]
-
-    def __len__(self):
-        return len(self.imgs)
-
-    def __getitem__(self, idx):
-        img_path = self.imgs[idx]
-        img = default_loader(ospath.join(self.root, img_path))
-        if self.transform:
-            img = self.transform(img)
-        return img, img_path
+from torchlib.dataloader import single_channel_loader, PathDataset
 
 
 if __name__ == "__main__":

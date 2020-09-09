@@ -29,6 +29,7 @@ from torchlib.dataloader import (
     AlbumentationsTorchTransform,
     random_split,
     create_albu_transform,
+    CombinedLoader,
 )  # pylint:disable=import-error
 from torchlib.models import (
     conv_at_resolution,  # pylint:disable=import-error
@@ -48,8 +49,6 @@ from torchlib.utils import (
     setup_pysyft,
     calc_class_weights,
 )
-
-from torchlib.dicomtools import CombinedLoader
 
 
 def main(args, verbose=True, optuna_trial=None):

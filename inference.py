@@ -29,62 +29,13 @@ from random import seed as rseed
 from torchlib.utils import stats_table, Arguments  # pylint:disable=import-error
 from torchlib.models import vgg16, resnet18, conv_at_resolution
 from torchlib.run_websocket_server import read_websocket_config
-from torchlib.dicomtools import CombinedLoader
-from torchlib.dataloader import AlbumentationsTorchTransform
+from torchlib.dataloader import (
+    AlbumentationsTorchTransform,
+    PathDataset,
+    RemoteTensorDataset,
+    CombinedLoader,
+)
 from collections import Counter
-
-
-class PathDataset(torch.utils.data.Dataset):
-    def __init__(
-        self,
-        root,
-        transform=None,
-        loader=CombinedLoader(),
-        extensions=[
-            ".jpg",
-            ".jpeg",
-            ".png",
-            ".ppm",
-            ".bmp",
-            ".pgm",
-            ".tif",
-            ".tiff",
-            ".webp",
-            ".dcm",
-            ".dicom",
-        ],
-    ):
-        super(PathDataset, self).__init__()
-        self.root = root
-        self.transform = transform
-        self.loader = loader
-        self.imgs = [
-            f
-            for f in listdir(root)
-            if os.path.splitext(f)[1].lower() in extensions
-            and not os.path.split(f)[1].lower().startswith("._")
-        ]
-
-    def __len__(self):
-        return len(self.imgs)
-
-    def __getitem__(self, idx):
-        img_path = self.imgs[idx]
-        img = self.loader(os.path.join(self.root, img_path))
-        if self.transform:
-            img = self.transform(img)
-        return img
-
-
-class RemoteTensorDataset(torch.utils.data.Dataset):
-    def __init__(self, tensor):
-        self.tensor = tensor
-
-    def __len__(self):
-        return self.tensor.shape[0]
-
-    def __getitem__(self, idx):
-        return self.tensor[idx].copy()
 
 
 if __name__ == "__main__":
