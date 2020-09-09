@@ -242,7 +242,8 @@ if __name__ == "__main__":
         dataset = RemoteTensorDataset(data_tensor)
 
         # for worker in data.keys():
-        #     dist_dataset = [  # TODO: in the future transform here would be nice but currently raise errors
+        #     dist_dataset = [
+        # # n the future transforms here would be optimal but currently not supported
         #         sy.BaseDataset(
         #             data[worker][0], torch.zeros_like(data[worker][0])
         #         )  # transform=federated_tf

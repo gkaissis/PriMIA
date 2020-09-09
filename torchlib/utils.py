@@ -99,9 +99,10 @@ class Arguments:
             "config", "inference_resolution", fallback=self.train_resolution
         )
         if self.train_resolution != self.inference_resolution:
-            raise FutureWarning(
+            warn(
                 "We are not supporting different train and inference"
-                " resolutions although it works for some scenarios."
+                " resolutions although it works for some scenarios.",
+                category=UserWarning,
             )
         self.validation_split = config.getint(
             "config", "validation_split"
@@ -224,7 +225,9 @@ class Arguments:
             self.weighted_averaging = config.getboolean(
                 "federated", "weighted_averaging"
             )  # , fallback=False
-
+            self.precision_fractional = config.getfloat(
+                "federated", "precision_fractional", fallback=16
+            )
         self.visdom = cmd_args.visdom if mode == "train" else False
         self.encrypted_inference = (
             cmd_args.encrypted_inference if mode == "inference" else False
@@ -737,7 +740,7 @@ def aggregation(
                             else 1
                         )
                     )
-                    .fix_prec(precision_fractional=16)
+                    .fix_prec(precision_fractional=args.precision_fractional)
                     .share(*workers, crypto_provider=crypto_provider, protocol="fss")
                     .get()
                 )
@@ -774,7 +777,7 @@ def aggregation(
     return local_model
 
 
-# def aggregation_old(
+# def aggregation(
 #     local_model,
 #     models,
 #     workers,
@@ -802,15 +805,14 @@ def aggregation(
 #                 param_stack = torch.sum(
 #                     torch.stack(
 #                         [
-#                             r.data.copy()
-#                             .fix_prec()
+#                             (r.data.copy() * (weights[w] if weights else 1))
+#                             .fix_prec(precision_fractional=args.precision_fractional)
 #                             .share(
 #                                 *workers,
 #                                 crypto_provider=crypto_provider,
 #                                 protocol="fss"
 #                             )
 #                             .get()
-#                             * weights[w]
 #                             for w, r in remote_params.items()
 #                         ]
 #                     ),
@@ -819,7 +821,10 @@ def aggregation(
 #             else:
 #                 param_stack = torch.sum(
 #                     torch.stack(
-#                         [r.data.copy() * weights[w] for w, r in remote_params.items()]
+#                         [
+#                             r.data.copy() * (weights[w] if weights else 1)
+#                             for w, r in remote_params.items()
+#                         ]
 #                     ),
 #                     dim=0,
 #                 )
@@ -870,7 +875,6 @@ def secure_aggregation_epoch(
     if not args.keep_optim_dict:
         for worker in optimizers.keys():
             kwargs = {"lr": args.lr, "weight_decay": args.weight_decay}
-            ## TODO implement for SGD (also in train_federated)
             if args.optimizer == "Adam":
                 kwargs["betas"] = (args.beta1, args.beta2)
                 opt = torch.optim.Adam
@@ -941,7 +945,6 @@ def secure_aggregation_epoch(
             else:
                 for worker in optimizers.keys():
                     kwargs = {"lr": args.lr, "weight_decay": args.weight_decay}
-                    ## TODO implement for SGD (also in train_federated)
                     if args.optimizer == "Adam":
                         kwargs["betas"] = (args.beta1, args.beta2)
                         opt = torch.optim.Adam

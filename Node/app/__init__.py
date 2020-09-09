@@ -1,7 +1,7 @@
 import logging
 import os
 
-# TODO: Tensorflow catch
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
 import sys
 import os.path

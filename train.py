@@ -246,6 +246,25 @@ def setup_pysyft(args, hook, verbose=False):
             worker["id"]: sy.VirtualWorker(hook, id=worker["id"], verbose=verbose)
             for _, worker in worker_dict.items()
         }
+        if args.data_dir == "mnist":
+            dataset = datasets.MNIST(
+                root="./data",
+                train=True,
+                download=True,
+                transform=AlbumentationsTorchTransform(
+                    a.Compose(
+                        [
+                            a.ToFloat(max_value=255.0),
+                            a.Lambda(image=lambda x, **kwargs: x[:, :, np.newaxis]),
+                        ]
+                    )
+                ),
+            )
+            lengths = [int(len(dataset) / len(workers)) for _ in workers]
+            ##assert sum of lenghts is whole dataset on the cost of the last worker
+            lengths[-1] += len(dataset) - sum(lengths)
+            mnist_datasets = random_split(dataset, lengths)
+            mnist_datasets = {worker: d for d, worker in zip(mnist_datasets, workers)}
         if not args.unencrypted_aggregation:
             crypto_provider = sy.VirtualWorker(
                 hook, id="crypto_provider", verbose=verbose
@@ -258,31 +277,32 @@ def setup_pysyft(args, hook, verbose=False):
             desc="load data",
         ):
             if args.data_dir == "mnist":
-                node_id = worker.id
-                KEEP_LABELS_DICT = {
-                    "alice": [0, 1, 2, 3],
-                    "bob": [4, 5, 6],
-                    "charlie": [7, 8, 9],
-                    None: list(range(10)),
-                }
-                dataset = LabelMNIST(
-                    labels=KEEP_LABELS_DICT[node_id]
-                    if node_id in KEEP_LABELS_DICT
-                    else KEEP_LABELS_DICT[None],
-                    root="./data",
-                    train=True,
-                    download=True,
-                    transform=AlbumentationsTorchTransform(
-                        a.Compose(
-                            [
-                                a.ToFloat(max_value=255.0),
-                                a.Lambda(image=lambda x, **kwargs: x[:, :, np.newaxis]),
-                            ]
-                        )
-                    ),
-                )
+                # node_id = worker.id
+                # KEEP_LABELS_DICT = {
+                #     "alice": [0, 1, 2, 3],
+                #     "bob": [4, 5, 6],
+                #     "charlie": [7, 8, 9],
+                #     None: list(range(10)),
+                # }
+                # dataset = LabelMNIST(
+                #     labels=KEEP_LABELS_DICT[node_id]
+                #     if node_id in KEEP_LABELS_DICT
+                #     else KEEP_LABELS_DICT[None],
+                #     root="./data",
+                #     train=True,
+                #     download=True,
+                #     transform=AlbumentationsTorchTransform(
+                #         a.Compose(
+                #             [
+                #                 a.ToFloat(max_value=255.0),
+                #                 a.Lambda(image=lambda x, **kwargs: x[:, :, np.newaxis]),
+                #             ]
+                #         )
+                #     ),
+                # )
+                dataset = mnist_datasets[worker.id]
                 mean, std = calc_mean_std(dataset)
-                dataset.transform.transform.transforms.transforms.append(  # beautiful
+                dataset.dataset.transform.transform.transforms.transforms.append(  # beautiful
                     a.Normalize(mean, std, max_pixel_value=1.0)
                 )
             else:

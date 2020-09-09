@@ -264,7 +264,7 @@ if __name__ == "__main__":
 
     tf = transforms.Compose(
         [transforms.Resize(224), transforms.CenterCrop(224), transforms.ToTensor(),]
-    )  # TODO: Add normalization
+    )
     ds = PPPP(train=True, transform=tf)
 
     ds.__compute_mean_std__()
