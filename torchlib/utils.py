@@ -1,6 +1,6 @@
 import multiprocessing as mp
 from os import makedirs
-from os.path import isfile, split, isdir
+from os.path import isfile, split, isdir, join
 from random import random
 from time import sleep
 from typing import List, Optional, Tuple, Union
@@ -11,13 +11,25 @@ import torch
 
 
 import tqdm
+import albumentations as a
 from sklearn import metrics as mt
+import syft as sy
 import syft.frameworks.torch.fl.utils as syft_fl_utils
 from syft.frameworks.torch.fl.utils import add_model, scale_model
 from tabulate import tabulate
 from collections import Counter
 from copy import deepcopy
 from warnings import warn
+from torchvision import datasets, transforms
+
+from .dicomtools import CombinedLoader
+from .dataloader import (
+    AlbumentationsTorchTransform,
+    calc_mean_std,
+    LabelMNIST,
+    random_split,
+    create_albu_transform,
+)
 
 
 class LearningRateScheduler:
@@ -99,9 +111,10 @@ class Arguments:
             "config", "inference_resolution", fallback=self.train_resolution
         )
         if self.train_resolution != self.inference_resolution:
-            raise FutureWarning(
+            warn(
                 "We are not supporting different train and inference"
-                " resolutions although it works for some scenarios."
+                " resolutions although it works for some scenarios.",
+                category=UserWarning,
             )
         self.validation_split = config.getint(
             "config", "validation_split"
@@ -224,7 +237,9 @@ class Arguments:
             self.weighted_averaging = config.getboolean(
                 "federated", "weighted_averaging"
             )  # , fallback=False
-
+            self.precision_fractional = config.getfloat(
+                "federated", "precision_fractional", fallback=16
+            )
         self.visdom = cmd_args.visdom if mode == "train" else False
         self.encrypted_inference = (
             cmd_args.encrypted_inference if mode == "inference" else False
@@ -448,6 +463,381 @@ class To_one_hot(torch.nn.Module):
         return one_hot
 
 
+def calc_class_weights(args, train_loader, num_classes):
+    comparison = list(
+        torch.split(
+            torch.zeros((num_classes, args.batch_size)), 1  # pylint:disable=no-member
+        )
+    )
+    for i in range(num_classes):
+        comparison[i] += i
+    occurances = torch.zeros(num_classes)  # pylint:disable=no-member
+    if not args.train_federated:
+        train_loader = {0: train_loader}
+    for worker, tl in tqdm.tqdm(
+        train_loader.items(),
+        total=len(train_loader),
+        leave=False,
+        desc="calc class weights",
+    ):
+        if args.train_federated:
+            for i in range(num_classes):
+                comparison[i] = comparison[i].send(worker.id)
+        for _, target in tqdm.tqdm(
+            tl,
+            leave=False,
+            desc="calc class weights on {:s}".format(worker.id)
+            if args.train_federated
+            else "calc_class_weights",
+            total=len(tl),
+        ):
+            if args.train_federated and (args.mixup or args.weight_classes):
+                target = target.max(dim=1)
+                target = target[1]  # without pysyft it should be target.indices
+            for i in range(num_classes):
+                n = target.eq(comparison[i][..., : target.shape[0]]).sum()
+                if args.train_federated:
+                    n = n.get()
+                occurances[i] += n.item()
+        if args.train_federated:
+            for i in range(num_classes):
+                comparison[i] = comparison[i].get()
+    if torch.sum(occurances).item() == 0:  # pylint:disable=no-member
+        warn("class weights could not be calculated - no weights are used")
+        return torch.ones((num_classes,))  # pylint:disable=no-member
+    cw = 1.0 / occurances
+    cw /= torch.sum(cw)  # pylint:disable=no-member
+    return cw
+
+
+def setup_pysyft(args, hook, verbose=False):
+    from torchlib.run_websocket_server import (  # pylint:disable=import-error
+        read_websocket_config,
+    )
+
+    worker_dict = read_websocket_config("configs/websetting/config.csv")
+    worker_names = [id_dict["id"] for _, id_dict in worker_dict.items()]
+    """if "validation" in worker_names:
+        worker_names.remove("validation")"""
+
+    crypto_in_config = "crypto_provider" in worker_names
+    crypto_provider = None
+    assert (args.unencrypted_aggregation) or (
+        crypto_in_config
+    ), "No crypto provider in configuration"
+    if crypto_in_config:
+        worker_names.remove("crypto_provider")
+        cp_key = [
+            key
+            for key, worker in worker_dict.items()
+            if worker["id"] == "crypto_provider"
+        ]
+        assert len(cp_key) == 1
+        cp_key = cp_key[0]
+        if not args.unencrypted_aggregation:
+            crypto_provider_data = worker_dict[cp_key]
+        worker_dict.pop(cp_key)
+
+    loader = CombinedLoader()
+    if not args.pretrained:
+        loader.change_channels(1)
+
+    if args.websockets:
+        if args.weight_classes or (args.mixup and args.data_dir == "mnist"):
+            raise NotImplementedError(
+                "Weighted loss/ MixUp in combination with MNIST are currently not implemented."
+            )
+        workers = {
+            worker[
+                "id"
+            ]: sy.grid.clients.data_centric_fl_client.DataCentricFLClient(  # pylint:disable=no-member
+                hook,
+                "http://{:s}:{:s}".format(worker["host"], worker["port"]),
+                id=worker["id"],
+                verbose=verbose,
+            )
+            for _, worker in worker_dict.items()
+        }
+        if not args.unencrypted_aggregation:
+            crypto_provider = sy.grid.clients.data_centric_fl_client.DataCentricFLClient(  # pylint:disable=no-member
+                hook,
+                "http://{:s}:{:s}".format(
+                    crypto_provider_data["host"], crypto_provider_data["port"]
+                ),
+                id=crypto_provider_data["id"],
+                verbose=verbose,
+            )
+
+    else:
+        workers = {
+            worker["id"]: sy.VirtualWorker(hook, id=worker["id"], verbose=verbose)
+            for _, worker in worker_dict.items()
+        }
+        if args.data_dir == "mnist":
+            dataset = datasets.MNIST(
+                root="./data",
+                train=True,
+                download=True,
+                transform=AlbumentationsTorchTransform(
+                    a.Compose(
+                        [
+                            a.ToFloat(max_value=255.0),
+                            a.Lambda(image=lambda x, **kwargs: x[:, :, np.newaxis]),
+                        ]
+                    )
+                ),
+            )
+            lengths = [int(len(dataset) / len(workers)) for _ in workers]
+            ##assert sum of lenghts is whole dataset on the cost of the last worker
+            lengths[-1] += len(dataset) - sum(lengths)
+            mnist_datasets = random_split(dataset, lengths)
+            mnist_datasets = {worker: d for d, worker in zip(mnist_datasets, workers)}
+        if not args.unencrypted_aggregation:
+            crypto_provider = sy.VirtualWorker(
+                hook, id="crypto_provider", verbose=verbose
+            )
+        train_loader = None
+        for i, worker in tqdm.tqdm(
+            enumerate(workers.values()),
+            total=len(workers.keys()),
+            leave=False,
+            desc="load data",
+        ):
+            if args.data_dir == "mnist":
+                # node_id = worker.id
+                # KEEP_LABELS_DICT = {
+                #     "alice": [0, 1, 2, 3],
+                #     "bob": [4, 5, 6],
+                #     "charlie": [7, 8, 9],
+                #     None: list(range(10)),
+                # }
+                # dataset = LabelMNIST(
+                #     labels=KEEP_LABELS_DICT[node_id]
+                #     if node_id in KEEP_LABELS_DICT
+                #     else KEEP_LABELS_DICT[None],
+                #     root="./data",
+                #     train=True,
+                #     download=True,
+                #     transform=AlbumentationsTorchTransform(
+                #         a.Compose(
+                #             [
+                #                 a.ToFloat(max_value=255.0),
+                #                 a.Lambda(image=lambda x, **kwargs: x[:, :, np.newaxis]),
+                #             ]
+                #         )
+                #     ),
+                # )
+                dataset = mnist_datasets[worker.id]
+                mean, std = calc_mean_std(dataset)
+                dataset.dataset.transform.transform.transforms.transforms.append(  # beautiful
+                    a.Normalize(mean, std, max_pixel_value=1.0)
+                )
+            else:
+                data_dir = join(args.data_dir, "worker{:d}".format(i + 1))
+                stats_dataset = datasets.ImageFolder(
+                    data_dir,
+                    loader=loader,
+                    transform=AlbumentationsTorchTransform(
+                        a.Compose(
+                            [
+                                a.Resize(
+                                    args.inference_resolution, args.inference_resolution
+                                ),
+                                a.RandomCrop(
+                                    args.train_resolution, args.train_resolution
+                                ),
+                                a.ToFloat(max_value=255.0),
+                            ]
+                        )
+                    ),
+                )
+                assert (
+                    len(stats_dataset.classes) == 3
+                ), "We can only handle data that has 3 classes: normal, bacterial and viral"
+                mean, std = calc_mean_std(stats_dataset, save_folder=data_dir,)
+                del stats_dataset
+
+                target_tf = None
+                if args.mixup or args.weight_classes:
+                    target_tf = [
+                        lambda x: torch.tensor(x),  # pylint:disable=not-callable
+                        To_one_hot(3),
+                    ]
+                dataset = datasets.ImageFolder(
+                    # path.join("data/server_simulation/", "validation")
+                    # if worker.id == "validation"
+                    # else
+                    data_dir,
+                    loader=loader,
+                    transform=create_albu_transform(args, mean, std),
+                    target_transform=transforms.Compose(target_tf)
+                    if target_tf
+                    else None,
+                )
+                assert (
+                    len(dataset.classes) == 3
+                ), "We can only handle data that has 3 classes: normal, bacterial and viral"
+
+            mean.tag("#datamean")
+            std.tag("#datastd")
+            worker.load_data([mean, std])
+
+            data, targets = [], []
+            # repetitions = 1 if worker.id == "validation" else args.repetitions_dataset
+            if args.mixup:
+                dataset = torch.utils.data.DataLoader(
+                    dataset, batch_size=1, shuffle=True, num_workers=args.num_threads,
+                )
+                mixup = MixUp(λ=args.mixup_lambda, p=args.mixup_prob)
+                last_set = None
+            for j in tqdm.tqdm(
+                range(args.repetitions_dataset),
+                total=args.repetitions_dataset,
+                leave=False,
+                desc="register data on {:s}".format(worker.id),
+            ):
+                for d, t in tqdm.tqdm(
+                    dataset,
+                    total=len(dataset),
+                    leave=False,
+                    desc="register data {:d}. time".format(j + 1),
+                ):
+                    if args.mixup:
+                        original_set = (d, t)
+                        if last_set:
+                            # pylint:disable=unsubscriptable-object
+                            d, t = mixup(((d, last_set[0]), (t, last_set[1])))
+                        last_set = original_set
+                    data.append(d)
+                    targets.append(t)
+            selected_data = torch.stack(data)  # pylint:disable=no-member
+            selected_targets = (
+                torch.stack(targets)  # pylint:disable=no-member
+                if args.mixup or args.weight_classes
+                else torch.tensor(targets)  # pylint:disable=not-callable
+            )
+            if args.mixup:
+                selected_data = selected_data.squeeze(1)
+                selected_targets = selected_targets.squeeze(1)
+            del data, targets
+            selected_data.tag("#traindata",)
+            selected_targets.tag("#traintargets",)
+            worker.load_data([selected_data, selected_targets])
+    if crypto_provider is not None:
+        grid = sy.PrivateGridNetwork(*(list(workers.values()) + [crypto_provider]))
+    else:
+        grid = sy.PrivateGridNetwork(*list(workers.values()))
+    data = grid.search("#traindata")
+    target = grid.search("#traintargets")
+    train_loader = {}
+    total_L = 0
+    for worker in data.keys():
+        dist_dataset = [  # TODO: in the future transform here would be nice but currently raise errors
+            sy.BaseDataset(
+                data[worker][0], target[worker][0],
+            )  # transform=federated_tf
+        ]
+        fed_dataset = sy.FederatedDataset(dist_dataset)
+        total_L += len(fed_dataset)
+        tl = sy.FederatedDataLoader(
+            fed_dataset, batch_size=args.batch_size, shuffle=True
+        )
+        train_loader[workers[worker]] = tl
+    means = [m[0] for m in grid.search("#datamean").values()]
+    stds = [s[0] for s in grid.search("#datastd").values()]
+    if len(means) == len(workers) and len(stds) == len(workers):
+        mean = (
+            means[0]
+            .fix_precision()
+            .share(*workers, crypto_provider=crypto_provider, protocol="fss")
+            .get()
+        )
+        std = (
+            stds[0]
+            .fix_precision()
+            .share(*workers, crypto_provider=crypto_provider, protocol="fss")
+            .get()
+        )
+        for m, s in zip(means[1:], stds[1:]):
+            mean += (
+                m.fix_precision()
+                .share(*workers, crypto_provider=crypto_provider, protocol="fss")
+                .get()
+            )
+            std += (
+                s.fix_precision()
+                .share(*workers, crypto_provider=crypto_provider, protocol="fss")
+                .get()
+            )
+        mean = mean.get().float_precision() / len(stds)
+        std = std.get().float_precision() / len(stds)
+    else:
+        raise RuntimeError("no datamean/standard deviation was found on (some) worker")
+    val_mean_std = torch.stack([mean, std])  # pylint:disable=no-member
+    if args.data_dir == "mnist":
+        valset = LabelMNIST(
+            labels=list(range(10)),
+            root="./data",
+            train=False,
+            download=True,
+            transform=AlbumentationsTorchTransform(
+                a.Compose(
+                    [
+                        a.ToFloat(max_value=255.0),
+                        a.Lambda(image=lambda x, **kwargs: x[:, :, np.newaxis]),
+                        a.Normalize(mean, std, max_pixel_value=1.0),
+                    ]
+                )
+            ),
+        )
+    else:
+
+        val_tf = [
+            a.Resize(args.inference_resolution, args.inference_resolution),
+            a.CenterCrop(args.train_resolution, args.train_resolution),
+            a.ToFloat(max_value=255.0),
+            a.Normalize(mean[None, None, :], std[None, None, :], max_pixel_value=1.0),
+        ]
+        valset = datasets.ImageFolder(
+            join(args.data_dir, "validation"),
+            loader=loader,
+            transform=AlbumentationsTorchTransform(a.Compose(val_tf)),
+        )
+        assert (
+            len(valset.classes) == 3
+        ), "We can only handle data that has 3 classes: normal, bacterial and viral"
+
+    val_loader = torch.utils.data.DataLoader(
+        valset,
+        batch_size=args.test_batch_size,
+        shuffle=False,
+        num_workers=args.num_threads,
+    )
+    assert len(train_loader.keys()) == (
+        len(workers.keys())
+    ), "data was not correctly loaded"
+
+    print(
+        "Found a total dataset with {:d} samples on remote workers".format(
+            sum([len(dl.federated_dataset) for dl in train_loader.values()])
+        )
+    )
+    print(
+        "Found a total validation set with {:d} samples (locally)".format(
+            len(val_loader.dataset)
+        )
+    )
+    return (
+        train_loader,
+        val_loader,
+        total_L,
+        workers,
+        worker_names,
+        crypto_provider,
+        val_mean_std,
+    )
+
+
 def save_config_results(args, score: float, timestamp: str, table: str):
     members = [
         attr
@@ -482,9 +872,7 @@ def federated_avg(models: dict, weights=None):
     if weights:
         model = None
         for idt, partial_model in models.items():
-            scaled_model = scale_model(
-                partial_model, weights[idt]
-            )  # @a1302z are we consciously overwriting the id keyword here?
+            scaled_model = scale_model(partial_model, weights[idt])
             if model:
                 model = add_model(model, scaled_model)
             else:
@@ -739,7 +1127,7 @@ def aggregation(
                             else 1
                         )
                     )
-                    .fix_prec(precision_fractional=16)
+                    .fix_prec(precision_fractional=args.precision_fractional)
                     .share(*workers, crypto_provider=crypto_provider, protocol="fss")
                     .get()
                 )
@@ -776,7 +1164,7 @@ def aggregation(
     return local_model
 
 
-# def aggregation_old(
+# def aggregation(
 #     local_model,
 #     models,
 #     workers,
@@ -804,15 +1192,14 @@ def aggregation(
 #                 param_stack = torch.sum(
 #                     torch.stack(
 #                         [
-#                             r.data.copy()
-#                             .fix_prec()
+#                             (r.data.copy() * (weights[w] if weights else 1))
+#                             .fix_prec(precision_fractional=args.precision_fractional)
 #                             .share(
 #                                 *workers,
 #                                 crypto_provider=crypto_provider,
 #                                 protocol="fss"
 #                             )
 #                             .get()
-#                             * weights[w]
 #                             for w, r in remote_params.items()
 #                         ]
 #                     ),
@@ -821,7 +1208,10 @@ def aggregation(
 #             else:
 #                 param_stack = torch.sum(
 #                     torch.stack(
-#                         [r.data.copy() * weights[w] for w, r in remote_params.items()]
+#                         [
+#                             r.data.copy() * (weights[w] if weights else 1)
+#                             for w, r in remote_params.items()
+#                         ]
 #                     ),
 #                     dim=0,
 #                 )
@@ -841,7 +1231,8 @@ def send_new_models(local_model, models):  # original version
             local_model.get()
         local_model.send(worker)
         models[worker].load_state_dict(local_model.state_dict())
-    local_model.get()
+    if local_model.location is not None:
+        local_model.get()
     return models  # returns models updated on workers
 
 
@@ -868,15 +1259,9 @@ def secure_aggregation_epoch(
                 worker
             )  # stuff sent to worker
 
-    models = send_new_models(
-        models["local_model"], models
-    )  # stuff sent to worker again (on 1st epoch it's irrelevant, afterwards it's the model updating)
-    # @a1302z we could refactor this to be more elegant and not do this twice in the first epoch
-
     if not args.keep_optim_dict:
         for worker in optimizers.keys():
             kwargs = {"lr": args.lr, "weight_decay": args.weight_decay}
-            ## TODO implement for SGD (also in train_federated)
             if args.optimizer == "Adam":
                 kwargs["betas"] = (args.beta1, args.beta2)
                 opt = torch.optim.Adam
@@ -927,7 +1312,16 @@ def secure_aggregation_epoch(
                 test_params,
                 weights=weights,
             )
-            models = send_new_models(models["local_model"], models)
+            updated_models = send_new_models(
+                models["local_model"],
+                {
+                    w: model
+                    for w, model in models.items()
+                    if w in num_batches and num_batches[w] > batch_idx
+                },
+            )
+            for w, model in updated_models.items():
+                models[w] = model
             pbar.set_description_str("Training with secure aggregation")
             if args.keep_optim_dict:
                 # In the future we'd like to have a method here that aggregates
@@ -938,7 +1332,6 @@ def secure_aggregation_epoch(
             else:
                 for worker in optimizers.keys():
                     kwargs = {"lr": args.lr, "weight_decay": args.weight_decay}
-                    ## TODO implement for SGD (also in train_federated)
                     if args.optimizer == "Adam":
                         kwargs["betas"] = (args.beta1, args.beta2)
                         opt = torch.optim.Adam
@@ -957,6 +1350,7 @@ def secure_aggregation_epoch(
         test_params,
         weights=weights,
     )
+    models = send_new_models(models["local_model"], models)
     avg_loss = np.mean(avg_loss)
 
     return models, avg_loss

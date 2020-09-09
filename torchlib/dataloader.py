@@ -46,6 +46,88 @@ class AlbumentationsTorchTransform:
         return img
 
 
+def create_albu_transform(args, mean, std):
+    train_tf = transforms.RandomAffine(
+        degrees=args.rotation,
+        translate=(args.translate, args.translate),
+        scale=(1.0 - args.scale, 1.0 + args.scale),
+        shear=args.shear,
+        #    fillcolor=0,
+    )
+    start_transformations = [
+        a.Resize(args.inference_resolution, args.inference_resolution),
+        a.RandomCrop(args.train_resolution, args.train_resolution),
+    ]
+    if args.clahe:
+        start_transformations.extend(
+            [
+                a.FromFloat(dtype="uint8", max_value=1.0),
+                a.CLAHE(always_apply=True, clip_limit=(1, 1)),
+            ]
+        )
+    train_tf_albu = [
+        a.VerticalFlip(p=args.individual_albu_probs),
+    ]
+    if args.randomgamma:
+        train_tf_albu.append(a.RandomGamma(p=args.individual_albu_probs))
+    if args.randombrightness:
+        train_tf_albu.append(a.RandomBrightness(p=args.individual_albu_probs))
+    if args.blur:
+        train_tf_albu.append(a.Blur(p=args.individual_albu_probs))
+    if args.elastic:
+        train_tf_albu.append(a.ElasticTransform(p=args.individual_albu_probs))
+    if args.optical_distortion:
+        train_tf_albu.append(a.OpticalDistortion(p=args.individual_albu_probs))
+    if args.grid_distortion:
+        train_tf_albu.append(a.GridDistortion(p=args.individual_albu_probs))
+    if args.grid_shuffle:
+        train_tf_albu.append(a.RandomGridShuffle(p=args.individual_albu_probs))
+    if args.hsv:
+        train_tf_albu.append(a.HueSaturationValue(p=args.individual_albu_probs))
+    if args.invert:
+        train_tf_albu.append(a.InvertImg(p=args.individual_albu_probs))
+    if args.cutout:
+        train_tf_albu.append(
+            a.Cutout(
+                num_holes=5, max_h_size=80, max_w_size=80, p=args.individual_albu_probs
+            )
+        )
+    if args.shadow:
+        assert args.pretrained, "RandomShadows needs 3 channels"
+        train_tf_albu.append(a.RandomShadow(p=args.individual_albu_probs))
+    if args.fog:
+        assert args.pretrained, "RandomFog needs 3 channels"
+        train_tf_albu.append(a.RandomFog(p=args.individual_albu_probs))
+    if args.sun_flare:
+        assert args.pretrained, "RandomSunFlare needs 3 channels"
+        train_tf_albu.append(a.RandomSunFlare(p=args.individual_albu_probs))
+    if args.solarize:
+        train_tf_albu.append(a.Solarize(p=args.individual_albu_probs))
+    if args.equalize:
+        train_tf_albu.append(a.Equalize(p=args.individual_albu_probs))
+    if args.grid_dropout:
+        train_tf_albu.append(a.GridDropout(p=args.individual_albu_probs))
+    train_tf_albu.append(a.GaussNoise(var_limit=args.noise_std ** 2, p=args.noise_prob))
+    end_transformations = [
+        a.ToFloat(max_value=255.0),
+        a.Normalize(mean, std, max_pixel_value=1.0),
+    ]
+    if not args.pretrained:
+        end_transformations.append(
+            a.Lambda(image=lambda x, **kwargs: x[:, :, np.newaxis])
+        )
+    train_tf_albu = AlbumentationsTorchTransform(
+        a.Compose(
+            [
+                a.Compose(start_transformations),
+                a.Compose(train_tf_albu, p=args.albu_prob),
+                a.Compose(end_transformations),
+            ]
+        )
+    )
+    return transforms.Compose([train_tf, train_tf_albu,])
+
+
 def calc_mean_std(dataset, save_folder=None):
     """
     Calculates the mean and standard deviation of `dataset` and
@@ -264,7 +346,7 @@ if __name__ == "__main__":
 
     tf = transforms.Compose(
         [transforms.Resize(224), transforms.CenterCrop(224), transforms.ToTensor(),]
-    )  # TODO: Add normalization
+    )
     ds = PPPP(train=True, transform=tf)
 
     ds.__compute_mean_std__()
