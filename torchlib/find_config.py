@@ -3,7 +3,7 @@ from argparse import Namespace
 import sys, os.path
 import torch
 
-torch.set_num_threads(36)
+torch.set_num_threads(36)  # pylint:disable=no-member
 
 sys.path.insert(0, os.path.split(sys.path[0])[0])
 
