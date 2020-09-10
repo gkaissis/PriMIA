@@ -25,7 +25,7 @@ def objective(trial: opt.trial):
         train_federated=cmdln_args.federated,
         data_dir="data/server_simulation" if cmdln_args.federated else "data/train",
         visdom=False,
-        encrypted_inference=False,
+        encrypted_inference=cmdln_args.unencrypted_aggregation,
         cuda=not cmdln_args.federated,
         websockets=False,
         batch_size=200,
@@ -169,9 +169,16 @@ if __name__ == "__main__":
         default="sqlite:///model_weights/pneumonia_search.db",
         help="Database file to store results.",
     )
+    parser.add_argument(
+        "--unencrypted_aggregation",
+        action="store_true",
+        help="Train model without secure aggregation",
+    )
     cmdln_args = parser.parse_args()
     study = opt.create_study(
-        study_name="federated_pneumonia"
+        study_name="federated_pneumonia{:s}".format(
+            "_unencrypted" if cmdln_args.unencrypted_aggregation else ""
+        )
         if cmdln_args.federated
         else "vanilla_pneumonia",
         storage=cmdln_args.db_file,
