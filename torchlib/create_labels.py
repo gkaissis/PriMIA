@@ -62,11 +62,11 @@ if __name__ == "__main__":
     state = torch.load(args.model_weights, map_location=device)
 
     model_args = state["args"]
-    if model_args.dataset == "pneumonia":
-        num_classes = 3
-        class_names = ["normal", "bacterial", "viral"]
-    else:
-        raise NotImplementedError("dataset not supported")
+    # if model_args.data_dir == "pneumonia":
+    num_classes = 3
+    class_names = ["normal", "bacterial", "viral"]
+    # else:
+    #     raise NotImplementedError("dataset not supported")
     if model_args.model == "vgg16":
         model = vgg16(
             pretrained=model_args.pretrained,
