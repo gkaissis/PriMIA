@@ -24,6 +24,12 @@ from torchvision.datasets import MNIST
 from torchvision import transforms
 from torchvision.datasets.folder import default_loader
 
+from os.path import splitext
+from typing import Dict, Union, Set, Callable
+
+from pathlib import Path
+from .dicomtools import DicomLoader
+
 
 class AlbumentationsTorchTransform:
     def __init__(self, transform, **kwargs):
@@ -44,6 +50,89 @@ class AlbumentationsTorchTransform:
         if img.shape[-1] < img.shape[0]:
             img = img.permute(2, 0, 1)
         return img
+
+
+class CombinedLoader:
+    """Class that combines several data loaders and their extensions.
+
+    Args: 
+        mapping (Dict): Dictionary that maps loader names to tuples 
+                        consisting of (corresponding extensions, loader method)
+    """
+
+    def __init__(
+        self,
+        mapping: Dict[str, Dict[str, Union[Set[str], Callable]]] = {
+            "default": {
+                "extensions": {
+                    ".jpg",
+                    ".jpeg",
+                    ".png",
+                    ".ppm",
+                    ".bmp",
+                    ".pgm",
+                    ".tif",
+                    ".tiff",
+                    ".webp",
+                },
+                "loader": default_loader,
+            },
+            "dicom": {"extensions": {".dcm", ".dicom"}, "loader": DicomLoader(3)},
+        },
+    ):
+        self.extensions = set()
+        self.mapping = mapping
+        self.ext_to_loader_name = dict()
+        for loader_name, defining_dict in mapping.items():
+            self.extensions |= defining_dict["extensions"]
+            for ext in defining_dict["extensions"]:
+                if ext in self.ext_to_loader_name:
+                    raise RuntimeError(
+                        "Extension {:s} was passed for multiple loaders".format(ext)
+                    )
+                self.ext_to_loader_name[ext] = loader_name
+
+    def __call__(self, path: Path, **kwargs):
+        """Apply loader to path
+
+        Args:
+            path (Path): path to file.
+            kwargs: kwargs passed to load methods
+
+        Returns:
+            Image: a PIL image of the given path
+
+        Raises:
+            RuntimeError: If loader for path extension not specified.
+        """
+        file_ending = splitext(path)[1].lower()
+        if file_ending in self.extensions:
+            return self.mapping[self.ext_to_loader_name[file_ending]]["loader"](
+                path, **kwargs
+            )
+        else:
+            raise RuntimeError(
+                "file extension does not match specified supported extensions. "
+                "Please provide the matching loader for the {:s} extension.".format(
+                    file_ending
+                )
+            )
+
+    def change_channels(self, num_channels: int):
+        """Change the number of channels that are loaded (Default: 3)
+
+        Args:
+            num_channels (int): Number of channels. Currently only 1 and 3 supported
+
+        Raises:
+            RuntimeError: if num_channels is not 1 or 3
+        """
+        if num_channels not in [1, 3]:
+            raise RuntimeError("Only 1 or 3 channels supported yet.")
+        self.mapping["default"]["loader"] = (
+            single_channel_loader if num_channels == 1 else default_loader
+        )
+        self.mapping["dicom"]["loader"] = DicomLoader(num_channels)
 
 
 def create_albu_transform(args, mean, std):
@@ -172,6 +261,59 @@ class LabelMNIST(MNIST):
         indices = np.isin(self.targets, labels).astype("bool")
         self.data = self.data[indices]
         self.targets = self.targets[indices]
+
+
+class PathDataset(torchdata.Dataset):
+    def __init__(
+        self,
+        root,
+        transform=None,
+        loader=CombinedLoader(),
+        extensions=[
+            ".jpg",
+            ".jpeg",
+            ".png",
+            ".ppm",
+            ".bmp",
+            ".pgm",
+            ".tif",
+            ".tiff",
+            ".webp",
+            ".dcm",
+            ".dicom",
+        ],
+    ):
+        super(PathDataset, self).__init__()
+        self.root = root
+        self.transform = transform
+        self.loader = loader
+        self.imgs = [
+            f
+            for f in os.listdir(root)
+            if os.path.splitext(f)[1].lower() in extensions
+            and not os.path.split(f)[1].lower().startswith("._")
+        ]
+
+    def __len__(self):
+        return len(self.imgs)
+
+    def __getitem__(self, idx):
+        img_path = self.imgs[idx]
+        img = self.loader(os.path.join(self.root, img_path))
+        if self.transform:
+            img = self.transform(img)
+        return img
+
+
+class RemoteTensorDataset(torchdata.Dataset):
+    def __init__(self, tensor):
+        self.tensor = tensor
+
+    def __len__(self):
+        return self.tensor.shape[0]
+
+    def __getitem__(self, idx):
+        return self.tensor[idx].copy()
 
 
 class ImageFolderFromCSV(torchdata.Dataset):
