@@ -15,8 +15,7 @@ from numpy import newaxis
 from random import seed as rseed
 from torchlib.utils import stats_table, Arguments  # pylint:disable=import-error
 from torchlib.models import vgg16, resnet18, conv_at_resolution
-from torchlib.dicomtools import CombinedLoader
-from torchlib.dataloader import AlbumentationsTorchTransform
+from torchlib.dataloader import AlbumentationsTorchTransform, CombinedLoader
 
 
 if __name__ == "__main__":
@@ -68,7 +67,7 @@ if __name__ == "__main__":
             torch.tensor([0.2, 0.2, 0.2]),  # pylint:disable=not-callable
         )
     )
-    mean, std = val_mean_std
+    mean, std = val_mean_std.cpu()
     # mean = mean.to(device)
     # std = std.to(device)
     if args.data_dir == "mnist":

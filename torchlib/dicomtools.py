@@ -28,10 +28,7 @@ from skimage.exposure import rescale_intensity
 import numpy as np
 
 from torchvision.datasets.folder import default_loader
-from os.path import splitext
-from typing import Dict, Union, Set, Callable
-
-from .dataloader import single_channel_loader
+from typing import Dict, Set
 
 
 def load_dcm(
@@ -134,85 +131,3 @@ class DicomLoader:
             output_type=self.mapping_channels_to_letters[self.out_channels],
         )
 
-
-class CombinedLoader:
-    """Class that combines several data loaders and their extensions.
-
-    Args: 
-        mapping (Dict): Dictionary that maps loader names to tuples 
-                        consisting of (corresponding extensions, loader method)
-    """
-
-    def __init__(
-        self,
-        mapping: Dict[str, Dict[str, Union[Set[str], Callable]]] = {
-            "default": {
-                "extensions": {
-                    ".jpg",
-                    ".jpeg",
-                    ".png",
-                    ".ppm",
-                    ".bmp",
-                    ".pgm",
-                    ".tif",
-                    ".tiff",
-                    ".webp",
-                },
-                "loader": default_loader,
-            },
-            "dicom": {"extensions": {".dcm", ".dicom"}, "loader": DicomLoader(3)},
-        },
-    ):
-        self.extensions = set()
-        self.mapping = mapping
-        self.ext_to_loader_name = dict()
-        for loader_name, defining_dict in mapping.items():
-            self.extensions |= defining_dict["extensions"]
-            for ext in defining_dict["extensions"]:
-                if ext in self.ext_to_loader_name:
-                    raise RuntimeError(
-                        "Extension {:s} was passed for multiple loaders".format(ext)
-                    )
-                self.ext_to_loader_name[ext] = loader_name
-
-    def __call__(self, path: Path, **kwargs):
-        """Apply loader to path
-
-        Args:
-            path (Path): path to file.
-            kwargs: kwargs passed to load methods
-
-        Returns:
-            Image: a PIL image of the given path
-
-        Raises:
-            RuntimeError: If loader for path extension not specified.
-        """
-        file_ending = splitext(path)[1].lower()
-        if file_ending in self.extensions:
-            return self.mapping[self.ext_to_loader_name[file_ending]]["loader"](
-                path, **kwargs
-            )
-        else:
-            raise RuntimeError(
-                "file extension does not match specified supported extensions. "
-                "Please provide the matching loader for the {:s} extension.".format(
-                    file_ending
-                )
-            )
-
-    def change_channels(self, num_channels: int):
-        """Change the number of channels that are loaded (Default: 3)
-
-        Args:
-            num_channels (int): Number of channels. Currently only 1 and 3 supported
-
-        Raises:
-            RuntimeError: if num_channels is not 1 or 3
-        """
-        if num_channels not in [1, 3]:
-            raise RuntimeError("Only 1 or 3 channels supported yet.")
-        self.mapping["default"]["loader"] = (
-            single_channel_loader if num_channels == 1 else default_loader
-        )
-        self.mapping["dicom"]["loader"] = DicomLoader(num_channels)

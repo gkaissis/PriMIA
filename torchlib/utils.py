@@ -22,13 +22,13 @@ from copy import deepcopy
 from warnings import warn
 from torchvision import datasets, transforms
 
-from .dicomtools import CombinedLoader
 from .dataloader import (
     AlbumentationsTorchTransform,
     calc_mean_std,
     LabelMNIST,
     random_split,
     create_albu_transform,
+    CombinedLoader,
 )
 
 
