@@ -937,113 +937,113 @@ def train_federated(
         w_dict = {
             worker.id: len(tl) / total_batches for worker, tl in train_loaders.items()
         }
-    if args.unencrypted_aggregation:
-        mng = mp.Manager()
-        # model.train()
-        result_dict, waiting_for_sync_dict, sync_dict, progress_dict, loss_dict = (
-            mng.dict(),
-            mng.dict(),
-            mng.dict(),
-            mng.dict(),
-            mng.dict(),
-        )
-        stop_sync, sync_completed = mng.Value("i", False), mng.Value("i", False)
-        # num_workers = mng.Value("d", len(train_loaders.keys()))
-        for worker in train_loaders.keys():
-            result_dict[worker.id] = None
-            loss_dict[worker.id] = mng.dict()
-            waiting_for_sync_dict[worker.id] = False
-            progress_dict[worker.id] = (0, len(train_loaders[worker]))
+    # if args.unencrypted_aggregation:
+    #     mng = mp.Manager()
+    #     # model.train()
+    #     result_dict, waiting_for_sync_dict, sync_dict, progress_dict, loss_dict = (
+    #         mng.dict(),
+    #         mng.dict(),
+    #         mng.dict(),
+    #         mng.dict(),
+    #         mng.dict(),
+    #     )
+    #     stop_sync, sync_completed = mng.Value("i", False), mng.Value("i", False)
+    #     # num_workers = mng.Value("d", len(train_loaders.keys()))
+    #     for worker in train_loaders.keys():
+    #         result_dict[worker.id] = None
+    #         loss_dict[worker.id] = mng.dict()
+    #         waiting_for_sync_dict[worker.id] = False
+    #         progress_dict[worker.id] = (0, len(train_loaders[worker]))
 
-        jobs = [
-            mp.Process(
-                name="{:s} training".format(worker.id),
-                target=train_on_server,
-                args=(
-                    args,
-                    model[worker.id],
-                    worker,
-                    device,
-                    train_loader,
-                    optimizer[worker.id],
-                    loss_fn[worker.id],
-                    result_dict,
-                    waiting_for_sync_dict,
-                    sync_dict,
-                    sync_completed,
-                    progress_dict,
-                    loss_dict,
-                ),
-            )
-            for worker, train_loader in train_loaders.items()
-        ]
-        for j in jobs:
-            j.start()
-        synchronize = mp.Process(
-            name="synchronization",
-            target=synchronizer,
-            args=(
-                args,
-                result_dict,
-                waiting_for_sync_dict,
-                sync_dict,
-                progress_dict,
-                loss_dict,
-                stop_sync,
-                sync_completed,
-                w_dict,
-                epoch,
-            ),
-            kwargs={
-                "wait_interval": args.wait_interval,
-                "vis_params": vis_params,
-                "test_params": test_params,
-            },
-        )
-        synchronize.start()
-        if verbose:
-            done = mng.Value("i", False)
-            animate = mp.Process(
-                name="animation", target=progress_animation, args=(done, progress_dict)
-            )
-            animate.start()
-        for j in jobs:
-            j.join()
-        stop_sync.value = True
-        synchronize.join()
-        if verbose:
-            done.value = True
-            animate.join()
+    #     jobs = [
+    #         mp.Process(
+    #             name="{:s} training".format(worker.id),
+    #             target=train_on_server,
+    #             args=(
+    #                 args,
+    #                 model[worker.id],
+    #                 worker,
+    #                 device,
+    #                 train_loader,
+    #                 optimizer[worker.id],
+    #                 loss_fn[worker.id],
+    #                 result_dict,
+    #                 waiting_for_sync_dict,
+    #                 sync_dict,
+    #                 sync_completed,
+    #                 progress_dict,
+    #                 loss_dict,
+    #             ),
+    #         )
+    #         for worker, train_loader in train_loaders.items()
+    #     ]
+    #     for j in jobs:
+    #         j.start()
+    #     synchronize = mp.Process(
+    #         name="synchronization",
+    #         target=synchronizer,
+    #         args=(
+    #             args,
+    #             result_dict,
+    #             waiting_for_sync_dict,
+    #             sync_dict,
+    #             progress_dict,
+    #             loss_dict,
+    #             stop_sync,
+    #             sync_completed,
+    #             w_dict,
+    #             epoch,
+    #         ),
+    #         kwargs={
+    #             "wait_interval": args.wait_interval,
+    #             "vis_params": vis_params,
+    #             "test_params": test_params,
+    #         },
+    #     )
+    #     synchronize.start()
+    #     if verbose:
+    #         done = mng.Value("i", False)
+    #         animate = mp.Process(
+    #             name="animation", target=progress_animation, args=(done, progress_dict)
+    #         )
+    #         animate.start()
+    #     for j in jobs:
+    #         j.join()
+    #     stop_sync.value = True
+    #     synchronize.join()
+    #     if verbose:
+    #         done.value = True
+    #         animate.join()
 
-        model["local_model"] = sync_dict["model"]
-        for w in train_loaders.keys():
-            if model[w.id].location:
-                model[w.id].get()
-            model[w.id].load_state_dict(sync_dict["model"].state_dict())
-            if not args.keep_optim_dict:
-                kwargs = {"lr": args.lr, "weight_decay": args.weight_decay}
-                if args.optimizer == "Adam":
-                    kwargs["betas"] = (args.beta1, args.beta2)
-                optimizer[w.id].__init__(model[w.id].parameters(), **kwargs)
+    #     model["local_model"] = sync_dict["model"]
+    #     for w in train_loaders.keys():
+    #         if model[w.id].location:
+    #             model[w.id].get()
+    #         model[w.id].load_state_dict(sync_dict["model"].state_dict())
+    #         if not args.keep_optim_dict:
+    #             kwargs = {"lr": args.lr, "weight_decay": args.weight_decay}
+    #             if args.optimizer == "Adam":
+    #                 kwargs["betas"] = (args.beta1, args.beta2)
+    #             optimizer[w.id].__init__(model[w.id].parameters(), **kwargs)
 
-        avg_loss = np.average(
-            [l["final"] for l in loss_dict.values()],
-            weights=[w_dict[w] for w in loss_dict.keys()] if w_dict else None,
-        )
+    #     avg_loss = np.average(
+    #         [l["final"] for l in loss_dict.values()],
+    #         weights=[w_dict[w] for w in loss_dict.keys()] if w_dict else None,
+    #     )
 
-    else:  # encrypted aggregation
-        model, avg_loss = secure_aggregation_epoch(
-            args,
-            model,
-            device,
-            train_loaders,
-            optimizer,
-            epoch,
-            loss_fn,
-            crypto_provider,
-            test_params=test_params,
-            weights=w_dict,
-        )
+    # else:  # encrypted aggregation
+    model, avg_loss = secure_aggregation_epoch(
+        args,
+        model,
+        device,
+        train_loaders,
+        optimizer,
+        epoch,
+        loss_fn,
+        crypto_provider,
+        test_params=test_params,
+        weights=w_dict,
+    )
     if args.visdom:
         vis_params["vis"].line(
             X=np.asarray([epoch]),
@@ -1136,6 +1136,7 @@ def aggregation(
                     models[worker if type(worker) == str else worker.id]
                     .state_dict()[key]
                     .data.copy()
+                    .get()
                     * (
                         weights[worker if type(worker) == str else worker.id]
                         if weights
@@ -1311,6 +1312,7 @@ def secure_aggregation_epoch(
                 args,
                 test_params,
                 weights=weights,
+                secure=not args.unencrypted_aggregation,
             )
             updated_models = send_new_models(
                 models["local_model"],
@@ -1349,6 +1351,7 @@ def secure_aggregation_epoch(
         args,
         test_params,
         weights=weights,
+        secure=not args.unencrypted_aggregation,
     )
     models = send_new_models(models["local_model"], models)
     avg_loss = np.mean(avg_loss)

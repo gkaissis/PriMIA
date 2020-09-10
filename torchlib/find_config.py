@@ -3,7 +3,7 @@ from argparse import Namespace
 import sys, os.path
 import torch
 
-torch.set_num_threads(36)  # pylint:disable=no-member
+torch.set_num_threads(16)  # pylint:disable=no-member
 
 sys.path.insert(0, os.path.split(sys.path[0])[0])
 
@@ -25,7 +25,7 @@ def objective(trial: opt.trial):
         train_federated=cmdln_args.federated,
         data_dir="data/server_simulation" if cmdln_args.federated else "data/train",
         visdom=False,
-        encrypted_inference=cmdln_args.unencrypted_aggregation,
+        encrypted_inference=False,
         cuda=not cmdln_args.federated,
         websockets=False,
         batch_size=200,
@@ -132,7 +132,7 @@ def objective(trial: opt.trial):
         )
         args.mixup_prob = trial.suggest_float("mixup_prob", 0.0, 1.0)
     if cmdln_args.federated:
-        args.unencrypted_aggregation = False
+        args.unencrypted_aggregation = cmdln_args.unencrypted_aggregation
         args.sync_every_n_batch = trial.suggest_int("sigma", 1, 5)
         args.wait_interval = 0.1
         args.keep_optim_dict = False
