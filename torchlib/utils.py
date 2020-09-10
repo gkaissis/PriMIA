@@ -1284,7 +1284,9 @@ def secure_aggregation_epoch(
         range(max(num_batches.values())),
         total=max(num_batches.values()),
         leave=False,
-        desc="Training with secure aggregation",
+        desc="Training with{:s} secure aggregation.".format(
+            "out" if args.unencrypted_aggregation else ""
+        ),
     )
     for batch_idx in pbar:
         for worker, dataloader in tqdm.tqdm(
@@ -1324,7 +1326,11 @@ def secure_aggregation_epoch(
             )
             for w, model in updated_models.items():
                 models[w] = model
-            pbar.set_description_str("Training with secure aggregation")
+            pbar.set_description_str(
+                "Training with{:s} secure aggregation.".format(
+                    "out" if args.unencrypted_aggregation else ""
+                )
+            )
             if args.keep_optim_dict:
                 # In the future we'd like to have a method here that aggregates
                 # the stats of all optimizers just as we do with models.
@@ -1359,167 +1365,167 @@ def secure_aggregation_epoch(
     return models, avg_loss
 
 
-def synchronizer(  # never gets called on websockets
-    args,
-    result_dict,
-    waiting_for_sync_dict,
-    sync_dict,
-    progress_dict,
-    loss_dict,
-    stop,
-    sync_completed,
-    weights,
-    epoch,
-    wait_interval=0.1,
-    vis_params=None,
-    test_params=None,
-):
-    if test_params:
-        pass
-        # save_iter: int = 1
-    while not stop.value:
-        while not all(waiting_for_sync_dict.values()) and not stop.value:
-            sleep(0.1)
-        # print("synchronizing: models from {:s}".format(str(result_dict.keys())))
-        if len(result_dict) == 1:
-            for model in result_dict.values():
-                sync_dict["model"] = model
-        elif len(result_dict) == 0:
-            pass
-        else:
-            models = {}
-            for idt, worker_model in result_dict.items():
-                models[idt] = worker_model
-            # avg_model = federated_avg(models, weights=weights)
-            avg_model = aggregation(
-                deepcopy(list(models.values())[0]),
-                models,
-                models.keys(),
-                None,
-                args,
-                test_params,
-                weights=weights,
-                secure=False,
-            )
-            sync_dict["model"] = avg_model
-        for k in waiting_for_sync_dict.keys():
-            waiting_for_sync_dict[k] = False
-        ## In theory we should clear the models here
-        ## However, if one worker has more samples than any other worker,
-        ## but has imbalanced data this destroys our training.
-        ## By keeping the last model of each worker in the dict,
-        ## we still assure that it's training is not lost
-        # result_dict.clear()
+# def synchronizer(  # never gets called on websockets
+#     args,
+#     result_dict,
+#     waiting_for_sync_dict,
+#     sync_dict,
+#     progress_dict,
+#     loss_dict,
+#     stop,
+#     sync_completed,
+#     weights,
+#     epoch,
+#     wait_interval=0.1,
+#     vis_params=None,
+#     test_params=None,
+# ):
+#     if test_params:
+#         pass
+#         # save_iter: int = 1
+#     while not stop.value:
+#         while not all(waiting_for_sync_dict.values()) and not stop.value:
+#             sleep(0.1)
+#         # print("synchronizing: models from {:s}".format(str(result_dict.keys())))
+#         if len(result_dict) == 1:
+#             for model in result_dict.values():
+#                 sync_dict["model"] = model
+#         elif len(result_dict) == 0:
+#             pass
+#         else:
+#             models = {}
+#             for idt, worker_model in result_dict.items():
+#                 models[idt] = worker_model
+#             # avg_model = federated_avg(models, weights=weights)
+#             avg_model = aggregation(
+#                 deepcopy(list(models.values())[0]),
+#                 models,
+#                 models.keys(),
+#                 None,
+#                 args,
+#                 test_params,
+#                 weights=weights,
+#                 secure=False,
+#             )
+#             sync_dict["model"] = avg_model
+#         for k in waiting_for_sync_dict.keys():
+#             waiting_for_sync_dict[k] = False
+#         ## In theory we should clear the models here
+#         ## However, if one worker has more samples than any other worker,
+#         ## but has imbalanced data this destroys our training.
+#         ## By keeping the last model of each worker in the dict,
+#         ## we still assure that it's training is not lost
+#         # result_dict.clear()
 
-        ## this should be commented in but it triggers some backend failure
-        """
-        progress = progress_dict.values()
-        cur_batch = max([p[0] for p in progress])
-        save_after = max([p[1] for p in progress]) / args.repetitions_dataset
-        progress = sum([p[0] / p[1] for p in progress]) / len(progress)
+#         ## this should be commented in but it triggers some backend failure
+#         """
+#         progress = progress_dict.values()
+#         cur_batch = max([p[0] for p in progress])
+#         save_after = max([p[1] for p in progress]) / args.repetitions_dataset
+#         progress = sum([p[0] / p[1] for p in progress]) / len(progress)
 
-        if vis_params:
-            if progress >= 1.0:
-                sync_completed.value = True
-                continue
-            avg_loss = np.mean(
-                [l[cur_batch] for l in loss_dict.values() if cur_batch in l]
-            )
-            vis_params["vis"].line(
-                X=np.asarray([epoch - 1 + progress]),
-                Y=np.asarray([avg_loss]),
-                win="loss_win",
-                name="train_loss",
-                update="append",
-                env=vis_params["vis_env"],
-            )
-        if test_params and cur_batch > (save_after * save_iter):
-            model = avg_model.copy()
-            _, score = test(
-                args,
-                model,
-                test_params["device"],
-                test_params["val_loader"],
-                epoch,
-                test_params["loss_fn"],
-                verbose=False,
-                num_classes=test_params["num_classes"],
-                vis_params=vis_params,
-                class_names=test_params["class_names"],
-            )
-            model_path = "model_weights/{:s}_epoch_{:03d}.pt".format(
-                test_params["exp_name"],
-                epoch * (args.repetitions_dataset if args.repetitions_dataset else 1)
-                + save_iter,
-            )
+#         if vis_params:
+#             if progress >= 1.0:
+#                 sync_completed.value = True
+#                 continue
+#             avg_loss = np.mean(
+#                 [l[cur_batch] for l in loss_dict.values() if cur_batch in l]
+#             )
+#             vis_params["vis"].line(
+#                 X=np.asarray([epoch - 1 + progress]),
+#                 Y=np.asarray([avg_loss]),
+#                 win="loss_win",
+#                 name="train_loss",
+#                 update="append",
+#                 env=vis_params["vis_env"],
+#             )
+#         if test_params and cur_batch > (save_after * save_iter):
+#             model = avg_model.copy()
+#             _, score = test(
+#                 args,
+#                 model,
+#                 test_params["device"],
+#                 test_params["val_loader"],
+#                 epoch,
+#                 test_params["loss_fn"],
+#                 verbose=False,
+#                 num_classes=test_params["num_classes"],
+#                 vis_params=vis_params,
+#                 class_names=test_params["class_names"],
+#             )
+#             model_path = "model_weights/{:s}_epoch_{:03d}.pt".format(
+#                 test_params["exp_name"],
+#                 epoch * (args.repetitions_dataset if args.repetitions_dataset else 1)
+#                 + save_iter,
+#             )
 
-            save_model(model, test_params["optimizer"], model_path, args, epoch)
-            test_params["scores"].append(score)
-            test_params["model_paths"].append(model_path)
+#             save_model(model, test_params["optimizer"], model_path, args, epoch)
+#             test_params["scores"].append(score)
+#             test_params["model_paths"].append(model_path)
 
-            save_iter += 1"""
-        sync_completed.value = True
+#             save_iter += 1"""
+#         sync_completed.value = True
 
 
-def train_on_server(  # never gets called on websockets
-    args,
-    model,
-    worker,
-    device,
-    train_loader,
-    optimizer,
-    loss_fn,
-    result_dict,
-    waiting_for_sync_dict,
-    sync_dict,
-    sync_completed,
-    progress_dict,
-    loss_dict,
-):
-    # optimizer = optim.get_optim(worker.id)
-    avg_loss = []
-    model.train()
-    if not model.location:
-        model.send(worker)
-        loss_fn = loss_fn.send(worker)
-    L = len(train_loader)
-    for batch_idx, (data, target) in enumerate(train_loader):
-        progress_dict[worker.id] = (batch_idx, L)
-        if (
-            # batch_idx % int(0.1 * L) == 0 and batch_idx > 0
-            batch_idx % args.sync_every_n_batch == 0
-            and batch_idx > 0
-        ):  # synchronize models
-            model = model.get()
-            result_dict[worker.id] = model
-            loss_dict[worker.id][batch_idx] = avg_loss[-1]
-            sync_completed.value = False
-            waiting_for_sync_dict[worker.id] = True
-            while not sync_completed.value:
-                sleep(args.wait_interval)
-            model.load_state_dict(sync_dict["model"].state_dict())
-            if not args.keep_optim_dict:
-                kwargs = {"lr": args.lr, "weight_decay": args.weight_decay}
-                if args.optimizer == "Adam":
-                    kwargs["betas"] = (args.beta1, args.beta2)
-                optimizer.__init__(model.parameters(), **kwargs)
-            model.train()
-            model.send(worker)
-        data, target = data.to(device), target.to(device)
-        optimizer.zero_grad()
-        output = model(data)
-        loss = loss_fn(output, target)
-        loss.backward()
-        optimizer.step()
-        loss = loss.get()
-        avg_loss.append(loss.detach().cpu().item())
-    model.get()
-    loss_fn = loss_fn.get()
-    result_dict[worker.id] = model
-    loss_dict[worker.id]["final"] = np.mean(avg_loss)
-    progress_dict[worker.id] = (batch_idx + 1, L)
-    del waiting_for_sync_dict[worker.id]
-    # optim.optimizers[worker.id] = optimizer
+# def train_on_server(  # never gets called on websockets
+#     args,
+#     model,
+#     worker,
+#     device,
+#     train_loader,
+#     optimizer,
+#     loss_fn,
+#     result_dict,
+#     waiting_for_sync_dict,
+#     sync_dict,
+#     sync_completed,
+#     progress_dict,
+#     loss_dict,
+# ):
+#     # optimizer = optim.get_optim(worker.id)
+#     avg_loss = []
+#     model.train()
+#     if not model.location:
+#         model.send(worker)
+#         loss_fn = loss_fn.send(worker)
+#     L = len(train_loader)
+#     for batch_idx, (data, target) in enumerate(train_loader):
+#         progress_dict[worker.id] = (batch_idx, L)
+#         if (
+#             # batch_idx % int(0.1 * L) == 0 and batch_idx > 0
+#             batch_idx % args.sync_every_n_batch == 0
+#             and batch_idx > 0
+#         ):  # synchronize models
+#             model = model.get()
+#             result_dict[worker.id] = model
+#             loss_dict[worker.id][batch_idx] = avg_loss[-1]
+#             sync_completed.value = False
+#             waiting_for_sync_dict[worker.id] = True
+#             while not sync_completed.value:
+#                 sleep(args.wait_interval)
+#             model.load_state_dict(sync_dict["model"].state_dict())
+#             if not args.keep_optim_dict:
+#                 kwargs = {"lr": args.lr, "weight_decay": args.weight_decay}
+#                 if args.optimizer == "Adam":
+#                     kwargs["betas"] = (args.beta1, args.beta2)
+#                 optimizer.__init__(model.parameters(), **kwargs)
+#             model.train()
+#             model.send(worker)
+#         data, target = data.to(device), target.to(device)
+#         optimizer.zero_grad()
+#         output = model(data)
+#         loss = loss_fn(output, target)
+#         loss.backward()
+#         optimizer.step()
+#         loss = loss.get()
+#         avg_loss.append(loss.detach().cpu().item())
+#     model.get()
+#     loss_fn = loss_fn.get()
+#     result_dict[worker.id] = model
+#     loss_dict[worker.id]["final"] = np.mean(avg_loss)
+#     progress_dict[worker.id] = (batch_idx + 1, L)
+#     del waiting_for_sync_dict[worker.id]
+#     # optim.optimizers[worker.id] = optimizer
 
 
 def train(  # never called on websockets
