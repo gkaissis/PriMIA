@@ -218,5 +218,6 @@ if __name__ == "__main__":
             catch=(Exception,),
             n_jobs=1,
             gc_after_trial=True,
+            show_progress_bar=True,
         )
 
