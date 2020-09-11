@@ -19,7 +19,7 @@ from syft.frameworks.torch.fl.utils import add_model, scale_model
 from tabulate import tabulate
 from collections import Counter
 from copy import deepcopy
-from warnings import warn
+from warnings import warn, filterwarnings
 from torchvision import datasets, transforms
 
 from .dataloader import (
@@ -30,6 +30,8 @@ from .dataloader import (
     create_albu_transform,
     CombinedLoader,
 )
+
+filterwarnings("ignore", message="invalid value encountered in double_scalars")
 
 
 class LearningRateScheduler:

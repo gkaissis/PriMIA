@@ -81,8 +81,11 @@ def main(args, verbose=True, optuna_trial=None):
     class_names = None
     # Dataset creation and definition
     if args.train_federated:
-        if not hasattr(torch, "torch_hooked"):
+        if hasattr(torch, "torch_hooked"):
+            hook = sy.hook
+        else:
             hook = sy.TorchHook(torch)
+
         (
             train_loader,
             val_loader,
