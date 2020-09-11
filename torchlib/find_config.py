@@ -3,6 +3,7 @@ from argparse import Namespace
 import sys, os.path
 import torch
 from psutil import cpu_count
+from sqlalchemy.exc import OperationalError
 
 torch.set_num_threads(cpu_count())  # pylint:disable=no-member
 
@@ -178,21 +179,27 @@ if __name__ == "__main__":
         help="Train model without secure aggregation",
     )
     cmdln_args = parser.parse_args()
-    study = opt.create_study(
-        study_name="federated_pneumonia{:s}".format(
-            "_unencrypted" if cmdln_args.unencrypted_aggregation else ""
+    try:
+        study = opt.create_study(
+            study_name="federated_pneumonia{:s}".format(
+                "_unencrypted" if cmdln_args.unencrypted_aggregation else ""
+            )
+            if cmdln_args.federated
+            else "vanilla_pneumonia",
+            storage=cmdln_args.db_file,
+            load_if_exists=True,
+            direction="maximize",
+            pruner=opt.pruners.NopPruner()
+            # pruner=opt.pruners.PercentilePruner(
+            #     0.95, n_startup_trials=10, n_warmup_steps=10
+            # )
+            # pruner=opt.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=10),
         )
-        if cmdln_args.federated
-        else "vanilla_pneumonia",
-        storage=cmdln_args.db_file,
-        load_if_exists=True,
-        direction="maximize",
-        pruner=opt.pruners.NopPruner()
-        # pruner=opt.pruners.PercentilePruner(
-        #     0.95, n_startup_trials=10, n_warmup_steps=10
-        # )
-        # pruner=opt.pruners.MedianPruner(n_startup_trials=10, n_warmup_steps=10),
-    )
+    except OperationalError:
+        print(
+            "Error: SQLite cannot find the specified database file. Please make sure the path exists!"
+        )
+        exit(0)
 
     if cmdln_args.visualize:
 
