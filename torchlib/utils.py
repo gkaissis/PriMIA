@@ -554,7 +554,7 @@ def setup_pysyft(args, hook, verbose=False):
                 hook,
                 "http://{:s}:{:s}".format(worker["host"], worker["port"]),
                 id=worker["id"],
-                verbose=verbose,
+                verbose=False,
             )
             for _, worker in worker_dict.items()
         }
@@ -565,14 +565,16 @@ def setup_pysyft(args, hook, verbose=False):
                     crypto_provider_data["host"], crypto_provider_data["port"]
                 ),
                 id=crypto_provider_data["id"],
-                verbose=verbose,
+                verbose=False,
             )
 
     else:
         workers = {
-            worker["id"]: sy.VirtualWorker(hook, id=worker["id"], verbose=verbose)
+            worker["id"]: sy.VirtualWorker(hook, id=worker["id"], verbose=False)
             for _, worker in worker_dict.items()
         }
+        for worker in workers.keys():
+            workers[worker].object_store.clear_objects()
         if args.data_dir == "mnist":
             dataset = datasets.MNIST(
                 root="./data",
@@ -594,7 +596,7 @@ def setup_pysyft(args, hook, verbose=False):
             mnist_datasets = {worker: d for d, worker in zip(mnist_datasets, workers)}
         if not args.unencrypted_aggregation:
             crypto_provider = sy.VirtualWorker(
-                hook, id="crypto_provider", verbose=verbose
+                hook, id="crypto_provider", verbose=False
             )
         train_loader = None
         for i, worker in tqdm.tqdm(
@@ -816,17 +818,17 @@ def setup_pysyft(args, hook, verbose=False):
     assert len(train_loader.keys()) == (
         len(workers.keys())
     ), "data was not correctly loaded"
-
-    print(
-        "Found a total dataset with {:d} samples on remote workers".format(
-            sum([len(dl.federated_dataset) for dl in train_loader.values()])
+    if verbose:
+        print(
+            "Found a total dataset with {:d} samples on remote workers".format(
+                sum([len(dl.federated_dataset) for dl in train_loader.values()])
+            )
         )
-    )
-    print(
-        "Found a total validation set with {:d} samples (locally)".format(
-            len(val_loader.dataset)
+        print(
+            "Found a total validation set with {:d} samples (locally)".format(
+                len(val_loader.dataset)
+            )
         )
-    )
     return (
         train_loader,
         val_loader,

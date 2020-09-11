@@ -81,7 +81,8 @@ def main(args, verbose=True, optuna_trial=None):
     class_names = None
     # Dataset creation and definition
     if args.train_federated:
-        hook = sy.TorchHook(torch)
+        if not hasattr(torch, "torch_hooked"):
+            hook = sy.TorchHook(torch)
         (
             train_loader,
             val_loader,
@@ -90,13 +91,7 @@ def main(args, verbose=True, optuna_trial=None):
             worker_names,
             crypto_provider,
             val_mean_std,
-        ) = setup_pysyft(
-            args,
-            hook,
-            verbose=cmd_args.verbose
-            if "cmd_args" in locals() and hasattr(cmd_args, "verbose")
-            else False,
-        )
+        ) = setup_pysyft(args, hook, verbose=verbose,)
     else:
         if args.data_dir == "mnist":
             val_mean_std = torch.tensor(  # pylint:disable=not-callable

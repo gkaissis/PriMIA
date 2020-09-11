@@ -67,9 +67,9 @@ if __name__ == "__main__":
             torch.tensor([0.2, 0.2, 0.2]),  # pylint:disable=not-callable
         )
     )
-    mean, std = val_mean_std.cpu()
-    # mean = mean.to(device)
-    # std = std.to(device)
+    mean, std = val_mean_std
+    mean = mean.cpu()
+    std = std.cpu()
     if args.data_dir == "mnist":
         num_classes = 10
         testset = datasets.MNIST(

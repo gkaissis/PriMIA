@@ -2,8 +2,9 @@ import optuna as opt
 from argparse import Namespace
 import sys, os.path
 import torch
+from psutil import cpu_count
 
-torch.set_num_threads(16)  # pylint:disable=no-member
+torch.set_num_threads(cpu_count())  # pylint:disable=no-member
 
 sys.path.insert(0, os.path.split(sys.path[0])[0])
 
@@ -15,7 +16,7 @@ global cmdln_args
 def objective(trial: opt.trial):
     lr = trial.suggest_loguniform("lr", 1e-5, 1e-3,)
     repetitions_dataset = (
-        trial.suggest_int("repetitions_dataset", 1, 2) if cmdln_args.federated else 1
+        trial.suggest_int("repetitions_dataset", 1, 3) if cmdln_args.federated else 1
     )
     epochs = 25
     if cmdln_args.federated:
@@ -136,6 +137,8 @@ def objective(trial: opt.trial):
         args.sync_every_n_batch = trial.suggest_int("sigma", 1, 5)
         args.wait_interval = 0.1
         args.keep_optim_dict = False
+        if not cmdln_args.unencrypted_aggregation:
+            args.precision_fractional = 16
         # trial.suggest_categorical(
         #     "keep_optim_dict", [True, False]
         # )
@@ -210,6 +213,10 @@ if __name__ == "__main__":
 
     else:
         study.optimize(
-            objective, n_trials=cmdln_args.num_trials, catch=(Exception,), n_jobs=1
+            objective,
+            n_trials=cmdln_args.num_trials,
+            catch=(Exception,),
+            n_jobs=1,
+            gc_after_trial=True,
         )
 
