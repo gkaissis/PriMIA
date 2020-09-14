@@ -231,7 +231,9 @@ if __name__ == "__main__":
             pooling=args.pooling_type if hasattr(args, "pooling_type") else "avg",
         )
     else:
-        raise NotImplementedError("model unknown")
+        raise ValueError(
+            "Model name not recognised. Please enter one of 'vgg16', 'simpleconv', 'resnet-18'."
+        )
     model.load_state_dict(state["model_state_dict"])
     model.to(device)
     if args.encrypted_inference:
