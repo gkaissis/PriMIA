@@ -87,3 +87,11 @@ encrypted_inference_ws:
 encrypted_inference_http:
 	@echo HTTP encrypted inference
 	python inference.py --data_dir .inference --model_weights .pretrained_weights/local_873.pt --encrypted_inference --websockets_config configs/websetting/config_inference.csv --http_protocol
+
+unencrypted_inference_ws:
+	@echo Websocket encrypted inference
+	python inference.py --data_dir .inference --model_weights .pretrained_weights/local_873.pt --websockets_config configs/websetting/config_inference.csv
+
+unencrypted_inference_http:
+	@echo HTTP encrypted inference
+	python inference.py --data_dir .inference --model_weights .pretrained_weights/local_873.pt --websockets_config configs/websetting/config_inference.csv --http_protocol	
