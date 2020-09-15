@@ -37,60 +37,33 @@ symbolic_server_folders:
 minimal_server_folders: symbolic_server_folders
 	cd data/server_simulation && python delete_all_but_n.py 4 && python calc_class_distribution.py && cd ../..
 
-#CrypTen Benchmark
-crypten_dataset:
-	@echo Creating CrypTen dataset from the test set
-	python data/create_crypten_data.py
-
-crypten_benchmark:
-	@echo WARNING: For this to work, make sure there is a .pretrained_weights directory in the repository root and that it contains a file called crypten_weights.pt.
-	@echo WARNING: This will probably strain your computer A LOT! 
-	python torchlib/crypten_inference.py --model_weights .pretrained_weights/crypten_weights.pt --max_num_samples 2 --batch_size 1
-
-################ TESTS ######################
+# Training
 federated_secure:
 	@echo Training on VirtualWorkers with SecAgg
-	python train.py --config configs/test_configs/weighted_classes.ini --train_federated --data_dir data/server_simulation
+	python train.py --config configs/torch/pneumonia-resnet-pretrained.ini --train_federated --data_dir data/server_simulation
 	@echo Finished Training on VirtualWorkers with SecAgg
 
 federated_insecure:
 	@echo Training on VirtualWorkers without SecAgg
-	python train.py --config configs/test_configs/weighted_classes.ini --train_federated --data_dir data/server_simulation --unencrypted_aggregation
+	python train.py --config configs/torch/pneumonia-resnet-pretrained.ini --train_federated --data_dir data/server_simulation --unencrypted_aggregation
 	@echo Finished Training on VirtualWorkers without SecAgg
 
-federated_gridnode:
+federated_gridnode_secure:
 	python train.py --config configs/torch/pneumonia-resnet-pretrained.ini --train_federated --data_dir data/server_simulation --websockets
+
+federated_gridnode_insecure:
+	python train.py --config configs/torch/pneumonia-resnet-pretrained.ini --train_federated --data_dir data/server_simulation --websockets --unencrypted_aggregation
 
 local:
 	@echo Training Locally
-	python train.py --config configs/test_configs/non_weighted_classes.ini --data_dir data/server_simulation/worker1 
+	python train.py --config configs/torch/pneumonia-resnet-pretrained.ini --data_dir data/server_simulation/worker1 --cuda
 	@echo Finished Training Locally
 
-local_cuda:
-	@echo Training Locally with SecAgg on CUDA
-	python train.py --config configs/test_configs/non_weighted_classes.ini --data_dir data/server_simulation/worker1 --cuda
-
-assert_cuda_fail:
-	@echo Training Federated with CUDA. Designed to fail. Does not exit with code 1.
-	python train.py --config configs/test_configs/weighted_classes.ini --data_dir data/server_simulation/worker1 --train_federated --cuda
-
-train_all: federated_secure federated_insecure local local_cuda assert_cuda_fail
-	@echo All checks successful
-
-###### VISDOM
-federated_secure_visdom:
-	@echo Training on VirtualWorkers with SecAgg
-	python train.py --config configs/test_configs/visdom.ini --train_federated --data_dir data/server_simulation --visdom
-	@echo Finished Training on VirtualWorkers with SecAgg
-
-###### VISDOM
-mixup_ablation:
-	python train.py --config configs/test_configs/mixup_ablation.ini --data_dir data/server_simulation/worker1 --visdom --cuda
-	
+# Gridnode ensemble shortcut
 gridnode:
 	python torchlib/run_websocket_server.py --data_dir data/server_simulation --config configs/torch/pneumonia-resnet-pretrained.ini
 
-######## ENCRYPTED INFERENCE
+# Inference
 data_owner:
 	python -m Node --id data_owner --port 8770 --data_dir .inference --config configs/torch/pneumonia-resnet-pretrained.ini --mean_std_file data/server_simulation/worker1/mean_std.pt
 
@@ -104,10 +77,13 @@ inference_setup:
 	make data_owner & make crypto_provider & make model_owner
 
 encrypted_inference_local:
-	@echo Make sure to use the inference environment for this to work!
-	python inference.py --data_dir .inference --model_weights model_weights/final_federated_dataserver_simulation_2020-08-30_16-01-38.pt --encrypted_inference
+	@echo Local encrypted inference
+	python inference.py --data_dir .inference --model_weights .pretrained_weights/local_873.pt --encrypted_inference
+
+encrypted_inference_ws:
+	@echo Websocket encrypted inference
+	python inference.py --data_dir .inference --model_weights .pretrained_weights/local_873.pt --encrypted_inference --websockets_config configs/websetting/config_inference.csv
 
 encrypted_inference_http:
-	@echo Make sure to use the inference environment for this to work!
-	python inference.py --data_dir .inference --model_weights ~/Downloads/good_resnet.pt --encrypted_inference --websockets_config configs/websetting/config_inference.csv
-
+	@echo HTTP encrypted inference
+	python inference.py --data_dir .inference --model_weights .pretrained_weights/local_873.pt --encrypted_inference --websockets_config configs/websetting/config_inference.csv --http_protocol
