@@ -88,15 +88,6 @@ if __name__ == "__main__":
         config_file=args.config,
         mean_std_file=args.mean_std_file,
     )
-    # else:
-    # app = create_app(
-    #     node_id=args.id,
-    #     debug=False,
-    #     n_replica=args.num_replicas,
-    #     data_dir=args.data_directory,
-    #     config_file=args.config,
-    # )
-
     _network = args.network
     _address = "http://{}:{}".format(args.host, args.port)
     if _address and _network:
@@ -110,19 +101,8 @@ if __name__ == "__main__":
     server = pywsgi.WSGIServer(
         (args.host, args.port), app, handler_class=WebSocketHandler
     )
-    server.serve_forever()
-else:
-    raise RuntimeError("You reached dead code.")
-    # node_id = os.environ.get("NODE_ID", None)
-    # num_replicas = os.environ.get("N_REPLICAS", None)
-    # _address = os.environ.get("ADDRESS", None)
-    # _network = os.environ.get("NETWORK", None)
-    # if _address and _network:
-    #     requests.post(
-    #         os.path.join(_network, "join"),
-    #         data=json.dumps(
-    #             {"node-id": node_id, "node-address": "{}".format(_address)}
-    #         ),
-    #     )
-
-    # app = create_app(node_id=node_id, debug=False, n_replica=num_replicas)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("Keyboard Interrupt. Exiting")
+        exit(0)
