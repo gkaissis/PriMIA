@@ -8,8 +8,6 @@ import os
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
 import torch
-
-#
 import configparser
 import argparse
 import syft as sy
@@ -36,6 +34,9 @@ from torchlib.dataloader import (
     CombinedLoader,
 )
 from collections import Counter
+from syft.serde.compression import NO_COMPRESSION
+
+sy.serde.compression.default_compress_scheme = NO_COMPRESSION
 
 
 if __name__ == "__main__":
@@ -61,12 +62,19 @@ if __name__ == "__main__":
         "\nIf not passed as argument virtual workers are used",
     )
     parser.add_argument("--cuda", action="store_true", help="Use CUDA acceleration.")
+    parser.add_argument(
+        "--http_protocol", action="store_true", help="Use HTTP instead of WS."
+    )
     cmd_args = parser.parse_args()
 
     use_cuda = cmd_args.cuda and torch.cuda.is_available()
-
     device = torch.device("cuda" if use_cuda else "cpu")  # pylint: disable=no-member
     state = torch.load(cmd_args.model_weights, map_location=device)
+
+    if not cmd_args.http_protocol:
+        warn(
+            "Under certain circumstances, WebSockets can fail when performing encrypted inference. If you experience errors related to 'rsv' not being implemented, consider enabling HTTP."
+        )
 
     args = state["args"]
     if type(args) is Namespace:
@@ -92,11 +100,12 @@ if __name__ == "__main__":
             assert "data_owner" in worker_names, "No data_owner in websockets config"
             data_owner = sy.grid.clients.data_centric_fl_client.DataCentricFLClient(
                 hook,
-                "http://{:s}:{:s}".format(
+                "{:s}://{:s}:{:s}".format(
+                    "http" if cmd_args.http_protocol else "ws",
                     worker_dict["data_owner"]["host"],
                     worker_dict["data_owner"]["port"],
                 ),
-                http_protocol=True,
+                http_protocol=cmd_args.http_protocol,
             )
             if cmd_args.encrypted_inference:
                 assert (
@@ -104,20 +113,23 @@ if __name__ == "__main__":
                 ), "No crypto_provider in websockets config"
                 crypto_provider = sy.grid.clients.data_centric_fl_client.DataCentricFLClient(
                     hook,
-                    "http://{:s}:{:s}".format(
+                    "{:s}://{:s}:{:s}".format(
+                        "http" if cmd_args.http_protocol else "ws",
                         worker_dict["crypto_provider"]["host"],
                         worker_dict["crypto_provider"]["port"],
                     ),
-                    http_protocol=True,
+                    http_protocol=cmd_args.http_protocol,
                 )
             model_owner = sy.grid.clients.data_centric_fl_client.DataCentricFLClient(
                 hook,
-                "http://{:s}:{:s}".format(
+                "{:s}://{:s}:{:s}".format(
+                    "http" if cmd_args.http_protocol else "ws",
                     worker_dict["model_owner"]["host"],
                     worker_dict["model_owner"]["port"],
                 ),
-                http_protocol=True,
+                http_protocol=cmd_args.http_protocol,
             )
+
         else:
             data_owner = sy.VirtualWorker(hook, id="data_owner")
             crypto_provider = sy.VirtualWorker(hook, id="crypto_provider")
@@ -191,6 +203,8 @@ if __name__ == "__main__":
             grid = sy.PrivateGridNetwork(data_owner, model_owner)
         data_tensor = grid.search("#inference_data")["data_owner"][0]
         dataset = RemoteTensorDataset(data_tensor)
+    if cmd_args.websockets_config:
+        sy.local_worker.object_store.garbage_delay = 1
 
         # for worker in data.keys():
         #     dist_dataset = [
