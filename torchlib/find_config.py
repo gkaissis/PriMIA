@@ -29,7 +29,7 @@ def objective(trial: opt.trial):
         visdom=False,
         encrypted_inference=False,
         cuda=not cmdln_args.federated,
-        websockets=False,
+        websockets=cmdln_args.websockets,
         batch_size=200,
         train_resolution=224,
         inference_resolution=224,
@@ -161,6 +161,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--federated", action="store_true", help="Search on federated setting"
     )
+    parser.add_argument("--websockets", action="store_true", help="Use websockets")
     parser.add_argument(
         "--num_trials", default=30, type=int, help="how many trials to perform"
     )
