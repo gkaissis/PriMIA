@@ -63,7 +63,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--cuda", action="store_true", help="Use CUDA acceleration.")
     parser.add_argument(
-        "--http_protocol", action="store_true", help="Use HTTP instead of WS."
+        "--http_protocol", action="store_true", help="Use HTTP only instead of WS."
     )
     cmd_args = parser.parse_args()
 
@@ -73,7 +73,8 @@ if __name__ == "__main__":
 
     if not cmd_args.http_protocol:
         warn(
-            "Under certain circumstances, WebSockets can fail when performing encrypted inference. If you experience errors related to 'rsv' not being implemented, consider enabling HTTP."
+            """Under certain circumstances, WebSockets can fail when performing encrypted inference.
+            If you experience WebSocket-related errors, consider using HTTP only with the --http_protocol flag."""
         )
 
     args = state["args"]
@@ -111,14 +112,16 @@ if __name__ == "__main__":
                 assert (
                     "crypto_provider" in worker_names
                 ), "No crypto_provider in websockets config"
-                crypto_provider = sy.grid.clients.data_centric_fl_client.DataCentricFLClient(
-                    hook,
-                    "{:s}://{:s}:{:s}".format(
-                        "http" if cmd_args.http_protocol else "ws",
-                        worker_dict["crypto_provider"]["host"],
-                        worker_dict["crypto_provider"]["port"],
-                    ),
-                    http_protocol=cmd_args.http_protocol,
+                crypto_provider = (
+                    sy.grid.clients.data_centric_fl_client.DataCentricFLClient(
+                        hook,
+                        "{:s}://{:s}:{:s}".format(
+                            "http" if cmd_args.http_protocol else "ws",
+                            worker_dict["crypto_provider"]["host"],
+                            worker_dict["crypto_provider"]["port"],
+                        ),
+                        http_protocol=cmd_args.http_protocol,
+                    )
                 )
             model_owner = sy.grid.clients.data_centric_fl_client.DataCentricFLClient(
                 hook,
@@ -188,7 +191,11 @@ if __name__ == "__main__":
     if not args.pretrained:
         loader.change_channels(1)
     if not cmd_args.websockets_config:
-        dataset = PathDataset(cmd_args.data_dir, transform=tf, loader=loader,)
+        dataset = PathDataset(
+            cmd_args.data_dir,
+            transform=tf,
+            loader=loader,
+        )
         if cmd_args.encrypted_inference:
             data = []
             for d in tqdm(dataset, total=len(dataset), leave=False, desc="load data"):
@@ -251,7 +258,7 @@ if __name__ == "__main__":
     model.load_state_dict(state["model_state_dict"])
     model.to(device)
     if args.encrypted_inference:
-        fix_prec_kwargs = {"precision_fractional": 4, "dtype": "long"}
+        fix_prec_kwargs = {"precision_fractional": 16, "dtype": "long"}
         share_kwargs = {
             "crypto_provider": crypto_provider,
             "protocol": "fss",
@@ -296,4 +303,3 @@ if __name__ == "__main__":
     sys.stdout.write(json.dumps(pred_dict))
 
     print("\n{:s}".format(str(Counter(total_pred))))
-

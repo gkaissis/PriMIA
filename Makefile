@@ -49,7 +49,7 @@ federated_insecure:
 	@echo Finished Training on VirtualWorkers without SecAgg
 
 federated_gridnode_secure:
-	python train.py --config configs/torch/pneumonia-resnet-pretrained.ini --train_federated --data_dir data/server_simulation --websockets
+	python train.py --config configs/torch/pneumonia-resnet-pretrained.ini --train_federated --websockets --data_dir data/server_simulation
 
 federated_gridnode_insecure:
 	python train.py --config configs/torch/pneumonia-resnet-pretrained.ini --train_federated --data_dir data/server_simulation --websockets --unencrypted_aggregation
