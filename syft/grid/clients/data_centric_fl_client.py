@@ -181,8 +181,34 @@ class DataCentricFLClient(WebsocketClientWorker):
             except TypeError:
                 response = serialize(None)
         else:
-            self.ws.send_binary(message)
-            response = self.ws.recv()
+            try:
+                self.ws.send_binary(message)
+                response = self.ws.recv()
+            except Exception as e:
+                decoded_message = message.decode(self.encoding)
+                message = {
+                    "encoding": self.encoding,
+                    "payload": decoded_message,
+                }
+                url = self.address.replace("ws", "http") + "/data-centric/syft/"
+                # Multipart encoding
+                form = MultipartEncoder(message)
+                upload_size = form.len
+                monitor = MultipartEncoderMonitor(form, None)
+                headers = {
+                    "Prefer": "respond-async",
+                    "Content-Type": monitor.content_type,
+                }
+                try:
+                    session = requests.Session()
+                    response = session.post(url, headers=headers, data=monitor).content
+                    session.close()
+                    response = json.loads(response)["payload"]
+                    response = response.encode(self.encoding)
+                except TypeError:
+                    response = serialize(None)
+                finally:
+                    url = self.address.replace("http", "ws") + "/data-centric/syft/"
         return response
 
     def _return_bool_result(self, result, return_key=None):
