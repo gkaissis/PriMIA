@@ -334,7 +334,8 @@ class MixUp(torch.nn.Module):
         self.λ = λ
 
     def forward(
-        self, x: Tuple[Union[torch.tensor, Tuple[torch.tensor]], Tuple[torch.Tensor]],
+        self,
+        x: Tuple[Union[torch.tensor, Tuple[torch.tensor]], Tuple[torch.Tensor]],
     ):
         assert len(x) == 2, "need data and target"
         x, y = x
@@ -557,6 +558,7 @@ def setup_pysyft(args, hook, verbose=False):
                 "http://{:s}:{:s}".format(worker["host"], worker["port"]),
                 id=worker["id"],
                 verbose=False,
+                timeout=60000,
             )
             for _, worker in worker_dict.items()
         }
@@ -568,6 +570,7 @@ def setup_pysyft(args, hook, verbose=False):
                 ),
                 id=crypto_provider_data["id"],
                 verbose=False,
+                timeout=60000,
             )
 
     else:
@@ -658,7 +661,10 @@ def setup_pysyft(args, hook, verbose=False):
                 assert (
                     len(stats_dataset.classes) == 3
                 ), "We can only handle data that has 3 classes: normal, bacterial and viral"
-                mean, std = calc_mean_std(stats_dataset, save_folder=data_dir,)
+                mean, std = calc_mean_std(
+                    stats_dataset,
+                    save_folder=data_dir,
+                )
                 del stats_dataset
 
                 target_tf = None
@@ -690,7 +696,10 @@ def setup_pysyft(args, hook, verbose=False):
             # repetitions = 1 if worker.id == "validation" else args.repetitions_dataset
             if args.mixup:
                 dataset = torch.utils.data.DataLoader(
-                    dataset, batch_size=1, shuffle=True, num_workers=args.num_threads,
+                    dataset,
+                    batch_size=1,
+                    shuffle=True,
+                    num_workers=args.num_threads,
                 )
                 mixup = MixUp(λ=args.mixup_lambda, p=args.mixup_prob)
                 last_set = None
@@ -724,8 +733,12 @@ def setup_pysyft(args, hook, verbose=False):
                 selected_data = selected_data.squeeze(1)
                 selected_targets = selected_targets.squeeze(1)
             del data, targets
-            selected_data.tag("#traindata",)
-            selected_targets.tag("#traintargets",)
+            selected_data.tag(
+                "#traindata",
+            )
+            selected_targets.tag(
+                "#traintargets",
+            )
             worker.load_data([selected_data, selected_targets])
     if crypto_provider is not None:
         grid = sy.PrivateGridNetwork(*(list(workers.values()) + [crypto_provider]))
@@ -738,7 +751,8 @@ def setup_pysyft(args, hook, verbose=False):
     for worker in data.keys():
         dist_dataset = [  # TODO: in the future transform here would be nice but currently raise errors
             sy.BaseDataset(
-                data[worker][0], target[worker][0],
+                data[worker][0],
+                target[worker][0],
             )  # transform=federated_tf
         ]
         fed_dataset = sy.FederatedDataset(dist_dataset)
@@ -965,13 +979,17 @@ def train_federated(
         )
     else:
         if verbose:
-            print("Train Epoch: {} \tLoss: {:.6f}".format(epoch, avg_loss,))
+            print(
+                "Train Epoch: {} \tLoss: {:.6f}".format(
+                    epoch,
+                    avg_loss,
+                )
+            )
     return model
 
 
 def tensor_iterator(model: "torch.Model") -> "Sequence[Iterator]":
-    """adding relavant iterators for the tensor elements
-    """
+    """adding relavant iterators for the tensor elements"""
     iterators = [
         "parameters",
         "buffers",
@@ -989,8 +1007,7 @@ def aggregation(
     weights=None,
     secure=True,
 ):
-    """(Very) defensive version of the original secure aggregation relying on actually checking the parameter names and shapes before trying to load them into the model.
-    """
+    """(Very) defensive version of the original secure aggregation relying on actually checking the parameter names and shapes before trying to load them into the model."""
 
     local_keys = local_model.state_dict().keys()
 
@@ -1266,7 +1283,12 @@ def train(  # never called on websockets
             else:
                 avg_loss.append(loss.item())
     if not args.visdom and verbose:
-        print("Train Epoch: {} \tLoss: {:.6f}".format(epoch, np.mean(avg_loss),))
+        print(
+            "Train Epoch: {} \tLoss: {:.6f}".format(
+                epoch,
+                np.mean(avg_loss),
+            )
+        )
     return model
 
 
@@ -1322,7 +1344,11 @@ def stats_table(
     headers.extend(
         [class_names[i] if class_names else i for i in range(conf_matrix.shape[0])]
     )
-    return tabulate(rows, headers=headers, tablefmt="fancy_grid",)
+    return tabulate(
+        rows,
+        headers=headers,
+        tablefmt="fancy_grid",
+    )
 
 
 def test(
@@ -1377,7 +1403,11 @@ def test(
         if verbose:
             print(
                 "Test set: Epoch: {:d} Average loss: {:.4f}, Recall: {}/{} ({:.0f}%)\n".format(
-                    epoch, test_loss, TP, L, objective,
+                    epoch,
+                    test_loss,
+                    TP,
+                    L,
+                    objective,
                 ),
                 # end="",
             )
