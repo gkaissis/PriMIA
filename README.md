@@ -1,8 +1,8 @@
 # PriMIA
 ## _Privacy-preserving Medical Image Analysis_
 
-![](images/OM - PriMIA-Logo@5x.png)
-![](images/Logos.png)
+![](docs/images/OM - PriMIA-Logo@5x.png)
+![](docs/images/Logos.png)
 
 ## About
 PriMIA is a framework for end-to-end privacy preserving machine learning on medical images designed and built at the Technical University of Munich, OpenMined and Imperial College London. It enables you to do federated training of convolutional neural networks and encrypted inference from a simple command-line interface.
