@@ -1,0 +1,511 @@
+
+
+
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+      
+      
+      <link rel="shortcut icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.1.2, mkdocs-material-5.5.13">
+    
+    
+      
+        <title>Contributing to or modifying PriMIA - PriMIA</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.077507d7.min.css">
+      
+        <link rel="stylesheet" href="../assets/stylesheets/palette.ff0a5ce4.min.css">
+      
+      
+        
+        
+        <meta name="theme-color" content="#546d78">
+      
+    
+    
+    
+      
+        <link href="https://fonts.gstatic.com" rel="preconnect" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Work+Sans:300,400,400i,700%7CFira+Code&display=fallback">
+        <style>body,input{font-family:"Work Sans",-apple-system,BlinkMacSystemFont,Helvetica,Arial,sans-serif}code,kbd,pre{font-family:"Fira Code",SFMono-Regular,Consolas,Menlo,monospace}</style>
+      
+    
+    
+    
+    
+      
+    
+    
+  </head>
+  
+  
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="blue-grey" data-md-color-accent="light-blue">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#contributing-to-or-modifying-primia" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <header class="md-header" data-md-component="header">
+  <nav class="md-header-nav md-grid" aria-label="Header">
+    <a href=".." title="PriMIA" class="md-header-nav__button md-logo" aria-label="PriMIA">
+      
+  <img src="../images/OM - PriMIA-Icon@5x.png" alt="logo">
+
+    </a>
+    <label class="md-header-nav__button md-icon" for="__drawer">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3V6m0 5h18v2H3v-2m0 5h18v2H3v-2z"/></svg>
+    </label>
+    <div class="md-header-nav__title" data-md-component="header-title">
+      
+        <div class="md-header-nav__ellipsis">
+          <span class="md-header-nav__topic md-ellipsis">
+            PriMIA
+          </span>
+          <span class="md-header-nav__topic md-ellipsis">
+            
+              Contributing to or modifying PriMIA
+            
+          </span>
+        </div>
+      
+    </div>
+    
+      <label class="md-header-nav__button md-icon" for="__search">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0116 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.516 6.516 0 019.5 16 6.5 6.5 0 013 9.5 6.5 6.5 0 019.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5z"/></svg>
+      </label>
+      
+<div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" data-md-state="active">
+      <label class="md-search__icon md-icon" for="__search">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0116 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.516 6.516 0 019.5 16 6.5 6.5 0 013 9.5 6.5 6.5 0 019.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5z"/></svg>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11h12z"/></svg>
+      </label>
+      <button type="reset" class="md-search__icon md-icon" aria-label="Clear" data-md-component="search-reset" tabindex="-1">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12 19 6.41z"/></svg>
+      </button>
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+    
+    
+  </nav>
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+        
+      
+      
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              <div class="md-sidebar md-sidebar--primary" data-md-component="navigation">
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    <nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="PriMIA" class="md-nav__button md-logo" aria-label="PriMIA">
+      
+  <img src="../images/OM - PriMIA-Icon@5x.png" alt="logo">
+
+    </a>
+    PriMIA
+  </label>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+      
+
+
+  <li class="md-nav__item">
+    <a href=".." title="Start Here" class="md-nav__link">
+      Start Here
+    </a>
+  </li>
+
+    
+      
+      
+      
+
+
+  <li class="md-nav__item">
+    <a href="../CLI_Docs/" title="Library Documentation" class="md-nav__link">
+      Library Documentation
+    </a>
+  </li>
+
+    
+      
+      
+      
+
+
+  <li class="md-nav__item">
+    <a href="../HowTo/" title="How-To Guides" class="md-nav__link">
+      How-To Guides
+    </a>
+  </li>
+
+    
+      
+      
+      
+
+
+  <li class="md-nav__item">
+    <a href="../ConfigDocs/" title="Configuration File Documentation" class="md-nav__link">
+      Configuration File Documentation
+    </a>
+  </li>
+
+    
+      
+      
+      
+
+  
+
+
+  <li class="md-nav__item md-nav__item--active">
+    
+    <input class="md-nav__toggle md-toggle" data-md-toggle="toc" type="checkbox" id="__toc">
+    
+      
+    
+    
+      <label class="md-nav__link md-nav__link--active" for="__toc">
+        Contributing to or modifying PriMIA
+        <span class="md-nav__icon md-icon"></span>
+      </label>
+    
+    <a href="./" title="Contributing to or modifying PriMIA" class="md-nav__link md-nav__link--active">
+      Contributing to or modifying PriMIA
+    </a>
+    
+      
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#general-considerations" class="md-nav__link">
+    General considerations
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#if-you-want-to-switch-out-the-network-architecture" class="md-nav__link">
+    If you want to switch out the network architecture
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#if-you-want-to-modify-the-data-used" class="md-nav__link">
+    If you want to modify the data used
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#if-you-want-to-use-similar-data-with-minor-modifications-to-the-training-task" class="md-nav__link">
+    If you want to use similar data with minor modifications to the training task
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#if-you-want-to-port-primia-to-pysyft-030" class="md-nav__link">
+    If you want to port PriMIA to PySyft 0.3.0
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#if-you-want-to-port-primia-to-tensorflow-or-jax" class="md-nav__link">
+    If you want to port PriMIA to TensorFlow or JAX
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#if-you-find-a-bug-or-want-to-suggest-a-feature" class="md-nav__link">
+    If you find a bug or want to suggest a feature
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#if-you-like-our-work" class="md-nav__link">
+    If you like our work
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+    
+  </li>
+
+    
+      
+      
+      
+
+
+  <li class="md-nav__item">
+    <a href="../Dataset_Description/" title="Dataset Description" class="md-nav__link">
+      Dataset Description
+    </a>
+  </li>
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="toc">
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#general-considerations" class="md-nav__link">
+    General considerations
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#if-you-want-to-switch-out-the-network-architecture" class="md-nav__link">
+    If you want to switch out the network architecture
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#if-you-want-to-modify-the-data-used" class="md-nav__link">
+    If you want to modify the data used
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#if-you-want-to-use-similar-data-with-minor-modifications-to-the-training-task" class="md-nav__link">
+    If you want to use similar data with minor modifications to the training task
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#if-you-want-to-port-primia-to-pysyft-030" class="md-nav__link">
+    If you want to port PriMIA to PySyft 0.3.0
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#if-you-want-to-port-primia-to-tensorflow-or-jax" class="md-nav__link">
+    If you want to port PriMIA to TensorFlow or JAX
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#if-you-find-a-bug-or-want-to-suggest-a-feature" class="md-nav__link">
+    If you find a bug or want to suggest a feature
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#if-you-like-our-work" class="md-nav__link">
+    If you like our work
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          <div class="md-content">
+            <article class="md-content__inner md-typeset">
+              
+                
+                
+                  
+                
+                
+                <h1 id="contributing-to-or-modifying-primia">Contributing to or modifying PriMIA</h1>
+<p>PriMIA is designed as a generic library. If you want to use our framework to train on different data (e.g. a different number of classes) or on another task altogether (segmentation instead of classification), here are some pointers to get you started.</p>
+<h2 id="general-considerations">General considerations</h2>
+<p>In general, if you are interested in adapting PriMIA to a different use case, please get in touch with us and join the OpenMined team! We are an open, diverse and welcoming community and appreciate anyone who wants to get involved!</p>
+<h2 id="if-you-want-to-switch-out-the-network-architecture">If you want to switch out the network architecture</h2>
+<p>... consider using one of the networks provided, which are suitable for distributed systems. Large networks (like ResNet50) are compatible, but might be impractical to use due to the I/O overhead. That said, to include a new network, modify <code>torchlib/models.py</code> and adapt the training loop in <code>train.py</code> using standard PyTorch practices.</p>
+<h2 id="if-you-want-to-modify-the-data-used">If you want to modify the data used</h2>
+<p>... you need to change the dataloader used, which can be found in <code>torchlib/dataloader.py</code> for a dataloader suitable to your task. You will probably also need to modify the loss function, which can be found in <code>torchlib/utils.py</code></p>
+<h2 id="if-you-want-to-use-similar-data-with-minor-modifications-to-the-training-task">If you want to use similar data with minor modifications to the training task</h2>
+<p>... you can probably get by with minor modifications to the training loop in <code>train.py</code> and potentially the dataloader and loss function as discussed above. </p>
+<h2 id="if-you-want-to-port-primia-to-pysyft-030">If you want to port PriMIA to PySyft 0.3.0</h2>
+<p>... get in touch with us! We are happy to support you.</p>
+<h2 id="if-you-want-to-port-primia-to-tensorflow-or-jax">If you want to port PriMIA to TensorFlow or JAX</h2>
+<p>... <em>definitely</em> get in touch with us! We'd be very excited!</p>
+<h2 id="if-you-find-a-bug-or-want-to-suggest-a-feature">If you find a bug or want to suggest a feature</h2>
+<p>... open a GitHub issue and get in touch with us on the OpenMined Slack! Hint: we have a PriMIA logo next to our names :)</p>
+<h2 id="if-you-like-our-work">If you like our work</h2>
+<p>... spread the word! Not just about us, but about privacy-preserving machine learning in general!  </p>
+                
+              
+              
+                
+
+
+              
+            </article>
+          </div>
+        </div>
+      </main>
+      
+        
+<footer class="md-footer">
+  
+    <div class="md-footer-nav">
+      <nav class="md-footer-nav__inner md-grid" aria-label="Footer">
+        
+          <a href="../ConfigDocs/" title="Configuration File Documentation" class="md-footer-nav__link md-footer-nav__link--prev" rel="prev">
+            <div class="md-footer-nav__button md-icon">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11h12z"/></svg>
+            </div>
+            <div class="md-footer-nav__title">
+              <div class="md-ellipsis">
+                <span class="md-footer-nav__direction">
+                  Previous
+                </span>
+                Configuration File Documentation
+              </div>
+            </div>
+          </a>
+        
+        
+          <a href="../Dataset_Description/" title="Dataset Description" class="md-footer-nav__link md-footer-nav__link--next" rel="next">
+            <div class="md-footer-nav__title">
+              <div class="md-ellipsis">
+                <span class="md-footer-nav__direction">
+                  Next
+                </span>
+                Dataset Description
+              </div>
+            </div>
+            <div class="md-footer-nav__button md-icon">
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11H4z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    </div>
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-footer-copyright">
+        
+        Made with
+        <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+          Material for MkDocs
+        </a>
+      </div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    
+      <script src="../assets/javascripts/vendor.2d1db4bd.min.js"></script>
+      <script src="../assets/javascripts/bundle.6627ddf3.min.js"></script><script id="__lang" type="application/json">{"clipboard.copy": "Copy to clipboard", "clipboard.copied": "Copied to clipboard", "search.config.lang": "en", "search.config.pipeline": "trimmer, stopWordFilter", "search.config.separator": "[\\s\\-]+", "search.result.placeholder": "Type to start searching", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents"}</script>
+      
+      <script>
+        app = initialize({
+          base: "..",
+          features: [],
+          search: Object.assign({
+            worker: "../assets/javascripts/worker/search.5eca75d3.min.js"
+          }, typeof search !== "undefined" && search)
+        })
+      </script>
+      
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js?config=TeX-MML-AM_CHTML"></script>
+      
+    
+  </body>
+</html>
