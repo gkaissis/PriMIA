@@ -1,4 +1,4 @@
-site_name: PrIMIA
+site_name: PriMIA
 theme:
     name: material
     palette:
@@ -8,14 +8,15 @@ theme:
     font:
         text: 'Work Sans'
         code: 'Fira Code'
-    logo: images/primia.png
+    logo: images/OM - PriMIA-Icon@5x.png
 
 nav:
     - "index.md"
     - "CLI_Docs.md"
     - "HowTo.md"
+    - "ConfigDocs.md"
+    - "HowToMod.md"
     - "Dataset_Description.md"
-    - "Tech_Supplement.md"
 
 extra_javascript:
   - 'https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.0/MathJax.js?config=TeX-MML-AM_CHTML'

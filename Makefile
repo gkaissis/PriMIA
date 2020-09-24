@@ -56,7 +56,7 @@ federated_gridnode_insecure:
 
 local:
 	@echo Training Locally
-	python train.py --config configs/torch/pneumonia-resnet-pretrained.ini --data_dir data/server_simulation/worker1 --cuda
+	python train.py --config configs/torch/pneumonia-resnet-pretrained.ini --data_dir data/train/ --cuda
 	@echo Finished Training Locally
 
 # Gridnode ensemble shortcut
