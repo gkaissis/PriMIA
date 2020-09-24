@@ -1,7 +1,7 @@
 # PriMIA
 ## _Privacy-preserving Medical Image Analysis_
 
-![]('docs/images/OM - PriMIA-Logo@5x.png')
+![](docs/images/logo_big.png)
 ![](docs/images/Logos.png)
 
 ## About

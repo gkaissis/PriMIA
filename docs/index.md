@@ -1,6 +1,6 @@
 # Start Here
 
-![](images/OM - PriMIA-Logo@5x.png)
+![](images/logo_big.png)
 ![](images/Logos.png)
 
 ## About

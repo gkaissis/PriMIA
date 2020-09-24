@@ -8,7 +8,7 @@ theme:
     font:
         text: 'Work Sans'
         code: 'Fira Code'
-    logo: images/OM - PriMIA-Icon@5x.png
+    logo: images/icon.png
 
 nav:
     - "index.md"
