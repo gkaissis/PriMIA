@@ -286,6 +286,7 @@ if __name__ == "__main__":
             model.fix_precision(**fix_prec_kwargs).share(*workers, **share_kwargs)
         # test method
         model.eval()
+        model.pool, model.relu = model.relu, model.pool
         total_pred, total_target, total_scores = [], [], []
         with torch.no_grad():
             for i, data in tqdm(
