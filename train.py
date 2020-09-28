@@ -51,7 +51,7 @@ from torchlib.utils import (
 )
 
 
-def main(args, verbose=True, optuna_trial=None):
+def main(args, verbose=True, optuna_trial=None, cmd_args=None):
 
     use_cuda = args.cuda and torch.cuda.is_available()
     if args.deterministic and args.websockets:
@@ -342,21 +342,51 @@ def main(args, verbose=True, optuna_trial=None):
         loss_fn = {w: loss_fn.copy() for w in [*workers, "local_model"]}
 
     start_at_epoch = 1
-    if "cmd_args" in locals() and cmd_args.resume_checkpoint:
-        print("resuming checkpoint - args will be overwritten")
+    if cmd_args.resume_checkpoint:
+        print("Resume training from a given checkpoint.")
         state = torch.load(cmd_args.resume_checkpoint, map_location=device)
         start_at_epoch = state["epoch"]
-        args = state["args"]
-        if cmd_args.train_federated and args.train_federated:
+        # args = state["args"]
+        checkpoint_args = state["args"]
+        if cmd_args.train_federated and checkpoint_args.train_federated:
             opt_state_dict = state["optim_state_dict"]
             for w in worker_names:
-                optimizer.get_optim(w).load_state_dict(opt_state_dict[w])
-        elif not cmd_args.train_federated and not args.train_federated:
+                if w not in opt_state_dict:
+                    warn(
+                        (
+                            "The worker names of the checkpoint and the current "
+                            "configuration cannot be matched."
+                        )
+                    )
+                    exit()
+                optimizer[w].load_state_dict(opt_state_dict[w])
+            for w in model.keys():
+                model[w].load_state_dict(state["model_state_dict"])
+        elif cmd_args.train_federated and not checkpoint_args.train_federated:
+            assert (
+                len(state["optim_state_dict"]) == 2
+                and "param_groups" in state["optim_state_dict"]
+                and "state" in state["optim_state_dict"]
+            )  # model checkpoint was no federated training
+            for w in worker_names:
+                optimizer[w].load_state_dict(state["optim_state_dict"])
+            for key in model.keys():
+                model[key].load_state_dict(state["model_state_dict"])
+
+        elif not cmd_args.train_federated and checkpoint_args.train_federated:
+            # no optimizer is loaded
+            model.load_state_dict(state["model_state_dict"]["local_model"])
+        elif not cmd_args.train_federated and not checkpoint_args.train_federated:
             optimizer.load_state_dict(state["optim_state_dict"])
+            model.load_state_dict(state["model_state_dict"])
         else:
-            pass  # not possible to load previous optimizer if setting changed
-        args.incorporate_cmd_args(cmd_args)
-        model.load_state_dict(state["model_state_dict"])
+            warn(
+                (
+                    "Checkpoint was not loaded as the combination of the "
+                    "checkpoint and the current configuration is not handled yet."
+                )
+            )  # not possible to load previous optimizer if setting changed
+        # args.incorporate_cmd_args(cmd_args)
     if args.train_federated:
         for m in model.values():
             m.to(device)
@@ -598,4 +628,4 @@ if __name__ == "__main__":
             )
             args.mixup_lambda = 0.499
     print(str(args))
-    main(args)
+    main(args, cmd_args=cmd_args)
