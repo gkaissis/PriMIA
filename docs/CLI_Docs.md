@@ -1,7 +1,7 @@
 # Library Documentation
 
 ## Video walkthrough
-A 50-minute video walkthrough for PriMIA can be found [here](https://youtu.be/LRF2l21n6F0)
+A 50-minute video walkthrough for PriMIA can be found [here](https://youtu.be/2wOlgGPH58w)
 
 ## Documentation for the individual components
 This section describes what the individual components of PriMIA do.
