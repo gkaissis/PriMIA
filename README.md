@@ -28,3 +28,9 @@ License][cc-by].
 [cc-by]: http://creativecommons.org/licenses/by/4.0/
 [cc-by-image]: https://i.creativecommons.org/l/by/4.0/88x31.png
 [cc-by-shield]: https://img.shields.io/badge/License-CC%20BY%204.0-lightgrey.svg
+
+PySyft, included with PriMIA is licensed under the Apache 2.0 license. The license can be found [here](https://github.com/OpenMined/PySyft/blob/master/LICENSE). All modifications to the PySyft source code are also licensed under the Apache 2.0 license.
+
+The PriMIA source code is licensed under the Attribution-NonCommercial-ShareAlike 4.0 International License. (C) 2020, PriMIA contributors.
+
+
