@@ -48,6 +48,12 @@ federated_insecure:
 	python train.py --config configs/torch/pneumonia-resnet-pretrained.ini --train_federated --data_dir data/server_simulation --unencrypted_aggregation
 	@echo Finished Training on VirtualWorkers without SecAgg
 
+# Segmentation 
+federated_insecure_segmentation: 
+	@echo Training a Seg-Net on VirtualWorkers without SecAgg
+	python train.py --config configs/torch/segmentation.ini --train_federated --data_dir seg_data --unencrypted_aggregation
+	@echo Finished Training on VirtualWorkers without SecAgg
+
 federated_gridnode_secure:
 	python train.py --config configs/torch/pneumonia-resnet-pretrained.ini --train_federated --websockets --data_dir data/server_simulation
 
@@ -60,10 +66,9 @@ local:
 	@echo Finished Training Locally
 
 # Segmentation 
-# For now without CUDA because I don't have CUDA. 
 local_segmentation:
 	@echo Segmentation Training Locally
-	python train.py --config configs/torch/segmentation.ini --data_dir seg_data
+	python train.py --config configs/torch/segmentation.ini --data_dir seg_data --cuda
 	@echo Finished Training Locally
 
 # Gridnode ensemble shortcut

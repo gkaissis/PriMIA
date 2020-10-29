@@ -1422,7 +1422,7 @@ def test(
                 )
     test_loss /= len(val_loader)
     # Segmentation - TEMPORARY 
-    print(f"Epoch: {epoch}, Test-Loss: {test_loss}, Test-Acc.: {np.mean(test_accs)}")  
+    print(f"VALIDATION: Epoch: {epoch}, Val-Loss: {test_loss}, Val-Acc.: {np.mean(test_accs)}")  
 
     if args.encrypted_inference:
         objective = 100.0 * TP / (len(val_loader) * args.test_batch_size)
