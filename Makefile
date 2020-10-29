@@ -59,6 +59,13 @@ local:
 	python train.py --config configs/torch/pneumonia-resnet-pretrained.ini --data_dir data/train/ --cuda
 	@echo Finished Training Locally
 
+# Segmentation 
+# For now without CUDA because I don't have CUDA. 
+local_segmentation:
+	@echo Segmentation Training Locally
+	python train.py --config configs/torch/segmentation.ini --data_dir seg_data
+	@echo Finished Training Locally
+
 # Gridnode ensemble shortcut
 gridnode:
 	python torchlib/run_websocket_server.py --data_dir data/server_simulation --config configs/torch/pneumonia-resnet-pretrained.ini

@@ -140,7 +140,7 @@ class Arguments:
             self.beta1 = config.getfloat("config", "beta1", fallback=0.9)
             self.beta2 = config.getfloat("config", "beta2", fallback=0.999)
         self.model = config.get("config", "model")  # , fallback="simpleconv")
-        assert self.model in ["simpleconv", "resnet-18", "vgg16"]
+        assert self.model in ["simpleconv", "resnet-18", "vgg16", "simple_seg_net"] # Segmentation 
         self.pooling_type = config.get("config", "pooling_type", fallback="max")
         self.pretrained = config.getboolean("config", "pretrained")  # , fallback=False)
         self.weight_decay = config.getfloat("config", "weight_decay")  # , fallback=0.0)
@@ -1370,6 +1370,10 @@ def test(
     model.eval()
     test_loss, TP = 0, 0
     total_pred, total_target, total_scores = [], [], []
+
+    # Segmentation - TEMPORARY 
+    test_accs = []
+
     with torch.no_grad():
         for data, target in (
             tqdm.tqdm(
@@ -1385,18 +1389,41 @@ def test(
             output = model(data)
             loss = loss_fn(output, oh_converter(target) if oh_converter else target)
             test_loss += loss.item()  # sum up batch loss
-            total_scores.append(output)
-            pred = output.argmax(dim=1)
-            tgts = target.view_as(pred)
-            total_pred.append(pred)
-            total_target.append(tgts)
-            equal = pred.eq(tgts)
-            TP += (
-                equal.sum().copy().get().float_precision().long().item()
-                if args.encrypted_inference
-                else equal.sum().item()
-            )
+            # Segmentation 
+            # TODO: Adapt for all use-cases (train, inference, encrypted, uncencrypted)
+            if args.data_dir == "seg_data": 
+                # As for normal classification consider the most probable class (for every pixel)
+                # the second dimension in model output is again the class-dimension
+                # that's why the max should be taken over that dimension
+                _, pred = torch.max(output, 1)
+
+                # Only allow images/pixels with label >= 0 e.g. for segmentation 
+                # (because of unlabeled datapoints with label: -1)
+                targets_mask = target >= 0
+                test_acc = np.mean((pred == target)[
+                                    targets_mask].data.cpu().numpy())
+                test_accs.append(test_acc)
+
+                # Added from above (TO BE EXTENDED)
+                total_pred.append(pred)
+                total_target.append(target)
+
+            else: 
+                total_scores.append(output)
+                pred = output.argmax(dim=1)
+                tgts = target.view_as(pred)
+                total_pred.append(pred)
+                total_target.append(tgts)
+                equal = pred.eq(tgts)
+                TP += (
+                    equal.sum().copy().get().float_precision().long().item()
+                    if args.encrypted_inference
+                    else equal.sum().item()
+                )
     test_loss /= len(val_loader)
+    # Segmentation - TEMPORARY 
+    print(f"Epoch: {epoch}, Test-Loss: {test_loss}, Test-Acc.: {np.mean(test_accs)}")  
+
     if args.encrypted_inference:
         objective = 100.0 * TP / (len(val_loader) * args.test_batch_size)
         L = len(val_loader.dataset)
@@ -1412,40 +1439,48 @@ def test(
                 # end="",
             )
     else:
-        total_pred = torch.cat(total_pred).cpu().numpy()  # pylint: disable=no-member
-        total_target = (
-            torch.cat(total_target).cpu().numpy()  # pylint: disable=no-member
-        )
-        total_scores = (
-            torch.cat(total_scores).cpu().numpy()  # pylint: disable=no-member
-        )
-        total_scores -= total_scores.min(axis=1)[:, np.newaxis]
-        total_scores = total_scores / total_scores.sum(axis=1)[:, np.newaxis]
-        try:
-            roc_auc = mt.roc_auc_score(total_target, total_scores, multi_class="ovo")
-        except ValueError:
-            warn(
-                "ROC AUC score could not be calculated and was set to zero.",
-                category=UserWarning,
+        # Segmentation: TEMPORARY
+        if args.data_dir == "seg_data": 
+            matthews_coeff = 0
+            # for now set objective to test_acc
+            objective = np.mean(test_accs)
+        else: 
+            total_pred = torch.cat(total_pred).cpu().numpy()  # pylint: disable=no-member
+            total_target = (
+                torch.cat(total_target).cpu().numpy()  # pylint: disable=no-member
             )
-            roc_auc = 0.0
-        matthews_coeff = mt.matthews_corrcoef(total_target, total_pred)
-        objective = 100.0 * matthews_coeff
-        if verbose:
-            conf_matrix = mt.confusion_matrix(total_target, total_pred)
-            report = mt.classification_report(
-                total_target, total_pred, output_dict=True, zero_division=0
+            total_scores = (
+                torch.cat(total_scores).cpu().numpy()  # pylint: disable=no-member
             )
-            print(
-                stats_table(
-                    conf_matrix,
-                    report,
-                    roc_auc=roc_auc,
-                    matthews_coeff=matthews_coeff,
-                    class_names=class_names,
-                    epoch=epoch,
+            total_scores -= total_scores.min(axis=1)[:, np.newaxis]
+            total_scores = total_scores / total_scores.sum(axis=1)[:, np.newaxis]
+            try:
+                roc_auc = mt.roc_auc_score(total_target, total_scores, multi_class="ovo")
+            except ValueError:
+                warn(
+                    "ROC AUC score could not be calculated and was set to zero.",
+                    category=UserWarning,
                 )
-            )
+                roc_auc = 0.0
+        
+            matthews_coeff = mt.matthews_corrcoef(total_target, total_pred)
+            objective = 100.0 * matthews_coeff
+
+            if verbose:
+                conf_matrix = mt.confusion_matrix(total_target, total_pred)
+                report = mt.classification_report(
+                    total_target, total_pred, output_dict=True, zero_division=0
+                )
+                print(
+                    stats_table(
+                        conf_matrix,
+                        report,
+                        roc_auc=roc_auc,
+                        matthews_coeff=matthews_coeff,
+                        class_names=class_names,
+                        epoch=epoch,
+                    )
+                )
         if args.visdom and vis_params:
             vis_params["vis"].line(
                 X=np.asarray([epoch]),

@@ -30,11 +30,13 @@ from torchlib.dataloader import (
     random_split,
     create_albu_transform,
     CombinedLoader,
+    SegmentationData, # Segmentation 
 )  # pylint:disable=import-error
 from torchlib.models import (
     conv_at_resolution,  # pylint:disable=import-error
     resnet18,
     vgg16,
+    simple_seg_net, # Segmentation
 )
 from torchlib.utils import (
     Arguments,
@@ -127,6 +129,18 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
                 dataset,
                 [int(ceil(total_L * (1.0 - fraction))), int(floor(total_L * fraction))],
             )
+        elif args.data_dir == "seg_data": 
+
+            # For now: - transforms fixed in datalaoder class (SegmentationData class), 
+            #          - train-val-split by different predfined datasets 
+            #          - fixed centralized data 
+
+            # Imagepath to the two the parent directory of the two label files 
+            dataset = SegmentationData(image_paths_file='data/segmentation_data/train.txt')
+            valset = SegmentationData(image_paths_file='data/segmentation_data/val.txt')
+
+            val_mean_std = calc_mean_std(dataset)
+
         else:
             # Different train and inference resolution only works with adaptive
             # pooling in model activated
@@ -264,6 +278,11 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             "input_size": args.inference_resolution,
             "pooling": args.pooling_type,
         }
+    # Segmentation 
+    elif args.model == "simple_seg_net":
+        model_type = simple_seg_net
+        # no params for now
+        model_args = {}
     else:
         raise ValueError(
             "Model name not understood. Please choose one of 'vgg16, 'simpleconv', resnet-18'."
@@ -332,7 +351,12 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
                 max_grad_norm=1.0,
             )
             privacy_engine.attach(optimizer)
-    loss_args = {"weight": cw, "reduction": "mean"}
+
+    # Segmentation - we have to ignore the classes with label -1, they represent unlabeled data
+    if args.data_dir == "seg_data": 
+        loss_args = {"ignore_index":-1, "reduction":"mean"}
+    else: 
+        loss_args = {"weight": cw, "reduction": "mean"}
     if args.mixup or (args.weight_classes and args.train_federated):
         loss_fn = Cross_entropy_one_hot
     else:

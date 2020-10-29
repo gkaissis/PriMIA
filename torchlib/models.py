@@ -158,7 +158,6 @@ def make_layers(cfg, batch_norm=False, in_channels=3, pooling="avg"):
             in_channels = v
     return nn.Sequential(*layers)
 
-
 def _vgg(
     arch,
     cfg,
@@ -738,3 +737,74 @@ conv_at_resolution = {28: ConvNetMNIST, 224: ConvNet224, 512: ConvNet512}
         x = self.fc2(x)
         return F.log_softmax(x, dim=1)
 """
+
+"""
+    1.  Segmentation Net
+"""
+
+from collections import OrderedDict
+
+class SimpleSegNet(nn.Module): 
+    def __init__(self): 
+        super(SimpleSegNet, self).__init__() 
+
+        # Take pretrained feature extractor - pretrained vgg11 on ImageNet (small for prototyping)
+        #self.features = _vgg(arch="vgg11", cfg="A", batch_norm=False, pretrained=True, progress=True, num_classes=23)
+
+        # get VGG using existing functions 
+
+        # problem?! corrupted file - invalid checksum 
+        #arch = "vgg11"
+        #cfg = "A"
+
+        arch = "vgg16"
+        cfg = "D"
+
+        batch_norm = False
+        in_channels = 3
+        pooling = "avg"
+        progress = True 
+        #num_classes = 23
+        kwargs = {}
+        kwargs["init_weights"] = False
+
+        feature_extractor = VGG(
+            make_layers(
+                cfgs[cfg], batch_norm=batch_norm, in_channels=in_channels, pooling=pooling
+            ),
+            **kwargs
+        )
+
+        state_dict = load_state_dict_from_url(model_urls[arch], progress=progress)
+        feature_extractor.load_state_dict(state_dict)
+
+        # create very simple segmentation net using nn.Upsample()
+        
+        # res of MSRC-v2 pics
+        H, W = 240, 240 
+
+        self.model = nn.Sequential(OrderedDict([
+                                   ('decoder', nn.Sequential(feature_extractor.features)), 
+                                   ('bridge_conv', nn.Conv2d(512, 512, kernel_size=(1, 1))), 
+                                   ('bridge_relu', nn.ReLU()), 
+                                   ('encoder_1', nn.Upsample(size=(int(H/4), int(W/2)))), 
+                                   ('encoder_1_conv', nn.Conv2d(512, 256, kernel_size=(1, 1))), 
+                                   ('encoder_1_relu', nn.ReLU()),
+                                   ('encoder_2', nn.Upsample(size=(int(H/2), int(W/2)))), 
+                                   ('encoder_2_conv', nn.Conv2d(256, 128, kernel_size=(1, 1))), 
+                                   ('encoder_2_relu', nn.ReLU()),
+                                   ('encoder_3', nn.Upsample(size=(H, W))), 
+                                   ('encoder_3_conv', nn.Conv2d(128, 23, kernel_size=(1, 1))), 
+                                   ('encoder_3_relu', nn.ReLU())
+                                   ]))
+
+    def forward(self, x): 
+        out = self.model(x)
+
+        return out 
+        
+# for import in train.py 
+
+def simple_seg_net(): 
+    # for now no params
+    return SimpleSegNet()
