@@ -139,7 +139,10 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             dataset = SegmentationData(image_paths_file='data/segmentation_data/train.txt')
             valset = SegmentationData(image_paths_file='data/segmentation_data/val.txt')
 
+            # For now only calculated for saving step below
             val_mean_std = calc_mean_std(dataset)
+
+            # TODO: Potentially add transforms (possibly based on val_mean_calc as for the others)
 
         else:
             # Different train and inference resolution only works with adaptive

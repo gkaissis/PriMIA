@@ -29,6 +29,7 @@ from .dataloader import (
     random_split,
     create_albu_transform,
     CombinedLoader,
+    SegmentationData, # Segmentation 
 )
 
 filterwarnings("ignore", message="invalid value encountered in double_scalars")
@@ -596,9 +597,23 @@ def setup_pysyft(args, hook, verbose=False):
             )
             lengths = [int(len(dataset) / len(workers)) for _ in workers]
             ##assert sum of lenghts is whole dataset on the cost of the last worker
+            ##-> because int() floors division, means that rest is send to last worker
             lengths[-1] += len(dataset) - sum(lengths)
             mnist_datasets = random_split(dataset, lengths)
             mnist_datasets = {worker: d for d, worker in zip(mnist_datasets, workers)}
+        
+        # Segmentation 
+        elif args.data_dir == "seg_data": 
+            # Imagepath to the two the parent directory of the two label files 
+            dataset = SegmentationData(image_paths_file='data/segmentation_data/train.txt')
+
+            lengths = [int(len(dataset) / len(workers)) for _ in workers]
+            ##assert sum of lenghts is whole dataset on the cost of the last worker
+            ##-> because int() floors division, means that rest is send to last worker
+            lengths[-1] += len(dataset) - sum(lengths)
+            seg_datasets = random_split(dataset, lengths)
+            seg_datasets = {worker: d for d, worker in zip(seg_datasets, workers)}
+
         if not args.unencrypted_aggregation:
             crypto_provider = sy.VirtualWorker(
                 hook, id="crypto_provider", verbose=False
@@ -639,6 +654,19 @@ def setup_pysyft(args, hook, verbose=False):
                 dataset.dataset.transform.transform.transforms.transforms.append(  # beautiful
                     a.Normalize(mean, std, max_pixel_value=1.0)
                 )
+            # Segmentation 
+            elif args.data_dir == "seg_data": 
+                #TODO: Add transforms if necessary 
+                # For now only empty structure 
+
+                dataset = seg_datasets[worker.id]
+                mean, std = calc_mean_std(dataset)
+                
+                # TODO: For now no transforms necessary - possibly add later (same as in local training case)
+                #dataset.dataset.transform.transform.transforms.transforms.append(  # beautiful
+                #    a.Normalize(mean, std, max_pixel_value=1.0)
+                #)
+
             else:
                 data_dir = join(args.data_dir, "worker{:d}".format(i + 1))
                 stats_dataset = datasets.ImageFolder(
@@ -724,11 +752,19 @@ def setup_pysyft(args, hook, verbose=False):
                     data.append(d)
                     targets.append(t)
             selected_data = torch.stack(data)  # pylint:disable=no-member
-            selected_targets = (
-                torch.stack(targets)  # pylint:disable=no-member
-                if args.mixup or args.weight_classes
-                else torch.tensor(targets)  # pylint:disable=not-callable
-            )
+            # Segmentation 
+            if args.data_dir == "seg_data": 
+                # Problem with the "torch.tensor(targets)" 
+                # this is normally used to convert list of scalar tensors into a torch array 
+                # however in segmentation we don't have only one scalar as target per sample but a whole mask (2D array)
+                selected_targets = torch.stack(targets)  
+
+            else: 
+                selected_targets = (
+                    torch.stack(targets)  # pylint:disable=no-member
+                    if args.mixup or args.weight_classes
+                    else torch.tensor(targets)  # pylint:disable=not-callable
+                )
             if args.mixup:
                 selected_data = selected_data.squeeze(1)
                 selected_targets = selected_targets.squeeze(1)
@@ -808,6 +844,11 @@ def setup_pysyft(args, hook, verbose=False):
                 )
             ),
         )
+    # Segmentation 
+    elif args.data_dir == "seg_data": 
+        # TODO: possibly add transforms (also for local case)
+        # Again for now WITHOUT transforms, just play loading of the valset 
+        valset = SegmentationData(image_paths_file='data/segmentation_data/val.txt')
     else:
 
         val_tf = [
