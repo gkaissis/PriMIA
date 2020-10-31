@@ -1220,6 +1220,8 @@ def secure_aggregation_epoch(
                 continue
             optimizers[worker.id].zero_grad()
             data, target = next(dataloader)
+            ## CUDA in FL ##
+            data, target = data.to(device), target.to(device)
             pred = models[worker.id](data)
             loss = loss_fns[worker.id](pred, target)
             loss.backward()
