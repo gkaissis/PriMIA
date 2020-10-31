@@ -1142,7 +1142,7 @@ def aggregation(
     
     local_model.load_state_dict(fresh_state_dict)
     ## CUDA for FL ##
-    print(f"!!! local_model: {local_model}")
+    print(f"!!!!! local mdoel state dict: {local_model.state_dict()}")
     local_model.to(device)
     return local_model
 
@@ -1274,7 +1274,6 @@ def secure_aggregation_epoch(
                         raise NotImplementedError("only Adam or SGD supported.")
                     optimizers[worker] = opt(models[worker].parameters(), **kwargs)
 
-    print(f"Second Aggregation")
     models["local_model"] = aggregation(
         models["local_model"],
         models,
