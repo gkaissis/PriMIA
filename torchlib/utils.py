@@ -1142,8 +1142,8 @@ def aggregation(
     
     local_model.load_state_dict(fresh_state_dict)
     ## CUDA for FL ##
-    print(f"!!!!! local mdoel state dict: {local_model.state_dict()['model.encoder_3_conv.bias']}")
-    local_model.to(device)
+    #print(f"!!!!! local mdoel state dict: {local_model.state_dict()['model.encoder_3_conv.bias']}")
+    #local_model.to(device)
     return local_model
 
 
