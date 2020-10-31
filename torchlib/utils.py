@@ -1094,7 +1094,7 @@ def aggregation(
                     (
                         models[worker if type(worker) == str else worker.id]
                         ## CUDA for FL ##
-                        .cpu()
+                        .to("cpu")
                         .state_dict()[key]
                         .data.copy()
                         * (
