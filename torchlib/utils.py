@@ -1140,7 +1140,7 @@ def aggregation(
             )
         fresh_state_dict[key] = sumstacked if weights else sumstacked / len(workers)
     ## CUDA for FL ##
-    local_model = local_model.to(device)
+    local_model.to(device)
     local_model.load_state_dict(fresh_state_dict)
     return local_model
 
