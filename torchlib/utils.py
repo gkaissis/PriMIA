@@ -1050,6 +1050,12 @@ def aggregation(
 ):
     """(Very) defensive version of the original secure aggregation relying on actually checking the parameter names and shapes before trying to load them into the model."""
 
+    ## CUDA in FL ##
+    # set device (so that we don't need to pass it all around)
+    # get first param tensor to then get device 
+    rand_key = next(iter(local_model.state_dict().values()))
+    device = rand_key.device
+
     local_keys = local_model.state_dict().keys()
 
     # make sure we're not getting cheated and some key or shape has been changed behind our backs
@@ -1087,6 +1093,8 @@ def aggregation(
                 remote_param_list.append(
                     (
                         models[worker if type(worker) == str else worker.id]
+                        ## CUDA for FL ##
+                        .cpu()
                         .state_dict()[key]
                         .data.copy()
                         * (
@@ -1102,6 +1110,8 @@ def aggregation(
             else:
                 remote_param_list.append(
                     models[worker if type(worker) == str else worker.id]
+                    ## CUDA for FL ##
+                    # nothing to add here because only encrypted computations are a problem in CUDA
                     .state_dict()[key]
                     .data.copy()
                     .get()
@@ -1129,6 +1139,8 @@ def aggregation(
                 torch.stack(remote_param_list), dim=0  # pylint:disable=no-member
             )
         fresh_state_dict[key] = sumstacked if weights else sumstacked / len(workers)
+    ## CUDA for FL ##
+    local_model = local_model.to(device)
     local_model.load_state_dict(fresh_state_dict)
     return local_model
 
