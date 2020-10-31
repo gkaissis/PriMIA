@@ -1139,9 +1139,10 @@ def aggregation(
                 torch.stack(remote_param_list), dim=0  # pylint:disable=no-member
             )
         fresh_state_dict[key] = sumstacked if weights else sumstacked / len(workers)
+    
+    local_model.load_state_dict(fresh_state_dict)
     ## CUDA for FL ##
     local_model.to(device)
-    local_model.load_state_dict(fresh_state_dict)
     return local_model
 
 
