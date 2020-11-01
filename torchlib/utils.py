@@ -1053,9 +1053,9 @@ def aggregation(
     ## CUDA in FL ##
     # set device (so that we don't need to pass it all around)
     # get first param tensor to then get device 
-    if secure: 
-        rand_key = next(iter(local_model.state_dict().values()))
-        device = rand_key.device
+    #if secure: 
+    #    rand_key = next(iter(local_model.state_dict().values()))
+    #    device = rand_key.device
 
     local_keys = local_model.state_dict().keys()
 
@@ -1095,7 +1095,7 @@ def aggregation(
                     (
                         models[worker if type(worker) == str else worker.id]
                         ## CUDA for FL ##
-                        .to("cpu")
+                        #.to("cpu")
                         .state_dict()[key]
                         .data.copy()
                         * (
@@ -1144,8 +1144,8 @@ def aggregation(
     local_model.load_state_dict(fresh_state_dict)
     ## CUDA for FL ##
     #print(f"!!!!! local mdoel state dict: {local_model.state_dict()['model.encoder_3_conv.bias']}")
-    if secure: 
-        local_model.to(device)
+    #if secure: 
+    #    local_model.to(device)
     return local_model
 
 
