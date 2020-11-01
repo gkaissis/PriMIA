@@ -1225,17 +1225,11 @@ def secure_aggregation_epoch(
             optimizers[worker.id].zero_grad()
             data, target = next(dataloader)
             ## CUDA in FL ##
-            print("TRAIN: Before shifting")
-            data, target = data.to(device), target.to(device)
-            print("TRAIN: After shifting")
+            #data, target = data.to(device), target.to(device)
             pred = models[worker.id](data)
-            print("TRAIN: after inference")
             loss = loss_fns[worker.id](pred, target)
-            print("TRAIN: loss")
             loss.backward()
-            print("TRAIN: grads")
             optimizers[worker.id].step()
-            print("TRAIN: backprop")
             avg_loss.append(loss.detach().cpu().get().item())
         if batch_idx > 0 and batch_idx % args.sync_every_n_batch == 0:
             pbar.set_description_str("Aggregating")
@@ -1450,8 +1444,7 @@ def test(
             if verbose
             else val_loader
         ):
-            data, target = data.to(device), target.to(device)
-            print(f"BEFORE to DEVICE AND MDOEL")
+            #data, target = data.to(device), target.to(device)
             output = model(data)
             loss = loss_fn(output, oh_converter(target) if oh_converter else target)
             test_loss += loss.item()  # sum up batch loss
