@@ -1445,8 +1445,8 @@ def test(
             else val_loader
         ):
             data, target = data.to(device), target.to(device)
-            print(f"BEFORE to DEVICE AND MDOEL")
             output = model(data)
+            print(f"BEFORE to DEVICE AND MDOEL")
             loss = loss_fn(output, oh_converter(target) if oh_converter else target)
             test_loss += loss.item()  # sum up batch loss
             # Segmentation 
