@@ -1225,7 +1225,7 @@ def secure_aggregation_epoch(
             optimizers[worker.id].zero_grad()
             data, target = next(dataloader)
             ## CUDA in FL ##
-            #data, target = data.to(device), target.to(device)
+            data, target = data.to(device), target.to(device)
             pred = models[worker.id](data)
             loss = loss_fns[worker.id](pred, target)
             loss.backward()
@@ -1444,7 +1444,7 @@ def test(
             if verbose
             else val_loader
         ):
-            #data, target = data.to(device), target.to(device)
+            data, target = data.to(device), target.to(device)
             output = model(data)
             loss = loss_fn(output, oh_converter(target) if oh_converter else target)
             test_loss += loss.item()  # sum up batch loss
