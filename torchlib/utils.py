@@ -1444,10 +1444,9 @@ def test(
             if verbose
             else val_loader
         ):
-            print(f"BEFORE to DEVICE AND MDOEL")
             data, target = data.to(device), target.to(device)
+            print(f"BEFORE to DEVICE AND MDOEL")
             output = model(data)
-            print(f"BEFORE LOSS CALC")
             loss = loss_fn(output, oh_converter(target) if oh_converter else target)
             test_loss += loss.item()  # sum up batch loss
             # Segmentation 
@@ -1456,7 +1455,6 @@ def test(
                 # As for normal classification consider the most probable class (for every pixel)
                 # the second dimension in model output is again the class-dimension
                 # that's why the max should be taken over that dimension
-                print(f"BEFORE torch.max")
                 _, pred = torch.max(output, 1)
 
                 # Only allow images/pixels with label >= 0 e.g. for segmentation 
@@ -1464,7 +1462,6 @@ def test(
                 targets_mask = target >= 0
                 test_acc = np.mean((pred == target)[
                                     targets_mask].data.cpu().numpy())
-                print(f"AFTER test_acc CALC")
                 test_accs.append(test_acc)
 
                 # Added from above (TO BE EXTENDED)
