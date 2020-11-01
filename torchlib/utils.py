@@ -1053,9 +1053,9 @@ def aggregation(
     ## CUDA in FL ##
     # set device (so that we don't need to pass it all around)
     # get first param tensor to then get device 
-    #if secure: 
-    #    rand_key = next(iter(local_model.state_dict().values()))
-    #    device = rand_key.device
+    if secure: 
+        rand_key = next(iter(local_model.state_dict().values()))
+        device = rand_key.device
 
     local_keys = local_model.state_dict().keys()
 
@@ -1095,7 +1095,7 @@ def aggregation(
                     (
                         models[worker if type(worker) == str else worker.id]
                         ## CUDA for FL ##
-                        #.to("cpu")
+                        .cpu()
                         .state_dict()[key]
                         .data.copy()
                         * (
@@ -1144,8 +1144,8 @@ def aggregation(
     local_model.load_state_dict(fresh_state_dict)
     ## CUDA for FL ##
     #print(f"!!!!! local mdoel state dict: {local_model.state_dict()['model.encoder_3_conv.bias']}")
-    #if secure: 
-    #    local_model.to(device)
+    if secure: 
+        local_model.to(device)
     return local_model
 
 
@@ -1444,8 +1444,10 @@ def test(
             if verbose
             else val_loader
         ):
+            print(f"BEFORE to DEVICE AND MDOEL")
             data, target = data.to(device), target.to(device)
             output = model(data)
+            print(f"BEFORE LOSS CALC")
             loss = loss_fn(output, oh_converter(target) if oh_converter else target)
             test_loss += loss.item()  # sum up batch loss
             # Segmentation 
@@ -1454,6 +1456,7 @@ def test(
                 # As for normal classification consider the most probable class (for every pixel)
                 # the second dimension in model output is again the class-dimension
                 # that's why the max should be taken over that dimension
+                print(f"BEFORE torch.max")
                 _, pred = torch.max(output, 1)
 
                 # Only allow images/pixels with label >= 0 e.g. for segmentation 
@@ -1461,6 +1464,7 @@ def test(
                 targets_mask = target >= 0
                 test_acc = np.mean((pred == target)[
                                     targets_mask].data.cpu().numpy())
+                print(f"AFTER test_acc CALC")
                 test_accs.append(test_acc)
 
                 # Added from above (TO BE EXTENDED)
