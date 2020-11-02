@@ -43,6 +43,12 @@ federated_secure:
 	python train.py --config configs/torch/pneumonia-resnet-pretrained.ini --train_federated --data_dir data/server_simulation
 	@echo Finished Training on VirtualWorkers with SecAgg
 
+# Segmentation 
+federated_secure_segmentation: 
+	@echo Training a Seg-Net on VirtualWorkers without SecAgg
+	python train.py --config configs/torch/segmentation.ini --train_federated --data_dir seg_data 
+	@echo Finished Training on VirtualWorkers without SecAgg
+
 federated_insecure:
 	@echo Training on VirtualWorkers without SecAgg
 	python train.py --config configs/torch/pneumonia-resnet-pretrained.ini --train_federated --data_dir data/server_simulation --unencrypted_aggregation
