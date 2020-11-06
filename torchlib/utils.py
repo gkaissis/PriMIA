@@ -1051,6 +1051,9 @@ def aggregation(
     """(Very) defensive version of the original secure aggregation relying on actually checking the parameter names and shapes before trying to load them into the model."""
 
     ## CUDA in FL ##
+    # important note: the shifting has to be called on the params 
+    # and summed params (after sec. agg.) directly on model as whole
+    # doesn't work. 
     # set device (so that we don't need to pass it all around)
     # get first param tensor to then get device 
     if secure: 
@@ -1144,10 +1147,6 @@ def aggregation(
         fresh_state_dict[key] = sumstacked if weights else sumstacked / len(workers)
     
     local_model.load_state_dict(fresh_state_dict)
-    ## CUDA for FL ##
-    #print(f"!!!!! local mdoel state dict: {local_model.state_dict()['model.encoder_3_conv.bias']}")
-    #if secure: 
-    #    local_model.to(device)
     return local_model
 
 
