@@ -1481,8 +1481,10 @@ def test(
                     else equal.sum().item()
                 )
     test_loss /= len(val_loader)
-    # Segmentation - TEMPORARY 
-    print(f"VALIDATION: Epoch: {epoch}, Val-Loss: {test_loss}, Val-Acc.: {np.mean(test_accs)}")  
+    
+    if args.data_dir == "seg_data": 
+        # Segmentation - TEMPORARY 
+        print(f"VALIDATION: Epoch: {epoch}, Val-Loss: {test_loss}, Val-Acc.: {np.mean(test_accs)}")  
 
     if args.encrypted_inference:
         objective = 100.0 * TP / (len(val_loader) * args.test_batch_size)
