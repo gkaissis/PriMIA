@@ -1094,8 +1094,6 @@ def aggregation(
                 remote_param_list.append(
                     (
                         models[worker if type(worker) == str else worker.id]
-                        ## CUDA for FL ##
-                        .cpu()
                         .state_dict()[key]
                         .data.copy()
                         * (
@@ -1104,6 +1102,8 @@ def aggregation(
                             else 1
                         )
                     )
+                    ## CUDA for FL ##
+                    .cpu()
                     .fix_prec(precision_fractional=args.precision_fractional)
                     .share(*workers, crypto_provider=crypto_provider, protocol="fss")
                     .get()
@@ -1134,6 +1134,8 @@ def aggregation(
                 )
                 .get()
                 .float_prec()
+                ## CUDA for FL ##
+                .to(device)
             )
         else:
             sumstacked = torch.sum(  # pylint:disable=no-member
@@ -1144,8 +1146,8 @@ def aggregation(
     local_model.load_state_dict(fresh_state_dict)
     ## CUDA for FL ##
     #print(f"!!!!! local mdoel state dict: {local_model.state_dict()['model.encoder_3_conv.bias']}")
-    if secure: 
-        local_model.to(device)
+    #if secure: 
+    #    local_model.to(device)
     return local_model
 
 
