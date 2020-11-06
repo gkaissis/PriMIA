@@ -641,12 +641,13 @@ if __name__ == "__main__":
     if args.websockets:
         if not args.train_federated:
             raise RuntimeError("WebSockets can only be used when in federated mode.")
-    if args.cuda and args.train_federated:
-        warn(
-            "CUDA is currently not supported by the backend. This option will be available at a later release",
-            category=FutureWarning,
-        )
-        exit(0)
+    ## CUDA in FL ##
+    #if args.cuda and args.train_federated:
+    #    warn(
+    #        "CUDA is currently not supported by the backend. This option will be available at a later release",
+    #        category=FutureWarning,
+    #    )
+    #    exit(0)
     if args.train_federated and (args.mixup or args.weight_classes):
         if args.mixup and args.mixup_lambda == 0.5:
             warn(
