@@ -615,7 +615,7 @@ def setup_pysyft(args, hook, verbose=False):
             RES_Z = 64
             CROP_HEIGHT = 16
 
-            sample_limit = 20
+            sample_limit = 9
             dataset = MSD_data(
                 path_string=PATH, 
                 res=RES, 
@@ -623,6 +623,13 @@ def setup_pysyft(args, hook, verbose=False):
                 crop_height=CROP_HEIGHT,
                 sample_limit=sample_limit,
             )
+
+            #TODO: Does it make sense to split already here? 
+            #      Different than normal for the other datasets. 
+            # split into val and train set 
+            train_size = int(0.8 * len(dataset))
+            val_size = len(dataset) - train_size
+            dataset, valset = torch.utils.data.random_split(dataset, [train_size, val_size])
             
             lengths = [int(len(dataset) / len(workers)) for _ in workers]
             ##assert sum of lenghts is whole dataset on the cost of the last worker
@@ -868,7 +875,13 @@ def setup_pysyft(args, hook, verbose=False):
     elif args.data_dir == "seg_data": 
         # TODO: possibly add transforms (also for local case)
         # Again for now WITHOUT transforms, just play loading of the valset 
-        valset = SegmentationData(image_paths_file='data/segmentation_data/val.txt')
+
+        ## MSCR dataset
+        #valset = SegmentationData(image_paths_file='data/segmentation_data/val.txt')
+
+        ## MSD dataset 
+        # set above together with training
+        pass
     else:
 
         val_tf = [
@@ -1247,7 +1260,10 @@ def secure_aggregation_epoch(
             data, target = next(dataloader)
             ## CUDA in FL ##
             # model already to cuda in train.py
-            data, target = data.to(device), target.to(device)
+            ##TODO: Special for MSD scans 
+            res = data.shape[-1]
+            data, target = data.view(-1, 1, res, res).to(device), target.view(-1, res, res).to(device)
+            #data, target = data.to(device), target.to(device)
             pred = models[worker.id](data)
             loss = loss_fns[worker.id](pred, target)
             loss.backward()
