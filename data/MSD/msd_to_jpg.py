@@ -24,13 +24,13 @@ def save_to_img(PATH, array, isLabel:bool):
             img = Image.fromarray(formatted)
             img.save(PATH+f"{i}.jpg")
 
-class Arguments:
-    """Parameters for training"""
-    def __init__(self, cmd_args):
-        self.data = cmd_args.data
-        self.res = cmd_args.res
-        self.res_z = cmd_args.res_z
-        self.crop_height = cmd.crop_height
+#class Arguments:
+#    """Parameters for training"""
+#    def __init__(self, cmd_args):
+#        self.data = cmd_args.data
+#        self.res = cmd_args.res
+#        self.res_z = cmd_args.res_z
+#        self.crop_height = cmd_args.crop_height
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -87,11 +87,11 @@ if __name__ == "__main__":
                                                                                     num_samples=50)
 
     print("## converting and saving ##")
-    save_to_img(PATH+'/imagesTr/train/', X_train_partial, False)
-    save_to_img(PATH+'/imagesTr/val/', X_val, False)
-    save_to_img(PATH+'/imagesTr/test/', X_test, False)
+    save_to_img(PATH+'/train/inputs/', X_train_partial, False)
+    save_to_img(PATH+'/val/inputs/', X_val, False)
+    save_to_img(PATH+'/test/inputs/', X_test, False)
 
-    save_to_img(PATH+'/labelsTr/train/', y_train_partial, True)
-    save_to_img(PATH+'/labelsTr/val/', y_val, True)
-    save_to_img(PATH+'/labelsTr/test/', y_test, True)
+    save_to_img(PATH+'/train/labels/', y_train_partial, True)
+    save_to_img(PATH+'/val/labels/', y_val, True)
+    save_to_img(PATH+'/test/labels/', y_test, True)
 

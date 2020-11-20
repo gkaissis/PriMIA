@@ -740,14 +740,82 @@ class MSD_data(torchdata.Dataset):
 """
 
 class MSD_data_images(torchdata.Dataset): 
-    def __init__(): 
-        super(MSD_data_images, self).__init__()
+    def __init__(
+        self, 
+        root="./data",
+        train=True,
+        val=False,
+        ):
+        # dynamically add search for all *.nii.* files that are 
+        # present in the subfolders of **/data_path/imagesTr
+        # and check if for every scan there exists one label 
+        if train: 
+            if val: 
+                self.input_path = Path(root) / "imagesTr_jpg/val/"
+                self.target_path = Path(root) / "labelsTr_jpg/val/"
+            else:
+                self.input_path = Path(root) / "imagesTr_jpg/train/"
+                self.target_path = Path(root) / "labelsTr_jpg/train/"
+        else: 
+            self.input_path = Path(root) / "imagesTr_jpg/test/"
+            self.target_path = Path(root) / "labelsTr_jpg/test/"
 
-    def __len__(self): 
-        return 0
+        assert self.input_path.exists() # as in original function 
+        label_names = [
+            file for i, file in enumerate(self.input_path.glob("*.jpg")) 
+        ]
 
-    def __getitem__(self): 
-        return 0
+        self.scan_names = scan_names 
+        self.label_names = label_names 
+
+    def __getitem__(self, key):
+        if isinstance(key, slice):
+            # get the start, stop, and step from the slice
+            return [self[ii] for ii in range(*key.indices(len(self)))]
+        elif isinstance(key, int):
+            # handle negative indices
+            if key < 0:
+                key += len(self)
+            if key < 0 or key >= len(self):
+                raise IndexError("The index (%d) is out of range." % key)
+            # get the data from direct index
+            return self.get_item_from_index(key)
+        else:
+            raise TypeError("Invalid argument type.")
+
+    def __len__(self):
+        return len(self.image_names)
+
+    def get_item_from_index(self, index):
+        to_tensor = transforms.ToTensor()
+        img_id = self.image_names[index].replace('.bmp', '')
+
+        img = Image.open(os.path.join(self.root_dir_name,
+                                      'images',
+                                      img_id + '.bmp')).convert('RGB')
+        center_crop = transforms.CenterCrop(240)
+        # TODO: TEMP.
+        #center_crop = transforms.CenterCrop(240)
+        #img = center_crop(img)
+        #img = to_tensor(img)
+
+        # TODO: TEMP. (only one channel -> for testing)
+        #img = img[:1, :, :]
+
+        target = Image.open(os.path.join(self.root_dir_name,
+                                         'targets',
+                                         img_id + '_GT.bmp'))
+        target = center_crop(target)
+        target = np.array(target, dtype=np.int64)
+
+        target_labels = target[..., 0]
+        for label in SEG_LABELS_LIST:
+            mask = np.all(target == label['rgb_values'], axis=2)
+            target_labels[mask] = label['id']
+
+        target_labels = from_numpy(target_labels.copy())
+
+        return img, target_labels
 
 """
     Data utility functions from I2DL class - N.Remerscheid
