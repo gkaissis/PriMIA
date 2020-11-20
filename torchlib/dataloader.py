@@ -728,12 +728,26 @@ class MSD_data(torchdata.Dataset):
             )
             # we want each of the new slices to be interpreted as separate sample
             # we shift the slices to the number of samples and introduce an empty channel-dim
+            # MoNet expects samples of batch_size x channel (=1) x 2D_image_dim
             scan = np.expand_dims(scan, 1)
             #label = np.expand_dims(label, 1)
 
         # convert to tensors 
         return from_numpy(scan.copy()), from_numpy(label.copy()).long()
 
+"""
+    MSD dataset as normal image-dataset. Assumes dataset was already preprocessed. 
+"""
+
+class MSD_data_images(torchdata.Dataset): 
+    def __init__(): 
+        super(MSD_data_images, self).__init__()
+
+    def __len__(self): 
+        return 0
+
+    def __getitem__(self): 
+        return 0
 
 """
     Data utility functions from I2DL class - N.Remerscheid
