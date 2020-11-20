@@ -450,6 +450,292 @@ def random_split(dataset, lengths, generator=default_generator):
     ]
 
 """
+    Data utility functions for the Medical Segmentation Decathlon
+    http://medicaldecathlon.com/#tasks
+    Based on the 'prepare_data' function in data_loader.py from M. Knolle 
+    (TUM-AIMED/MoNet)
+"""
+
+import os
+import sys
+import gc
+import numpy as np
+import nibabel as nib
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import minmax_scale
+import cv2 as cv
+import math
+from skimage.transform import resize
+from nilearn.image import resample_img
+from pathlib import Path, WindowsPath, PureWindowsPath, PosixPath, PurePosixPath
+from tqdm import tqdm
+
+# additional utility functions from original function 
+
+def scale_array(array: np.array) -> np.array:
+    """ Scales a numpy array from 0 to 1. Works in 3D 
+        Return np.array """
+    assert array.max() - array.min() > 0
+
+    return ((array - array.min()) / (array.max() - array.min())).astype(np.float32)
+
+
+def preprocess_scan(scan) -> np.array:
+    """ Performs Preprocessing: (1) clips vales to -150 to 200, (2) scales values to lie in between 0 and 1, 
+        (3) peforms rotations and flipping to move patient into referen position 
+        Return: np.array """
+    scan = np.clip(scan, -150, 200)
+    scan = scale_array(scan)
+    scan = np.rot90(scan)
+    scan = np.fliplr(scan)
+
+    return scan
+
+def rotate_label(label_volume) -> np.array:
+    """ Rotates and flips the label in the same way the scans were rotated and flipped
+        Return: np.array """
+
+    label_volume = np.rot90(label_volume)
+    label_volume = np.fliplr(label_volume)
+
+    return label_volume.astype(np.float32)
+
+def preprocess_and_convert_to_numpy(
+    nifti_scan: nib.Nifti1Image, nifti_mask: nib.Nifti1Image
+) -> list:
+    """ Convert scan and label to numpy arrays and perform preprocessing
+            Return: Tuple(np.array, np.array)  """
+    np_scan = nifti_scan.get_fdata()
+    np_label = nifti_mask.get_fdata()
+    nifti_mask.uncache()
+    nifti_scan.uncache()
+    np_scan = preprocess_scan(np_scan)
+    np_label = rotate_label(np_label)
+    assert np_scan.shape == np_label.shape
+
+    return np_scan, np_label
+
+def get_name(nifti: nib.Nifti1Image, path: Path) -> str:
+    "Gets the original filename of a Nifti."
+    file_dir = nifti.get_filename()
+    if isinstance(path, PosixPath) or isinstance(path, PurePosixPath):
+        file_name = file_dir.split("/")[-1]
+    else:
+        file_name = file_dir.split("\\")[-1]
+    return file_name
+
+def merge_labels(label_volume: np.array) -> np.array:
+    """ Merges Tumor and Pancreas labels into one volume with background=0, pancreas & tumor = 1
+        Input: label_volume = 3D numpy array
+        Return: Merged Label volume """
+    merged_label = np.zeros(label_volume.shape, dtype=np.float32)
+    merged_label[label_volume == 1] = 1.
+    merged_label[label_volume == 2] = 1.
+    return merged_label
+
+def bbox_dim_3D(img: np.array):
+    """Finds the corresponding dimensions for the 3D Bounding Box from the Segmentation Label volume
+       Input: img = 3D numpy array, 
+       Return: row-min, row-max, collumn-min, collumn-max, z-min, z_max """
+    if np.nonzero(img)[0].size == 0:
+        print("Warning Empty Label Mask")
+        return None
+    r = np.any(img, axis=(1, 2))
+    c = np.any(img, axis=(0, 2))
+    z = np.any(img, axis=(0, 1))
+
+    rmin, rmax = np.where(r)[0][[0, -1]]
+    cmin, cmax = np.where(c)[0][[0, -1]]
+    zmin, zmax = np.where(z)[0][[0, -1]]
+
+    return rmin, rmax, cmin, cmax, zmin, zmax
+
+def create_2D_label(rmin: int, rmax: int, cmin: int, cmax: int, res: int) -> np.array:
+    """Creates a 2D Label from a Bounding Box 
+        Input: rmin, rmax, cmin, cmax = dimensions of Bounding Box, res = resolution of required label
+        Return: 2D numpy array """
+    label = np.zeros((res, res), dtype=np.float32)
+    label[rmin:rmax, cmin:cmax] = 1
+    return label
+
+def create_3D_label(
+    rmin: int,
+    rmax: int,
+    cmin: int,
+    cmax: int,
+    zmin: int,
+    zmax: int,
+    res: int,
+    num_slices: int,
+) -> np.array:
+    """Creates a 3D Label from a Bounding Box 
+        Input: rmin, rmax, cmin, cmax, zmin, zmax = dimensions of Bounding Box, res = resolution of required label
+        Return: 3D numpy array """
+    label_volume = np.zeros((res, res, num_slices), dtype=np.float32)
+    label_volume[rmin:rmax, cmin:cmax, zmin:zmax] = 1.0
+    return label_volume
+
+def convert_to_2d(arr: np.array) -> np.array:
+    """Takes a 4d array of shape: (num_samples, res_x, res_y, sample_height) and destacks the 3d scans 
+        converting it to a 3d array of shape: (num_samples*sample_height, res_x, res_y)"""
+    assert len(arr.shape) == 4
+    reshaped = np.concatenate(arr, axis=-1)
+    assert len(reshaped.shape) == 3
+    return np.moveaxis(reshaped, -1, 0)
+
+def crop_volume(
+    data_volume: np.array, label_volume: np.array, crop_height: int = 32
+) -> np.array:
+    """Crops two 3D Numpy array along the zaxis to crop_height. Finds the midpoint of the pancreas label along the z-axis and crops [..., zmiddle-(crop_height//2):zmiddle+(crop_height//2)].
+       Return: two np.array s """
+    rmin, rmax, cmin, cmax, zmin, zmax = bbox_dim_3D(label_volume)
+
+    zmiddle = (zmin + zmax) // 2
+    z_min = zmiddle - (crop_height // 2)
+    if z_min < 0:
+        z_min = 0
+    z_max = zmiddle + (crop_height // 2)
+    cropped_data_volume = data_volume[:, :, z_min:z_max]
+    cropped_label_volume = label_volume[:, :, z_min:z_max]
+
+    return cropped_data_volume, cropped_label_volume
+
+class MSD_data(torchdata.Dataset):
+
+    def __init__(
+        self, 
+        path_string: str,
+        res: int,
+        res_z: int,
+        sample_limit: int = -1,  # 281 for the whole dataset
+        crop_height: int = 32,
+        mode="2D",
+        label_mode="seg",
+        mrg_labels: bool = True,
+        ):
+        self.path_string = path_string
+        self.res = res
+        self.res_z = res_z 
+        self.sample_limit = sample_limit
+        self.crop_height = crop_height
+        self.mode = mode
+        self.label_mode = label_mode
+        self.mrg_labels = mrg_labels
+
+        # as in original function 
+        assert (crop_height % 16) == 0
+        if label_mode == "bbox-coord":
+                raise NotImplementedError()
+
+        # dynamically add search for all *.nii.* files that are 
+        # present in the subfolders of **/data_path/imagesTr
+        # and check if for every scan there exists one label 
+        scan_path = Path(path_string) / "imagesTr"
+        assert scan_path.exists() # as in original function 
+        scan_names = [
+            # TODO: Solve problem: don't want to load in all images but how do I call get_names then? 
+            #       Is what I'm doing here also valid or not the real file names? NO - assert doesn't pass
+            #       What is the difference? 
+            #get_name(file, scan_path) for i, file in enumerate(scan_path.rglob("*.nii.*")) if i < sample_limit 
+            file for i, file in enumerate(scan_path.rglob("*.nii.*")) if i < sample_limit 
+        ]
+
+        label_path = Path(path_string) / "labelsTr"
+        assert label_path.exists() # as in original function 
+        label_names = [
+            #get_name(file, label_path) for i, file in enumerate(label_path.rglob("*.nii.*")) if i < sample_limit
+            file for i, file in enumerate(label_path.rglob("*.nii.*")) if i < sample_limit
+        ]
+
+        # Make sure that for each scan there exists a label 
+        # (the labels have the same name as the scans
+        #  there just stored in another folder)
+        #TODO: Change with get_name
+        #assert scan_names==label_names
+
+        self.scan_names = scan_names 
+        self.label_names = label_names 
+
+    #TODO: Possible change that? The same way as in Moritzes version? 
+    def __len__(self):
+        """
+            If we don't specify how many samples we want we get all samples
+            that are present in the directories (see in __init__())
+        """
+        return len(self.scan_names) if self.sample_limit == -1 else self.sample_limit
+
+    def __getitem__(self, key):
+        if isinstance(key, slice):
+            # get the start, stop, and step from the slice
+            return [self[ii] for ii in range(*key.indices(len(self)))]
+        elif isinstance(key, int):
+            # handle negative indices
+            if key < 0:
+                key += len(self)
+            if key < 0 or key >= len(self):
+                raise IndexError("The index (%d) is out of range." % key)
+            # get the data from direct index
+            return self.get_item_from_index(key)
+        else:
+            raise TypeError("Invalid argument type.")
+
+    def get_item_from_index(self, index):
+        scan_id = self.scan_names[index] 
+        label_id = self.label_names[index]
+
+        scan = nib.load(str(scan_id))
+        label = nib.load(str(label_id))
+
+        # preprocessing scan and label, extracting np array data
+        scan, label = preprocess_and_convert_to_numpy(scan, label)
+
+        # merging tumor and pancreas labels in the label mask
+        if self.mrg_labels:
+            label = merge_labels(label)
+
+        # finding bounding box from segmentation label
+        if self.label_mode == "bbox-seg" or self.label_mode == "bbox-coord":
+            b = bbox_dim_3D(label)
+            if b == None:
+                print(
+                    "Couldn't generate a bounding box for the label in scan:", scan_id
+                )
+            # creating label mask from bounding box dimensions
+            label = create_3D_label(
+                b[0], b[1], b[2], b[3], b[4], b[5], label.shape[1], label.shape[2],
+            )
+
+        # cropping scan and label volumes to reduce the number of non-pancreas slices
+        cropped_scan, cropped_label = crop_volume(scan, label, crop_height=self.crop_height)
+        assert cropped_scan.shape == cropped_label.shape
+
+        scan = resize(
+            cropped_scan, (self.res, self.res, self.res_z), preserve_range=True, order=1
+        ).astype(np.float32)
+        label = resize(
+            cropped_label, (self.res, self.res, self.res_z), preserve_range=True, order=0
+        ).astype(np.uint8)
+
+        if self.mode == "2D":
+            #print("... converting data to 2D slices")
+            # convert_to_2d expects an array of shape: num_samples, xres, yres, height 
+            # will return num_samples*height, xres, yres
+            scan = np.expand_dims(scan, 0)
+            label = np.expand_dims(label, 0)
+            scan, label = (
+                convert_to_2d(scan),
+                convert_to_2d(label),
+            )
+            # we want each of the new slices to be interpreted as separate sample
+            # we shift the slices to the number of samples and introduce an empty channel-dim
+            scan = np.expand_dims(scan, 1)
+            #label = np.expand_dims(label, 1)
+
+        # convert to tensors 
+        return from_numpy(scan.copy()), from_numpy(label.copy()).long()
+
+
+"""
     Data utility functions from I2DL class - N.Remerscheid
 """ 
 
@@ -532,8 +818,13 @@ class SegmentationData(torchdata.Dataset):
                                       'images',
                                       img_id + '.bmp')).convert('RGB')
         center_crop = transforms.CenterCrop(240)
-        img = center_crop(img)
-        img = to_tensor(img)
+        # TODO: TEMP.
+        #center_crop = transforms.CenterCrop(240)
+        #img = center_crop(img)
+        #img = to_tensor(img)
+
+        # TODO: TEMP. (only one channel -> for testing)
+        #img = img[:1, :, :]
 
         target = Image.open(os.path.join(self.root_dir_name,
                                          'targets',

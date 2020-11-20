@@ -31,12 +31,14 @@ from torchlib.dataloader import (
     create_albu_transform,
     CombinedLoader,
     SegmentationData, # Segmentation 
+    MSD_data, 
 )  # pylint:disable=import-error
 from torchlib.models import (
     conv_at_resolution,  # pylint:disable=import-error
     resnet18,
     vgg16,
     simple_seg_net, # Segmentation
+    monet_seg_net,
 )
 from torchlib.utils import (
     Arguments,
@@ -51,6 +53,7 @@ from torchlib.utils import (
     setup_pysyft,
     calc_class_weights,
 )
+from sklearn.model_selection import train_test_split
 
 
 def main(args, verbose=True, optuna_trial=None, cmd_args=None):
@@ -136,8 +139,29 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             #          - fixed centralized data 
 
             # Imagepath to the two the parent directory of the two label files 
-            dataset = SegmentationData(image_paths_file='data/segmentation_data/train.txt')
-            valset = SegmentationData(image_paths_file='data/segmentation_data/val.txt')
+            ## MSRC dataset 
+            #dataset = SegmentationData(image_paths_file='data/segmentation_data/train.txt')
+            #valset = SegmentationData(image_paths_file='data/segmentation_data/val.txt')
+
+            ## MSD dataset
+            PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
+            RES = 256
+            RES_Z = 64
+            CROP_HEIGHT = 16
+
+            sample_limit = 2
+            dataset = MSD_data(
+                path_string=PATH, 
+                res=RES, 
+                res_z=RES_Z,
+                crop_height=CROP_HEIGHT,
+                sample_limit=sample_limit,
+            )
+
+            # split into val and train set 
+            train_size = int(0.8 * len(dataset))
+            val_size = len(dataset) - train_size
+            dataset, valset = torch.utils.data.random_split(dataset, [train_size, val_size])
 
             # For now only calculated for saving step below
             val_mean_std = calc_mean_std(dataset)
@@ -286,6 +310,10 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
         model_type = simple_seg_net
         # no params for now
         model_args = {}
+    elif args.model == "monet_seg_net": 
+        model_type = monet_seg_net
+        # no params for now
+        model_args = {}
     else:
         raise ValueError(
             "Model name not understood. Please choose one of 'vgg16, 'simpleconv', resnet-18'."
@@ -356,8 +384,10 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             privacy_engine.attach(optimizer)
 
     # Segmentation - we have to ignore the classes with label -1, they represent unlabeled data
+    # Only for MSRC dataset
     if args.data_dir == "seg_data": 
-        loss_args = {"ignore_index":-1, "reduction":"mean"}
+        #loss_args = {"ignore_index":-1, "reduction":"mean"}
+        loss_args = {"reduction":"mean"}
     else: 
         loss_args = {"weight": cw, "reduction": "mean"}
     if args.mixup or (args.weight_classes and args.train_federated):

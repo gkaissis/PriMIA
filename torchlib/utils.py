@@ -30,6 +30,7 @@ from .dataloader import (
     create_albu_transform,
     CombinedLoader,
     SegmentationData, # Segmentation 
+    MSD_data, 
 )
 
 filterwarnings("ignore", message="invalid value encountered in double_scalars")
@@ -141,7 +142,7 @@ class Arguments:
             self.beta1 = config.getfloat("config", "beta1", fallback=0.9)
             self.beta2 = config.getfloat("config", "beta2", fallback=0.999)
         self.model = config.get("config", "model")  # , fallback="simpleconv")
-        assert self.model in ["simpleconv", "resnet-18", "vgg16", "simple_seg_net"] # Segmentation 
+        assert self.model in ["simpleconv", "resnet-18", "vgg16", "simple_seg_net", "monet_seg_net"] # Segmentation 
         self.pooling_type = config.get("config", "pooling_type", fallback="max")
         self.pretrained = config.getboolean("config", "pretrained")  # , fallback=False)
         self.weight_decay = config.getfloat("config", "weight_decay")  # , fallback=0.0)
@@ -605,11 +606,28 @@ def setup_pysyft(args, hook, verbose=False):
         # Segmentation 
         elif args.data_dir == "seg_data": 
             # Imagepath to the two the parent directory of the two label files 
-            dataset = SegmentationData(image_paths_file='data/segmentation_data/train.txt')
+            ## MSRC dataset ##
+            #dataset = SegmentationData(image_paths_file='data/segmentation_data/train.txt')
 
+            ## MSD dataset ##
+            PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
+            RES = 256
+            RES_Z = 64
+            CROP_HEIGHT = 16
+
+            sample_limit = 20
+            dataset = MSD_data(
+                path_string=PATH, 
+                res=RES, 
+                res_z=RES_Z,
+                crop_height=CROP_HEIGHT,
+                sample_limit=sample_limit,
+            )
+            
             lengths = [int(len(dataset) / len(workers)) for _ in workers]
             ##assert sum of lenghts is whole dataset on the cost of the last worker
             ##-> because int() floors division, means that rest is send to last worker
+
             lengths[-1] += len(dataset) - sum(lengths)
             seg_datasets = random_split(dataset, lengths)
             seg_datasets = {worker: d for d, worker in zip(seg_datasets, workers)}
@@ -660,6 +678,8 @@ def setup_pysyft(args, hook, verbose=False):
                 # For now only empty structure 
 
                 dataset = seg_datasets[worker.id]
+                print(len(dataset))
+                print(dataset)
                 mean, std = calc_mean_std(dataset)
                 
                 # TODO: For now no transforms necessary - possibly add later (same as in local training case)
@@ -1226,6 +1246,7 @@ def secure_aggregation_epoch(
             optimizers[worker.id].zero_grad()
             data, target = next(dataloader)
             ## CUDA in FL ##
+            # model already to cuda in train.py
             data, target = data.to(device), target.to(device)
             pred = models[worker.id](data)
             loss = loss_fns[worker.id](pred, target)
@@ -1320,7 +1341,9 @@ def train(  # never called on websockets
         desc="training epoch {:d}".format(epoch),
         total=L + 1,
     ):
-        data, target = data.to(device), target.to(device)
+        res = data.shape[-1]
+        data, target = data.view(-1, 1, res, res).to(device), target.view(-1, res, res).to(device)
+        #data, target = data.to(device), target.to(device)
         if args.mixup:
             with torch.no_grad():
                 target = oh_converter(target)
@@ -1445,7 +1468,9 @@ def test(
             if verbose
             else val_loader
         ):
-            data, target = data.to(device), target.to(device)
+            # TODO: ONLY MSD DATASET
+            res = data.shape[-1]
+            data, target = data.view(-1, 1, res, res).to(device), target.view(-1, res, res).to(device)
             output = model(data)
             loss = loss_fn(output, oh_converter(target) if oh_converter else target)
             test_loss += loss.item()  # sum up batch loss
