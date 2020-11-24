@@ -796,8 +796,8 @@ class MSD_data_images(torchdata.Dataset):
         scan_img = Image.open(scan_path)
         label_img = Image.open(label_path)
 
-        scan_np = np.array(scan_img, dtype=np.float32) #float
-        label_np = np.array(label_img, dtype=np.uint8) #int
+        scan_np = np.array(scan_img, dtype=np.float32) / 255
+        label_np = np.array(label_img, dtype=np.float32) / 255
 
         # MoNet expects a tensor of shape channel x xres x yres 
         # channel = 1
@@ -805,7 +805,7 @@ class MSD_data_images(torchdata.Dataset):
 
         scan = from_numpy(scan_np)
         # BCELoss expects float tensors and not byte tensors
-        label = from_numpy(label_np).float()
+        label = from_numpy(label_np)
         
         # no transforms necessary, because all already done in preprocessing
 
