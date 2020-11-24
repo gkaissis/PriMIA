@@ -1377,6 +1377,9 @@ def train(  # never called on websockets
                 data, target = mixup((data, target))
         optimizer.zero_grad()
         output = model(data)
+
+        print(f"MODEL OUTPUT IN RANGE.: {((output > 0) * (output < 1)).sum()}")
+
         loss = loss_fn(output, target)
         loss.backward()
         optimizer.step()
