@@ -1026,8 +1026,8 @@ class MoNet(nn.Module):
         #head_list.append(activation)
         # BCELoss doesn't include sigmoid layer (not as in CELoss)
         # BCELoss can't handle negative number so no log-space 
-        #activation = nn.Sigmoid()
-        #head_list.append(activation)
+        activation = nn.Sigmoid()
+        head_list.append(activation)
         # INSTEAD: Added BCEWithLogitsLoss which combines both in a numerically stable way sssss
 
         self.header = nn.Sequential(*head_list)

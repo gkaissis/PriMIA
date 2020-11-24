@@ -405,7 +405,7 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
         loss_fn = nn.CrossEntropyLoss
 
     if args.data_dir == "seg_data": 
-        loss_fn = nn.BCEWithLogitsLoss
+        loss_fn = nn.BCELoss
 
     loss_fn = loss_fn(**loss_args).to(device)
     
