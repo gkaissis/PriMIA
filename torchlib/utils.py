@@ -1367,9 +1367,10 @@ def train(  # never called on websockets
         desc="training epoch {:d}".format(epoch),
         total=L + 1,
     ):
-        res = data.shape[-1]
-        data, target = data.view(-1, 1, res, res).to(device), target.view(-1, res, res).to(device)
-        #data, target = data.to(device), target.to(device)
+        # TODO: Only for MSD without preprocessing
+        #res = data.shape[-1]
+        #data, target = data.view(-1, 1, res, res).to(device), target.view(-1, res, res).to(device)
+        data, target = data.to(device), target.to(device)
         if args.mixup:
             with torch.no_grad():
                 target = oh_converter(target)
