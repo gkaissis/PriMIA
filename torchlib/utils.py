@@ -31,6 +31,7 @@ from .dataloader import (
     CombinedLoader,
     SegmentationData, # Segmentation 
     MSD_data, 
+    MSD_data_images, 
 )
 
 filterwarnings("ignore", message="invalid value encountered in double_scalars")
@@ -610,6 +611,7 @@ def setup_pysyft(args, hook, verbose=False):
             #dataset = SegmentationData(image_paths_file='data/segmentation_data/train.txt')
 
             ## MSD dataset ##
+            """
             PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
             RES = 256
             RES_Z = 64
@@ -630,6 +632,11 @@ def setup_pysyft(args, hook, verbose=False):
             train_size = int(0.8 * len(dataset))
             val_size = len(dataset) - train_size
             dataset, valset = torch.utils.data.random_split(dataset, [train_size, val_size])
+            """
+
+            ## MSD dataset preprocessed version ##
+            PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
+            dataset = MSD_data_images(PATH+'/train')
             
             lengths = [int(len(dataset) / len(workers)) for _ in workers]
             ##assert sum of lenghts is whole dataset on the cost of the last worker
@@ -880,7 +887,8 @@ def setup_pysyft(args, hook, verbose=False):
         #valset = SegmentationData(image_paths_file='data/segmentation_data/val.txt')
 
         ## MSD dataset 
-        # set above together with training
+        PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
+        valset = MSD_data_images(PATH+'/val')
         pass
     else:
 
@@ -1260,10 +1268,10 @@ def secure_aggregation_epoch(
             data, target = next(dataloader)
             ## CUDA in FL ##
             # model already to cuda in train.py
-            ##TODO: Special for MSD scans 
-            res = data.shape[-1]
-            data, target = data.view(-1, 1, res, res).to(device), target.view(-1, res, res).to(device)
-            #data, target = data.to(device), target.to(device)
+            ##TODO: Special for MSD scans (ONLY FOR THE NON-PREPROCESSED)
+            #res = data.shape[-1]
+            #data, target = data.view(-1, 1, res, res).to(device), target.view(-1, res, res).to(device)
+            data, target = data.to(device), target.to(device)
             pred = models[worker.id](data)
             loss = loss_fns[worker.id](pred, target)
             loss.backward()
@@ -1484,9 +1492,10 @@ def test(
             if verbose
             else val_loader
         ):
-            # TODO: ONLY MSD DATASET
-            res = data.shape[-1]
-            data, target = data.view(-1, 1, res, res).to(device), target.view(-1, res, res).to(device)
+            # TODO: ONLY MSD DATASET (NOT PREPROCESSED)
+            #res = data.shape[-1]
+            #data, target = data.view(-1, 1, res, res).to(device), target.view(-1, res, res).to(device)
+            data, target = data.to(device), target.to(device)
             output = model(data)
             loss = loss_fn(output, oh_converter(target) if oh_converter else target)
             test_loss += loss.item()  # sum up batch loss
@@ -1498,11 +1507,13 @@ def test(
                 # that's why the max should be taken over that dimension
                 _, pred = torch.max(output, 1)
 
+                # TODO: Mask only for MSRC
                 # Only allow images/pixels with label >= 0 e.g. for segmentation 
                 # (because of unlabeled datapoints with label: -1)
-                targets_mask = target >= 0
-                test_acc = np.mean((pred == target)[
-                                    targets_mask].data.cpu().numpy())
+                #targets_mask = target >= 0
+                #test_acc = np.mean((pred == target)[targets_mask].data.cpu().numpy())
+                _, target_pred = torch.max(target, 1)
+                test_acc = np.mean((pred==target_pred).data.cpu().numpy())
                 test_accs.append(test_acc)
 
                 # Added from above (TO BE EXTENDED)

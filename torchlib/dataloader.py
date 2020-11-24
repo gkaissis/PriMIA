@@ -739,34 +739,36 @@ class MSD_data(torchdata.Dataset):
     MSD dataset as normal image-dataset. Assumes dataset was already preprocessed. 
 """
 
+from os import listdir
+from os.path import isfile, join
+
 class MSD_data_images(torchdata.Dataset): 
     def __init__(
         self, 
-        root="./data",
-        train=True,
-        val=False,
+        img_path="./data",
         ):
-        # dynamically add search for all *.nii.* files that are 
-        # present in the subfolders of **/data_path/imagesTr
-        # and check if for every scan there exists one label 
-        if train: 
-            if val: 
-                self.input_path = Path(root) / "imagesTr_jpg/val/"
-                self.target_path = Path(root) / "labelsTr_jpg/val/"
-            else:
-                self.input_path = Path(root) / "imagesTr_jpg/train/"
-                self.target_path = Path(root) / "labelsTr_jpg/train/"
-        else: 
-            self.input_path = Path(root) / "imagesTr_jpg/test/"
-            self.target_path = Path(root) / "labelsTr_jpg/test/"
+    
+        self.input_path = img_path + "/inputs/"
+        self.target_path = img_path + "/labels/"
 
-        assert self.input_path.exists() # as in original function 
-        label_names = [
-            file for i, file in enumerate(self.input_path.glob("*.jpg")) 
+        assert os.path.exists(self.input_path) 
+        scan_names = [
+            file for file in listdir(self.input_path) if isfile(join(self.input_path, file))
         ]
+
+        assert os.path.exists(self.target_path) 
+        label_names = [
+            file for file in listdir(self.target_path) if isfile(join(self.target_path, file))
+        ]
+
+        # check that for each scan there exists a label 
+        assert scan_names==label_names
 
         self.scan_names = scan_names 
         self.label_names = label_names 
+
+    def __len__(self):
+        return len(self.scan_names)
 
     def __getitem__(self, key):
         if isinstance(key, slice):
@@ -783,39 +785,28 @@ class MSD_data_images(torchdata.Dataset):
         else:
             raise TypeError("Invalid argument type.")
 
-    def __len__(self):
-        return len(self.image_names)
-
     def get_item_from_index(self, index):
-        to_tensor = transforms.ToTensor()
-        img_id = self.image_names[index].replace('.bmp', '')
+        # because images are named from 0.jpg, 1.jpg, ...
+        scan_path = self.input_path + f'{index}.jpg'
+        label_path = self.target_path + f'{index}.jpg'
 
-        img = Image.open(os.path.join(self.root_dir_name,
-                                      'images',
-                                      img_id + '.bmp')).convert('RGB')
-        center_crop = transforms.CenterCrop(240)
-        # TODO: TEMP.
-        #center_crop = transforms.CenterCrop(240)
-        #img = center_crop(img)
-        #img = to_tensor(img)
+        scan_img = Image.open(scan_path)
+        label_img = Image.open(label_path)
 
-        # TODO: TEMP. (only one channel -> for testing)
-        #img = img[:1, :, :]
+        scan_np = np.array(scan_img, dtype=np.float32) #float
+        label_np = np.array(label_img, dtype=np.uint8) #int
 
-        target = Image.open(os.path.join(self.root_dir_name,
-                                         'targets',
-                                         img_id + '_GT.bmp'))
-        target = center_crop(target)
-        target = np.array(target, dtype=np.int64)
+        # MoNet expects a tensor of shape channel x xres x yres 
+        # channel = 1
+        scan_np = np.expand_dims(scan_np, axis=0)
 
-        target_labels = target[..., 0]
-        for label in SEG_LABELS_LIST:
-            mask = np.all(target == label['rgb_values'], axis=2)
-            target_labels[mask] = label['id']
+        scan = from_numpy(scan_np)
+        # BCELoss expects float tensors and not byte tensors
+        label = from_numpy(label_np).float()
+        
+        # no transforms necessary, because all already done in preprocessing
 
-        target_labels = from_numpy(target_labels.copy())
-
-        return img, target_labels
+        return scan, label
 
 """
     Data utility functions from I2DL class - N.Remerscheid

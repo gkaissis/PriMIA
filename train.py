@@ -32,6 +32,7 @@ from torchlib.dataloader import (
     CombinedLoader,
     SegmentationData, # Segmentation 
     MSD_data, 
+    MSD_data_images,
 )  # pylint:disable=import-error
 from torchlib.models import (
     conv_at_resolution,  # pylint:disable=import-error
@@ -144,6 +145,7 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             #valset = SegmentationData(image_paths_file='data/segmentation_data/val.txt')
 
             ## MSD dataset
+            """
             PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
             RES = 256
             RES_Z = 64
@@ -162,6 +164,11 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             train_size = int(0.8 * len(dataset))
             val_size = len(dataset) - train_size
             dataset, valset = torch.utils.data.random_split(dataset, [train_size, val_size])
+            """
+            ## MSD dataset preprocessed version ##
+            PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
+            dataset = MSD_data_images(PATH+'/train')
+            valset = MSD_data_images(PATH+'/val')
 
             # For now only calculated for saving step below
             val_mean_std = calc_mean_std(dataset)
@@ -387,14 +394,20 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
     # Only for MSRC dataset
     if args.data_dir == "seg_data": 
         #loss_args = {"ignore_index":-1, "reduction":"mean"}
-        loss_args = {"reduction":"mean"}
+        # reduction mean is set by defaut 
+        loss_args = {}
     else: 
         loss_args = {"weight": cw, "reduction": "mean"}
     if args.mixup or (args.weight_classes and args.train_federated):
         loss_fn = Cross_entropy_one_hot
     else:
         loss_fn = nn.CrossEntropyLoss
+
+    if args.data_dir == "seg_data": 
+        loss_fn = nn.BCELoss
+
     loss_fn = loss_fn(**loss_args).to(device)
+    
     if args.train_federated:
         loss_fn = {w: loss_fn.copy() for w in [*workers, "local_model"]}
 

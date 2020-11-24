@@ -1020,6 +1020,10 @@ class MoNet(nn.Module):
         #else:
         #    activation = nn.Sigmoid()
         #head_list.append(activation)
+        # BCELoss doesn't include sigmoid layer (not as in CELoss)
+        # BCELoss can't handle negative number so no log-space 
+        activation = nn.Sigmoid()
+        head_list.append(activation)
 
         self.header = nn.Sequential(*head_list)
 
@@ -1045,9 +1049,9 @@ class MoNet(nn.Module):
                 out = torch.cat((out, skip.pop()), dim=-1)
 
         # header
-        out = self.header(out)
+        out = self.header(out).squeeze()
 
         return out
 
 def monet_seg_net(): 
-    return MoNet(input_shape=(240, 240, 1), output_classes=23)
+    return MoNet()
