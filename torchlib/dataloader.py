@@ -761,7 +761,10 @@ class MSD_data_images(torchdata.Dataset):
             file for file in listdir(self.target_path) if isfile(join(self.target_path, file))
         ]
 
-        # check that for each scan there exists a label 
+        # check that for each scan there exists a label
+        # sort important in-case files are not structured the same way (problem in Colab e.g.)
+        scan_names.sort()
+        label_names.sort()
         assert scan_names==label_names
 
         self.scan_names = scan_names 
