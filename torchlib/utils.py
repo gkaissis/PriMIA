@@ -1378,8 +1378,7 @@ def train(  # never called on websockets
         optimizer.zero_grad()
         output = model(data)
 
-        print(f"MODEL OUTPUT IN RANGE.: {output[0]}")
-        print(f"TARGET IN RANGE.: {target[0]}")
+        assert output.max() < 1
 
         loss = loss_fn(output, target)
         loss.backward()
