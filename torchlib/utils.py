@@ -1378,7 +1378,7 @@ def train(  # never called on websockets
         optimizer.zero_grad()
         output = model(data)
 
-        print(f"MODEL OUTPUT IN RANGE.: {((output > 0) * (output < 1)).sum()}")
+        print(f"MODEL OUTPUT IN RANGE.: {output[0]}")
 
         loss = loss_fn(output, target)
         loss.backward()

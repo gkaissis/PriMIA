@@ -811,6 +811,10 @@ def simple_seg_net():
 
 #from models.MoNet import MoNet
 
+"""
+    MoNet - ported from TF 
+"""
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F 
@@ -1024,7 +1028,7 @@ class MoNet(nn.Module):
         # BCELoss can't handle negative number so no log-space 
         #activation = nn.Sigmoid()
         #head_list.append(activation)
-        # INSTEAD: Added BCEWithLogitsLoss which combines both in a numerically stable way 
+        # INSTEAD: Added BCEWithLogitsLoss which combines both in a numerically stable way sssss
 
         self.header = nn.Sequential(*head_list)
 
@@ -1041,7 +1045,7 @@ class MoNet(nn.Module):
         # bottleneck 
         out = self.bottleneck(out)
 
-        # decoder 
+        # decoder
         for key in self.decoder: 
             out = self.decoder[key](out)
             if key == "deconv": 
