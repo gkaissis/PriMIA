@@ -167,7 +167,7 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             """
             ## MSD dataset preprocessed version ##
             #PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
-            PATH = "drive/MyDrive/Colab\ Notebooks/TUM/GR-PriMIA/Task03_Liver"
+            PATH = "/content/drive/MyDrive/Colab\ Notebooks/TUM/GR-PriMIA/Task03_Liver"
             dataset = MSD_data_images(PATH+'/train')
             valset = MSD_data_images(PATH+'/val')
 
