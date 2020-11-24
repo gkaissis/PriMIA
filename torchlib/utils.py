@@ -635,7 +635,8 @@ def setup_pysyft(args, hook, verbose=False):
             """
 
             ## MSD dataset preprocessed version ##
-            PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
+            #PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
+            PATH = "/drive/MyDrive/Colab\ Notebooks/TUM/GR-PriMIA/Task03_Liver"
             dataset = MSD_data_images(PATH+'/train')
             
             lengths = [int(len(dataset) / len(workers)) for _ in workers]
@@ -887,7 +888,8 @@ def setup_pysyft(args, hook, verbose=False):
         #valset = SegmentationData(image_paths_file='data/segmentation_data/val.txt')
 
         ## MSD dataset 
-        PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
+        #PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
+        PATH = "/drive/MyDrive/Colab\ Notebooks/TUM/GR-PriMIA/Task03_Liver"
         valset = MSD_data_images(PATH+'/val')
         pass
     else:
