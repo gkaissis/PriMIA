@@ -396,7 +396,11 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
     if args.data_dir == "seg_data": 
         #loss_args = {"ignore_index":-1, "reduction":"mean"}
         # reduction mean is set by defaut 
-        loss_args = {}
+        # stats for weighting from asmple 0.jpg in /train
+        # white_pixels/ all_pixels = 0.0602 -> % of pos. classes 
+        # (256*256-a_np.sum())/a_np.sum() -> 15.598 times more negative classes
+        pos_weight = torch.tensor([15])
+        loss_args = {"pos_weight" : pos_weight}
     else: 
         loss_args = {"weight": cw, "reduction": "mean"}
     if args.mixup or (args.weight_classes and args.train_federated):
@@ -405,7 +409,7 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
         loss_fn = nn.CrossEntropyLoss
 
     if args.data_dir == "seg_data": 
-        loss_fn = nn.BCELoss
+        loss_fn = nn.BCEWithLogitsLoss
 
     loss_fn = loss_fn(**loss_args).to(device)
     
