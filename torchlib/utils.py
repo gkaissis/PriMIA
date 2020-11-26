@@ -1378,11 +1378,6 @@ def train(  # never called on websockets
         optimizer.zero_grad()
         output = model(data)
 
-        assert output.max() < 1.0
-        assert output.min() > 0.0
-        assert target.max() <= 1.0
-        assert target.min() >= 0.0
-
         loss = loss_fn(output, target)
         loss.backward()
         optimizer.step()
