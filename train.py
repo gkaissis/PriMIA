@@ -8,9 +8,6 @@ import shutil
 from datetime import datetime
 from warnings import warn
 
-from PIL import Image
-import matplotlib.pyplot as plt
-
 import numpy as np
 import syft as sy
 import torch
@@ -174,11 +171,6 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             dataset = MSD_data_images(PATH+'/train')
             valset = MSD_data_images(PATH+'/val')
 
-            test_inp, test_tar = valset[0]
-
-            Image.fromarray(test_inp[0].numpy()*255).save('file1.jpg')
-            Image.fromarray(test_tar[0].numpy()*255).save('file2.jpg')
-
             # For now only calculated for saving step below
             val_mean_std = calc_mean_std(dataset)
 
@@ -242,7 +234,7 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
         # valset.dataset.transform = AlbumentationsTorchTransform(a.Compose(val_tf))
 
         val_loader = torch.utils.data.DataLoader(
-            valset, batch_size=args.test_batch_size, shuffle=False, **kwargs,
+            valset, batch_size=args.test_batch_size, shuffle=True, **kwargs,
         )
         # del total_L, fraction
 
