@@ -10,7 +10,6 @@ from warnings import warn
 
 from PIL import Image
 import matplotlib.pyplot as plt
-%matplotlib inline
 
 import numpy as np
 import syft as sy
