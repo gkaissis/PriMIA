@@ -8,6 +8,8 @@ import shutil
 from datetime import datetime
 from warnings import warn
 
+from PIL import Image
+
 import numpy as np
 import syft as sy
 import torch
@@ -172,7 +174,8 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             valset = MSD_data_images(PATH+'/val')
 
             test_inp, test_tar = valset[0]
-            print(f"test_inp: {test_inp}, \n \n test_tag: {test_tar}")
+            Image.fromarray(test_inp[0].numpy()).show()
+            Image.fromarray(test_tar[0].numpy()).show()
 
             # For now only calculated for saving step below
             val_mean_std = calc_mean_std(dataset)
