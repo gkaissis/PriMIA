@@ -12,6 +12,8 @@ import numpy as np
 import syft as sy
 import torch
 
+from PIL import Image
+
 # torch.set_num_threads(36)
 
 import torch.nn as nn
