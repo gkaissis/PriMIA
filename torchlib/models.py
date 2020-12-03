@@ -857,7 +857,7 @@ class ConvBnElu(nn.Module):
 
     def forward(self, x): 
         out = self.conv(x)
-        #out = self.batch_norm(out)
+        out = self.batch_norm(out)
         out = F.elu(out)
         return out 
 
@@ -891,7 +891,7 @@ class deconv(nn.Module):
 
     def forward(self, x):
         out = self.transp_conv(x)
-        #out = self.batch_norm(out)
+        out = self.batch_norm(out)
         out = F.elu(out)
         return out 
 
