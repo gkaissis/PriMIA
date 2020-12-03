@@ -1522,7 +1522,7 @@ def test(
                 test_accs.append(test_acc)
 
                 # f1-score 
-                test_dice = mt.f1_score(target_pred, pred)
+                test_dice = mt.f1_score(target_pred.cpu(), pred.cpu())
                 test_dices.append(test_dice)
 
                 # Added from above (TO BE EXTENDED)
