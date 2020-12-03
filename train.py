@@ -9,6 +9,8 @@ from datetime import datetime
 from warnings import warn
 
 from PIL import Image
+import matplotlib.pyplot as plt
+%matplotlib inline
 
 import numpy as np
 import syft as sy
@@ -174,8 +176,9 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             valset = MSD_data_images(PATH+'/val')
 
             test_inp, test_tar = valset[0]
-            Image.fromarray(test_inp[0].numpy()).show()
-            Image.fromarray(test_tar[0].numpy()).show()
+
+            plt.show(Image.fromarray(test_inp[0].numpy()))
+            plt.show(Image.fromarray(test_tar[0].numpy()))
 
             # For now only calculated for saving step below
             val_mean_std = calc_mean_std(dataset)
