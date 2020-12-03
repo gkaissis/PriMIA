@@ -176,10 +176,8 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
 
             test_inp, test_tar = valset[0]
 
-            inp_img = Image.fromarray(test_inp[0].numpy())
-            tar_img = Image.fromarray(test_tar[0].numpy())
-            plt.show(inp_img)
-            plt.show(tar_img)
+            Image.fromarray(test_inp[0].numpy()).save('file1.jpg')
+            Image.fromarray(test_tar[0].numpy()).save('file2.jpg')
 
             # For now only calculated for saving step below
             val_mean_std = calc_mean_std(dataset)
