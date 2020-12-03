@@ -172,7 +172,7 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             valset = MSD_data_images(PATH+'/val')
 
             test_inp, test_tar = valset[0]
-            print(f"test_inp: {test_inp.shape}, test_tag: {test_tar.shape}")
+            print(f"test_inp: {test_inp}, \n \n test_tag: {test_tar}")
 
             # For now only calculated for saving step below
             val_mean_std = calc_mean_std(dataset)
