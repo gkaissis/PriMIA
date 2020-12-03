@@ -837,8 +837,7 @@ class ConvBnElu(nn.Module):
         # 'SAME' padding => Output-Dim = Input-Dim/stride -> exact calculation: if uneven add more padding to the right
         # int() floors padding
         # TODO: how to add asymmetric padding? tuple option for padding only specifies the different dims 
-        #same_padding = int(dilation_rate*(kernel_size-1)*0.5)
-        same_padding = 1
+        same_padding = int(dilation_rate*(kernel_size-1)*0.5)
 
         # TODO: kernel_initializer="he_uniform",
 
@@ -858,7 +857,7 @@ class ConvBnElu(nn.Module):
 
     def forward(self, x): 
         out = self.conv(x)
-        out = self.batch_norm(out)
+        #out = self.batch_norm(out)
         out = F.elu(out)
         return out 
 
@@ -875,9 +874,8 @@ class deconv(nn.Module):
         dilation_rate = 1
 
         # TODO: how to add asymmetric padding? possibly use "output_padding here"
-        #same_padding = int(dilation_rate*(kernel_size-1)*0.5)
-        same_padding = 1
-        
+        same_padding = int(dilation_rate*(kernel_size-1)*0.5)
+
         # TODO: kernel_initializer="he_uniform",
 
         # TODO: here we conserve the number of channels, but in paper they are reduced to the half? 
@@ -893,7 +891,7 @@ class deconv(nn.Module):
 
     def forward(self, x):
         out = self.transp_conv(x)
-        out = self.batch_norm(out)
+        #out = self.batch_norm(out)
         out = F.elu(out)
         return out 
 
