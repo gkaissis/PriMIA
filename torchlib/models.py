@@ -802,7 +802,7 @@ class SimpleSegNet(nn.Module):
         out = self.model(x)
 
         return out 
-        
+
 # for import in train.py 
 
 def simple_seg_net(): 
@@ -837,7 +837,8 @@ class ConvBnElu(nn.Module):
         # 'SAME' padding => Output-Dim = Input-Dim/stride -> exact calculation: if uneven add more padding to the right
         # int() floors padding
         # TODO: how to add asymmetric padding? tuple option for padding only specifies the different dims 
-        same_padding = int(dilation_rate*(kernel_size-1)*0.5)
+        #same_padding = int(dilation_rate*(kernel_size-1)*0.5)
+        same_padding = 1
 
         # TODO: kernel_initializer="he_uniform",
 
@@ -874,8 +875,9 @@ class deconv(nn.Module):
         dilation_rate = 1
 
         # TODO: how to add asymmetric padding? possibly use "output_padding here"
-        same_padding = int(dilation_rate*(kernel_size-1)*0.5)
-
+        #same_padding = int(dilation_rate*(kernel_size-1)*0.5)
+        same_padding = 1
+        
         # TODO: kernel_initializer="he_uniform",
 
         # TODO: here we conserve the number of channels, but in paper they are reduced to the half? 

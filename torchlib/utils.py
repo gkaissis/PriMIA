@@ -1484,6 +1484,7 @@ def test(
 
     # Segmentation - TEMPORARY 
     test_accs = []
+    test_dices = []
 
     with torch.no_grad():
         for data, target in (
@@ -1520,6 +1521,10 @@ def test(
                 test_acc = np.mean((pred==target_pred).data.cpu().numpy())
                 test_accs.append(test_acc)
 
+                # f1-score 
+                test_dice = mt.f1_score(target_pred, pred)
+                test_dices.append(test_dice)
+
                 # Added from above (TO BE EXTENDED)
                 total_pred.append(pred)
                 total_target.append(target)
@@ -1540,7 +1545,8 @@ def test(
     
     if args.data_dir == "seg_data": 
         # Segmentation - TEMPORARY 
-        print(f"VALIDATION: Epoch: {epoch}, Val-Loss: {test_loss}, Val-Acc.: {np.mean(test_accs)}")  
+        print(f"VALIDATION: Epoch: {epoch}, Val-Loss: {test_loss}, \
+            Val-Acc.: {np.mean(test_accs)}, Dice: {np.mean(test_dices)}")  
 
     if args.encrypted_inference:
         objective = 100.0 * TP / (len(val_loader) * args.test_batch_size)
@@ -1561,7 +1567,9 @@ def test(
         if args.data_dir == "seg_data": 
             matthews_coeff = 0
             # for now set objective to test_acc
-            objective = np.mean(test_accs)
+            #objective = np.mean(test_accs)
+            # for now set objective to F1-score 
+            objective = np.mean(test_dices)
         else: 
             total_pred = torch.cat(total_pred).cpu().numpy()  # pylint: disable=no-member
             total_target = (
