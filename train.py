@@ -12,8 +12,6 @@ import numpy as np
 import syft as sy
 import torch
 
-from PIL import Image
-
 # torch.set_num_threads(36)
 
 import torch.nn as nn
@@ -174,8 +172,7 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             valset = MSD_data_images(PATH+'/val')
 
             test_inp, test_tar = valset[0]
-            Image.fromarray(test_inp.numpy())
-            Image.fromarray(test_tar.numpy())
+            print(f"test_inp: {test_inp.shape}, test_tag: {test_tar.shape}")
 
             # For now only calculated for saving step below
             val_mean_std = calc_mean_std(dataset)
