@@ -1522,8 +1522,8 @@ def test(
                 test_accs.append(test_acc)
 
                 # f1-score 
-                #test_dice = mt.f1_score(target_pred.cpu(), pred.cpu())
-                #test_dices.append(test_dice)
+                test_dice = mean([mt.f1_score(tar, pred) for tar, pred in zip(target_pred.numpy(), pred.numpy())])
+                test_dices.append(test_dice)
 
                 # Added from above (TO BE EXTENDED)
                 total_pred.append(pred)
@@ -1567,9 +1567,9 @@ def test(
         if args.data_dir == "seg_data": 
             matthews_coeff = 0
             # for now set objective to test_acc
-            objective = np.mean(test_accs)
+            #objective = np.mean(test_accs)
             # for now set objective to F1-score 
-            #objective = np.mean(test_dices)
+            objective = np.mean(test_dices)
         else: 
             total_pred = torch.cat(total_pred).cpu().numpy()  # pylint: disable=no-member
             total_target = (
