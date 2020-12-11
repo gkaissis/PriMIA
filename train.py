@@ -69,7 +69,14 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
 
     device = torch.device("cuda" if use_cuda else "cpu")  # pylint: disable=no-member
 
-    kwargs = {"num_workers": args.num_threads, "pin_memory": True,} if use_cuda else {}
+    kwargs = (
+        {
+            "num_workers": args.num_threads,
+            "pin_memory": True,
+        }
+        if use_cuda
+        else {}
+    )
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     exp_name = "{:s}_{:s}_{:s}".format(
@@ -94,7 +101,11 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             worker_names,
             crypto_provider,
             val_mean_std,
-        ) = setup_pysyft(args, hook, verbose=verbose,)
+        ) = setup_pysyft(
+            args,
+            hook,
+            verbose=verbose,
+        )
     else:
         if args.data_dir == "mnist":
             val_mean_std = torch.tensor(  # pylint:disable=not-callable
@@ -145,7 +156,9 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             if not args.pretrained:
                 loader.change_channels(1)
             dataset = datasets.ImageFolder(
-                args.data_dir, transform=stats_tf, loader=loader,
+                args.data_dir,
+                transform=stats_tf,
+                loader=loader,
             )
             assert (
                 len(dataset.classes) == 3
@@ -185,7 +198,10 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
         # valset.dataset.transform = AlbumentationsTorchTransform(a.Compose(val_tf))
 
         val_loader = torch.utils.data.DataLoader(
-            valset, batch_size=args.test_batch_size, shuffle=False, **kwargs,
+            valset,
+            batch_size=args.test_batch_size,
+            shuffle=False,
+            **kwargs,
         )
         # del total_L, fraction
 
@@ -538,11 +554,15 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
     model.load_state_dict(state["model_state_dict"])
 
     shutil.copyfile(
-        best_model_file, "model_weights/final_{:s}.pt".format(exp_name),
+        best_model_file,
+        "model_weights/final_{:s}.pt".format(exp_name),
     )
     if args.save_file:
         save_config_results(
-            args, matthews_scores[best_score_idx], timestamp, args.save_file,
+            args,
+            matthews_scores[best_score_idx],
+            timestamp,
+            args.save_file,
         )
 
     # delete old model weights

@@ -135,6 +135,8 @@ class Arguments:
         self.differentially_private = config.getboolean(
             "config", "differentially_private", fallback=False
         )
+        self.DPSSE = config.getboolean("config", "dp_stats_exchange", fallback=False)
+        self.dpsse_eps = config.getfloat("config", "dp_sse_epsilon", fallback=1.0)
         assert self.optimizer in ["SGD", "Adam"], "Unknown optimizer"
         if self.optimizer == "Adam":
             self.beta1 = config.getfloat("config", "beta1", fallback=0.9)
@@ -664,6 +666,7 @@ def setup_pysyft(args, hook, verbose=False):
                 mean, std = calc_mean_std(
                     stats_dataset,
                     save_folder=data_dir,
+                    epsilon=args.dpsse_eps if args.DPSSE else None,
                 )
                 del stats_dataset
 
