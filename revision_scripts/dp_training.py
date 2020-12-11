@@ -12,7 +12,8 @@ from torchvision.datasets.folder import default_loader
 
 import albumentations as a
 from PIL import Image
-from numpy import array
+from numpy import array, all as np_all, full_like
+from collections import Counter
 
 currentdir = dirname(abspath(getfile(currentframe())))
 parentdir = dirname(currentdir)
@@ -87,9 +88,124 @@ def make_model():
     return model
 
 
+def send_new_models(local_model, models):
+    with th.no_grad():
+        for w_id, remote_model in models.items():
+            for new_param, remote_param in zip(
+                local_model.parameters(), remote_model.parameters()
+            ):
+                worker = remote_param.location
+                remote_value = new_param.send(worker)
+                remote_param.set_(remote_value)
+                models[w_id] = remote_model
+
+
+def federated_aggregation(local_model, models):
+    with th.no_grad():
+        for local_param, *remote_params in zip(
+            *([local_model.parameters()] + [model.parameters() for model in models])
+        ):
+            param_stack = th.zeros(*remote_params[0].shape)
+            for remote_param in remote_params:
+                param_stack += remote_param.copy().get()
+            param_stack /= len(remote_params)
+            local_param.set_(param_stack)
+
+
+def aggregation(
+    local_model, models, workers, crypto_provider, weights=None, secure=True,
+):
+    """(Very) defensive version of the original secure aggregation relying on actually checking the parameter names and shapes before trying to load them into the model."""
+
+    local_keys = local_model.state_dict().keys()
+
+    # make sure we're not getting cheated and some key or shape has been changed behind our backs
+    ids = [name if type(name) == str else name.id for name in workers]
+    remote_keys = []
+    for id_ in ids:
+        remote_keys.extend(list(models[id_].state_dict().keys()))
+
+    c = Counter(remote_keys)
+    assert np_all(
+        list(c.values()) == full_like(list(c.values()), len(workers))
+    ) and list(c.keys()) == list(
+        local_keys
+    )  # we know that the keys match exactly and are all present
+
+    # for key in list(local_keys):
+    #     if "num_batches_tracked" in key:
+    #         continue
+    #     local_shape = local_model.state_dict()[key].shape
+    #     remote_shapes = [
+    #         models[worker if type(worker) == str else worker.id].state_dict()[key].shape
+    #         for worker in workers
+    #     ]
+    # assert len(set(remote_shapes)) == 1 and local_shape == next(
+    #     iter(set(remote_shapes))
+    # ), "Shape mismatch BEFORE sending and getting"
+    fresh_state_dict = dict()
+    for key in list(local_keys):  # which are same as remote_keys for sure now
+        if "num_batches_tracked" in str(key):
+            continue
+        local_shape = local_model.state_dict()[key].shape
+        remote_param_list = []
+        for worker in workers:
+            if secure:
+                remote_param_list.append(
+                    (
+                        models[worker if type(worker) == str else worker.id]
+                        .state_dict()[key]
+                        .encrypt(
+                            workers=workers,
+                            crypto_provider=crypto,
+                            protocol="fss",
+                            precision_fractional=16,
+                        )
+                        * (
+                            weights[worker if type(worker) == str else worker.id]
+                            if weights
+                            else 1
+                        )
+                    ).get()
+                )
+            else:
+                remote_param_list.append(
+                    models[worker if type(worker) == str else worker.id]
+                    .state_dict()[key]
+                    .data.get()
+                    .copy()
+                    * (
+                        weights[worker if type(worker) == str else worker.id]
+                        if weights
+                        else 1
+                    )
+                )
+
+        remote_shapes = [p.shape for p in remote_param_list]
+        assert len(set(remote_shapes)) == 1 and local_shape == next(
+            iter(set(remote_shapes))
+        ), "Shape mismatch AFTER sending and getting"
+        if secure:
+            sumstacked = (
+                th.sum(  # pylint:disable=no-member
+                    th.stack(remote_param_list), dim=0  # pylint:disable=no-member
+                )
+                .get()
+                .float_prec()
+            )
+        else:
+            sumstacked = th.sum(  # pylint:disable=no-member
+                th.stack(remote_param_list), dim=0  # pylint:disable=no-member
+            )
+        fresh_state_dict[key] = sumstacked if weights else sumstacked / len(workers)
+    local_model.load_state_dict(fresh_state_dict)
+    return local_model
+
+
 hook = sy.TorchHook(th)
 alice = sy.VirtualWorker(hook, id="alice")
 bob = sy.VirtualWorker(hook, id="bob")
+crypto = sy.VirtualWorker(hook, id="crypto_provider")
 workers = [alice, bob]
 
 sy.local_worker.is_client_worker = False
@@ -105,7 +221,7 @@ train_datasets = dataset.federate(*workers)
 # the local version that we will use to do the aggregation
 local_model = make_model()
 
-models, dataloaders, optimizers, privacy_engines = [], [], [], []
+models, dataloaders, optimizers, privacy_engines = {}, {}, {}, {}
 for worker in workers:
     model = make_model()
     optimizer = th.optim.SGD(model.parameters(), lr=0.1)
@@ -124,45 +240,21 @@ for worker in workers:
     )
     privacy_engine.attach(optimizer)
 
-    models.append(model)
-    dataloaders.append(dataloader)
-    optimizers.append(optimizer)
-    privacy_engines.append(privacy_engine)
+    models[worker.id] = model
+    dataloaders[worker.id] = dataloader
+    optimizers[worker.id] = optimizer
+    privacy_engines[worker.id] = privacy_engine
 
-
-def send_new_models(local_model, models):
-    with th.no_grad():
-        for remote_model in models:
-            for new_param, remote_param in zip(
-                local_model.parameters(), remote_model.parameters()
-            ):
-                worker = remote_param.location
-                remote_value = new_param.send(worker)
-                remote_param.set_(remote_value)
-
-
-def federated_aggregation(local_model, models):
-    with th.no_grad():
-        for local_param, *remote_params in zip(
-            *([local_model.parameters()] + [model.parameters() for model in models])
-        ):
-            param_stack = th.zeros(*remote_params[0].shape)
-            for remote_param in remote_params:
-                param_stack += remote_param.copy().get()
-            param_stack /= len(remote_params)
-            local_param.set_(param_stack)
-
-
-def train(epoch, delta):
-
+delta = 1e-5
+for epoch in range(5):
     # 1. Send new version of the model
     send_new_models(local_model, models)
 
     # 2. Train remotely the models
     for i, worker in enumerate(workers):
-        dataloader = dataloaders[i]
-        model = models[i]
-        optimizer = optimizers[i]
+        dataloader = dataloaders[worker.id]
+        model = models[worker.id]
+        optimizer = optimizers[worker.id]
 
         model.train()
         criterion = th.nn.CrossEntropyLoss()
@@ -185,8 +277,6 @@ def train(epoch, delta):
         )
 
     # 3. Federated aggregation of the updated models
-    federated_aggregation(local_model, models)
+    # federated_aggregation(local_model, models)
+    local_model = aggregation(local_model, models, workers, crypto)
 
-
-for epoch in range(5):
-    train(epoch, delta=1e-5)
