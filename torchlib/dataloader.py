@@ -220,12 +220,7 @@ def create_albu_transform(args, mean, std):
             ]
         )
     )
-    return transforms.Compose(
-        [
-            train_tf,
-            train_tf_albu,
-        ]
-    )
+    return transforms.Compose([train_tf, train_tf_albu,])
 
 
 def l1_sensitivity(query: Callable, d: tensor) -> float:
@@ -241,9 +236,7 @@ def l1_sensitivity(query: Callable, d: tensor) -> float:
 
 
 def calc_mean_std(
-    dataset,
-    save_folder=None,
-    epsilon=None,
+    dataset, save_folder=None, epsilon=None,
 ):
     """
     Calculates the mean and standard deviation of `dataset` and
@@ -411,11 +404,7 @@ class ImageFolderFromCSV(torchdata.Dataset):
 
 class PPPP(torchdata.Dataset):
     def __init__(
-        self,
-        label_path="data/Labels.csv",
-        train=False,
-        transform=None,
-        seed=1,
+        self, label_path="data/Labels.csv", train=False, transform=None, seed=1,
     ):
         super().__init__()
         random.seed(seed)
@@ -464,8 +453,7 @@ class PPPP(torchdata.Dataset):
     def __compute_mean_std__(self):
 
         calc_mean_std(
-            self,
-            save_folder="data",
+            self, save_folder="data",
         )
 
 
@@ -532,11 +520,7 @@ if __name__ == "__main__":
     img.show()
 
     tf = transforms.Compose(
-        [
-            transforms.Resize(224),
-            transforms.CenterCrop(224),
-            transforms.ToTensor(),
-        ]
+        [transforms.Resize(224), transforms.CenterCrop(224), transforms.ToTensor(),]
     )
     ds = PPPP(train=True, transform=tf)
 
