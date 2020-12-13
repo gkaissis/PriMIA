@@ -4,7 +4,6 @@ import torch as th
 import syft as sy
 from torchvision import datasets, transforms
 from opacus import PrivacyEngine, utils
-from module_modification import convert_batchnorm_modules
 
 from os.path import dirname, abspath
 from sys import path as syspath
@@ -51,7 +50,7 @@ class AlbumentationsTorchTransform:
 
 def make_model():
     # model_args = {
-    #     "pretrained": False,
+    #     "pretrained": True,
     #     "num_classes": 3,
     #     "in_channels": 3,
     #     "adptpool": False,
@@ -65,27 +64,27 @@ def make_model():
         "pooling": "max",
     }
     model = conv_at_resolution[224](**model_args)
-    model = convert_batchnorm_modules(model)
-    # bn_layers = []
-    # for layer_name, layer in model.named_modules():
-    #     if isinstance(layer, th.nn.modules.batchnorm.BatchNorm2d):
-    #         bn_layers.append(layer_name)
-    # for bn in bn_layers:
-    #     layers = bn.split(".")
-    #     bn = model
-    #     semi_last_layer = model
-    #     for i, l in enumerate(layers):
-    #         bn = bn.__getattr__(l)
-    #         if i == len(layers) - 2:
-    #             semi_last_layer = bn
-    #     semi_last_layer.__setattr__(
-    #         layers[-1],
-    #         th.nn.GroupNorm(
-    #             num_channels=bn.num_features,
-    #             num_groups=min(32, bn.num_features,),
-    #             affine=True,
-    #         ),
-    #     )
+    # model = utils.module_modification.convert_batchnorm_modules(model)
+    bn_layers = []
+    for layer_name, layer in model.named_modules():
+        if isinstance(layer, th.nn.modules.batchnorm.BatchNorm2d):
+            bn_layers.append(layer_name)
+    for bn in bn_layers:
+        layers = bn.split(".")
+        bn = model
+        semi_last_layer = model
+        for i, l in enumerate(layers):
+            bn = bn.__getattr__(l)
+            if i == len(layers) - 2:
+                semi_last_layer = bn
+        semi_last_layer.__setattr__(
+            layers[-1],
+            th.nn.GroupNorm(
+                num_channels=bn.num_features,
+                num_groups=min(32, bn.num_features,),
+                affine=True,
+            ),
+        )
     return model
 
 
@@ -215,10 +214,8 @@ sy.local_worker.is_client_worker = False
 stats_tf = AlbumentationsTorchTransform(
     a.Compose([a.Resize(224, 224), a.RandomCrop(224, 224), a.ToFloat(max_value=255.0),])
 )
-dataset = datasets.ImageFolder(
-    "data/server_simulation/worker1", transform=stats_tf, loader=default_loader,
-)
-train_datasets = dataset.federate(workers)
+dataset = datasets.ImageFolder("data/train", transform=stats_tf, loader=default_loader,)
+train_datasets = dataset.federate(*workers)
 
 
 # the local version that we will use to do the aggregation
@@ -240,7 +237,6 @@ for worker in workers:
         alphas=range(2, 32),
         noise_multiplier=1.2,
         max_grad_norm=1.0,
-        secure_rng=False,
     )
     privacy_engine.attach(optimizer)
 
@@ -283,3 +279,4 @@ for epoch in range(5):
     # 3. Federated aggregation of the updated models
     # federated_aggregation(local_model, models)
     local_model = aggregation(local_model, models, workers, crypto)
+
