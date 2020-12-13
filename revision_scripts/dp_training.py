@@ -50,42 +50,16 @@ class AlbumentationsTorchTransform:
 
 
 def make_model():
-    # model_args = {
-    #     "pretrained": False,
-    #     "num_classes": 3,
-    #     "in_channels": 3,
-    #     "adptpool": False,
-    #     "input_size": 224,
-    #     "pooling": "max",
-    # }
-    # model = resnet18(**model_args)
     model_args = {
+        "pretrained": False,
         "num_classes": 3,
         "in_channels": 3,
+        "adptpool": False,
+        "input_size": 224,
         "pooling": "max",
     }
-    model = conv_at_resolution[224](**model_args)
+    model = resnet18(**model_args)
     model = convert_batchnorm_modules(model)
-    # bn_layers = []
-    # for layer_name, layer in model.named_modules():
-    #     if isinstance(layer, th.nn.modules.batchnorm.BatchNorm2d):
-    #         bn_layers.append(layer_name)
-    # for bn in bn_layers:
-    #     layers = bn.split(".")
-    #     bn = model
-    #     semi_last_layer = model
-    #     for i, l in enumerate(layers):
-    #         bn = bn.__getattr__(l)
-    #         if i == len(layers) - 2:
-    #             semi_last_layer = bn
-    #     semi_last_layer.__setattr__(
-    #         layers[-1],
-    #         th.nn.GroupNorm(
-    #             num_channels=bn.num_features,
-    #             num_groups=min(32, bn.num_features,),
-    #             affine=True,
-    #         ),
-    #     )
     return model
 
 
@@ -116,11 +90,8 @@ def federated_aggregation(local_model, models):
 def aggregation(
     local_model, models, workers, crypto_provider, weights=None, secure=True,
 ):
-    """(Very) defensive version of the original secure aggregation relying on actually checking the parameter names and shapes before trying to load them into the model."""
-
+    
     local_keys = local_model.state_dict().keys()
-
-    # make sure we're not getting cheated and some key or shape has been changed behind our backs
     ids = [name if type(name) == str else name.id for name in workers]
     remote_keys = []
     for id_ in ids:
@@ -131,21 +102,9 @@ def aggregation(
         list(c.values()) == full_like(list(c.values()), len(workers))
     ) and list(c.keys()) == list(
         local_keys
-    )  # we know that the keys match exactly and are all present
-
-    # for key in list(local_keys):
-    #     if "num_batches_tracked" in key:
-    #         continue
-    #     local_shape = local_model.state_dict()[key].shape
-    #     remote_shapes = [
-    #         models[worker if type(worker) == str else worker.id].state_dict()[key].shape
-    #         for worker in workers
-    #     ]
-    # assert len(set(remote_shapes)) == 1 and local_shape == next(
-    #     iter(set(remote_shapes))
-    # ), "Shape mismatch BEFORE sending and getting"
+    )  
     fresh_state_dict = dict()
-    for key in list(local_keys):  # which are same as remote_keys for sure now
+    for key in list(local_keys):  
         if "num_batches_tracked" in str(key):
             continue
         local_shape = local_model.state_dict()[key].shape
