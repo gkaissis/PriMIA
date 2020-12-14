@@ -226,7 +226,7 @@ def create_albu_transform(args, mean, std):
 def l1_sensitivity(query: Callable, d: tensor) -> float:
     """Calculates L1-sensitivity of a query on a dataset."""
     L = LeaveOneOut()
-    data = d.copy()
+    data = d.clone()
     sensitivity = 0
     for idx in L.split(data):
         val = query(data[idx[0]])
