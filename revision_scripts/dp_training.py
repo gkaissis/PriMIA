@@ -2,7 +2,7 @@ from tqdm import tqdm
 
 import torch as th
 from torchvision import datasets, transforms
-from opacus import privacy_analysis as tf_privacy
+import privacy_analysis as tf_privacy
 from module_modification import convert_batchnorm_modules
 
 from os.path import dirname, abspath
@@ -25,7 +25,7 @@ from torchlib.models import (
     vgg16,
 )
 
-BATCH_SIZE = 5
+BATCH_SIZE = 2
 SAMPLE_SIZE = None
 NOISE_MULTIPLIER = 0.38
 MAX_GRAD_NORM = 1.2
