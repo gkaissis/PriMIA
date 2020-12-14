@@ -3,7 +3,7 @@ from tqdm import tqdm
 import torch as th
 import syft as sy
 from torchvision import datasets, transforms
-from opacus import PrivacyEngine, utils, privacy_analysis as tf_privacy
+from opacus import privacy_analysis as tf_privacy
 from module_modification import convert_batchnorm_modules
 
 from os.path import dirname, abspath
@@ -25,12 +25,13 @@ from torchlib.models import (
     vgg16,
 )
 
-BATCH_SIZE = 1
-NOISE_MULTIPLIER = 0.1
-MAX_GRAD_NORM = 1.3
-LR = 1e-3
-ALPHAS = range(2, 32)
-TARGET_DELTA = 1e-1
+BATCH_SIZE = 5
+SAMPLE_SIZE = None
+NOISE_MULTIPLIER = 0.38
+MAX_GRAD_NORM = 1.2
+LR = 1e-4
+ALPHAS = [1 + x / 10.0 for x in range(1, 100)] + list(range(12, 64))
+TARGET_DELTA = 1e-5
 
 
 class AlbumentationsTorchTransform:
@@ -167,7 +168,7 @@ def aggregation(
 
 def get_privacy_spent(
     target_delta=None, steps=None, alphas=None, sample_rate=1, noise_multiplier=None
-):  # steps is the number of optimisation steps
+):
     rdp = (
         th.tensor(tf_privacy.compute_rdp(sample_rate, noise_multiplier, 1, alphas))
         * steps
@@ -191,89 +192,74 @@ dataset = datasets.ImageFolder(
     "data/server_simulation/worker1", transform=stats_tf, loader=default_loader,
 )
 train_datasets = dataset.federate(workers)
-
-
 # the local version that we will use to do the aggregation
 local_model = make_model()
 
-models, dataloaders, optimizers, privacy_engines = {}, {}, {}, {}
+models, dataloaders, optimizers = {}, {}, {}
 for worker in workers:
     model = make_model()
-    optimizer = th.optim.SGD(model.parameters(), lr=LR)  # not used at all
+    optimizer = th.optim.Adam(
+        model.parameters(), lr=LR
+    )  # th.optim.SGD(model.parameters(), lr=LR)
     model.send(worker)
     dataset = train_datasets[worker.id]
     dataloader = th.utils.data.DataLoader(
-        dataset, batch_size=BATCH_SIZE, shuffle=True, drop_last=True
+        dataset,
+        batch_size=BATCH_SIZE,
+        shuffle=True,
+        drop_last=True,  # drop last is important!
     )
-    # privacy_engine = PrivacyEngine(
-    #     model,
-    #     batch_size=batch_size,
-    #     sample_size=len(dataset),
-    #     alphas=range(2, 32),
-    #     noise_multiplier=1.2,
-    #     max_grad_norm=1.0,
-    #     secure_rng=False,
-    # )
-    # privacy_engine.attach(optimizer)
-
     models[worker.id] = model
     dataloaders[worker.id] = dataloader
     optimizers[worker.id] = optimizer
-    # privacy_engines[worker.id] = privacy_engine
 
 for epoch in range(10):
     # 1. Send new version of the model
     send_new_models(local_model, models)
 
-    # 2. Train remotely the models
+    # 2. Train the models remotely
     for i, worker in enumerate(workers):
 
         dataloader = dataloaders[worker.id]
+        SAMPLE_SIZE = len(dataloader)
         model = models[worker.id]
         optimizer = optimizers[worker.id]
 
         model.train()
-        criterion = th.nn.CrossEntropyLoss()
+        criterion = th.nn.CrossEntropyLoss(reduce="mean")
         losses = []
 
-        total_optimisation_steps = 0  # for moments accountant, privacy
+        total_optimisation_steps = 0  # for moments accountant
 
-        for i, (data, target) in enumerate(tqdm(dataloader)):
-            # optimizer.zero_grad() #not needed since we're playing optimiser
-            output = model(data)
-            loss = criterion(output, target)
-            loss.backward()  # calculate gradients
-
+        for i, batch in enumerate(tqdm(dataloader)):
             for param in model.parameters():
-                param.accumulated_grads = (
-                    []
-                )  # container for accumulated microbatch gradients
+                param.accumulated_grads = []
+
+            optimizer.zero_grad()
+
+            for microbatch in batch:
+                # calculate potentially unbounded gradient of microbatch
+                data, target = batch
+                output = model(data)
+                loss = criterion(output, target)
+                loss.backward()
+
+                with th.no_grad():
+                    for param in model.parameters():
+                        th.nn.utils.clip_grad_norm_(param, max_norm=MAX_GRAD_NORM)
+                        param.accumulated_grads.append(param.grad.clone())
 
             with th.no_grad():
                 for param in model.parameters():
-                    per_sample_grad = param.grad.clone()
-                    th.nn.utils.clip_grad_norm_(
-                        per_sample_grad, max_norm=MAX_GRAD_NORM
-                    )  # clip them
-                    param.accumulated_grads.append(per_sample_grad)
-
-                for param in model.parameters():
-                    param.grad = th.stack(
-                        param.accumulated_grads, dim=0
-                    )  # this is an identity operation cause the virtual batch size = real batch size
-
-                for param in model.parameters():  # optimizer.step()
-                    param.sub_(LR * param.grad)
-                    param.add_(
-                        th.normal(
-                            0.0, NOISE_MULTIPLIER * MAX_GRAD_NORM, size=param.shape
-                        )
+                    param.grad = th.mean(th.stack(param.accumulated_grads, dim=0))
+                    noise = th.normal(
+                        0.0, NOISE_MULTIPLIER * MAX_GRAD_NORM, size=param.grad.shape
                     )
-                    param.grad = 0  # optimizer.zero_grad()
+                    noise /= BATCH_SIZE  # this is important, otherwise the noise is overly aggressive
+                    param.grad.add_(noise)
 
-                total_optimisation_steps += 1
-
-            # optimizer.step()
+            optimizer.step()
+            total_optimisation_steps += 1
             losses.append(loss.get().item())
 
         sy.local_worker.clear_objects()
@@ -282,7 +268,9 @@ for epoch in range(10):
             steps=total_optimisation_steps,
             alphas=ALPHAS,
             noise_multiplier=NOISE_MULTIPLIER,
+            sample_rate=BATCH_SIZE / SAMPLE_SIZE,
         )
+
         print(
             f"[{worker.id}]\t"
             f"Train Epoch: {epoch} \t"
@@ -291,6 +279,5 @@ for epoch in range(10):
         )
 
     # 3. Federated aggregation of the updated models
-    # federated_aggregation(local_model, models)
     local_model = aggregation(local_model, models, workers, crypto)
 
