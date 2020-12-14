@@ -1,7 +1,6 @@
 from tqdm import tqdm
 
 import torch as th
-import syft as sy
 from torchvision import datasets, transforms
 from opacus import privacy_analysis as tf_privacy
 from module_modification import convert_batchnorm_modules
@@ -19,6 +18,7 @@ from collections import Counter
 currentdir = dirname(abspath(getfile(currentframe())))
 parentdir = dirname(currentdir)
 syspath.insert(0, parentdir)
+import syft as sy
 from torchlib.models import (
     conv_at_resolution,  # pylint:disable=import-error
     resnet18,
@@ -226,7 +226,7 @@ for epoch in range(10):
         optimizer = optimizers[worker.id]
 
         model.train()
-        criterion = th.nn.CrossEntropyLoss(reduce="mean")
+        criterion = th.nn.CrossEntropyLoss(reduction="mean")
         losses = []
 
         total_optimisation_steps = 0  # for moments accountant
@@ -256,6 +256,7 @@ for epoch in range(10):
                         0.0, NOISE_MULTIPLIER * MAX_GRAD_NORM, size=param.grad.shape
                     )
                     noise /= BATCH_SIZE  # this is important, otherwise the noise is overly aggressive
+                    noise = noise.send(worker.id)
                     param.grad.add_(noise)
 
             optimizer.step()
