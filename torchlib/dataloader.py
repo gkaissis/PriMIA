@@ -806,7 +806,7 @@ class MSD_data_images(torchdata.Dataset):
         scan = from_numpy(scan_np)
         # BCELoss expects float tensors and not byte tensors
         label = from_numpy(label_np)
-        
+
         # no transforms necessary, because all already done in preprocessing
 
         return scan, label

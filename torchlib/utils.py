@@ -8,6 +8,7 @@ from typing import List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn as nn
 
 
 import tqdm
@@ -636,7 +637,7 @@ def setup_pysyft(args, hook, verbose=False):
 
             ## MSD dataset preprocessed version ##
             #PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
-            PATH = "/content/drive/MyDrive/Colab Notebooks/TUM/GR-PriMIA/Task03_Liver"
+            PATH = "/home/NiWaRe/PriMIA/Task03_Liver"
             dataset = MSD_data_images(PATH+'/train')
             
             lengths = [int(len(dataset) / len(workers)) for _ in workers]
@@ -889,7 +890,7 @@ def setup_pysyft(args, hook, verbose=False):
 
         ## MSD dataset 
         #PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
-        PATH = "/content/drive/MyDrive/Colab Notebooks/TUM/GR-PriMIA/Task03_Liver"
+        PATH = "/home/NiWaRe/PriMIA/Task03_Liver"
         valset = MSD_data_images(PATH+'/val')
         pass
     else:
@@ -1370,13 +1371,23 @@ def train(  # never called on websockets
         # TODO: Only for MSD without preprocessing
         #res = data.shape[-1]
         #data, target = data.view(-1, 1, res, res).to(device), target.view(-1, res, res).to(device)
-        data, target = data.to(device), target.to(device)
+        data, target = data.to(device), target[0].to(device)
+        #dim = 256*256
+        #dim_2 = int(dim/2)
+        #model = nn.Sequential(
+        #                        nn.Flatten(),
+        #                        nn.Linear(dim, 100), 
+        #                        nn.ReLU(), 
+        #                        nn.Linear(100, dim), 
+        #                    ).to(device)
         if args.mixup:
             with torch.no_grad():
                 target = oh_converter(target)
                 data, target = mixup((data, target))
         optimizer.zero_grad()
         output = model(data)
+
+        #output = output.view_as(target)
 
         loss = loss_fn(output, target)
         loss.backward()
@@ -1500,8 +1511,20 @@ def test(
             # TODO: ONLY MSD DATASET (NOT PREPROCESSED)
             #res = data.shape[-1]
             #data, target = data.view(-1, 1, res, res).to(device), target.view(-1, res, res).to(device)
-            data, target = data.to(device), target.to(device)
+            data, target = data.to(device), target[0].to(device)
+            #dim = 256*256
+            #dim_2 = int(dim/2)
+            #model = nn.Sequential(
+            #                    nn.Flatten(),
+            #                    nn.Linear(dim, 100), 
+            #                    nn.ReLU(), 
+            #                    nn.Linear(100, dim), 
+            #                    ).to(device)
             output = model(data)
+
+            #output = output.view_as(target)
+
+            #output, target = output.cpu(), target.cpu() # for loss_fn
             loss = loss_fn(output, oh_converter(target) if oh_converter else target)
             test_loss += loss.item()  # sum up batch loss
             # Segmentation 
@@ -1510,43 +1533,80 @@ def test(
                 # As for normal classification consider the most probable class (for every pixel)
                 # the second dimension in model output is again the class-dimension
                 # that's why the max should be taken over that dimension
-                _, pred = torch.max(output, 1)
+                #_, pred = torch.max(output, 1)
+                #pred = torch.round(output).type(torch.LongTensor).view(-1).cpu().numpy()
 
                 # TODO: Mask only for MSRC
                 # Only allow images/pixels with label >= 0 e.g. for segmentation 
                 # (because of unlabeled datapoints with label: -1)
                 #targets_mask = target >= 0
                 #test_acc = np.mean((pred == target)[targets_mask].data.cpu().numpy())
-                _, target_pred = torch.max(target, 1)
-                test_acc = np.mean((pred==target_pred).data.cpu().numpy())
-                test_accs.append(test_acc)
+                #_, target_pred = torch.max(target, 1)
+                #target_pred = target.type(torch.LongTensor).view(-1).cpu().numpy()
+               
+                #test_acc = np.mean((pred==target_pred))
+                #test_accs.append(test_acc)
 
                 # f1-score 
-                test_dice = mean([mt.f1_score(tar, pred) for tar, pred in zip(target_pred.numpy(), pred.numpy())])
-                test_dices.append(test_dice)
+                #test_dice = np.mean([mt.f1_score(tar, pred) for tar, pred in zip(target_pred.numpy(), pred.numpy())])
+                #test_dice = []
+
+
+
+
+
+
+                #print(pred[pred!=0])
+                #print(pred.shape)
+  
+
+
+
+
+
+                #test_dice = mt.f1_score(target_pred, pred)
+
+                ### Too inefficient ###
+                #for i in range(target_pred.shape[1]): 
+                #    for j in range(target_pred.shape[2]): 
+                        # all classifcations for one pixel 
+                #        test_dice.append(mt.f1_score(target_pred[:, i, j], pred[:, i, j]))
+
+               #test_dices.append(test_dice)
 
                 # Added from above (TO BE EXTENDED)
-                total_pred.append(pred)
-                total_target.append(target)
+                #total_pred.append(pred)
+                #total_target.append(target)
 
+                # Make segmentation compatible with classification eval pipeline
+                output = output.view(output.shape[0], -1)
+                total_scores.append(output)
+                target = target.view(-1).type(torch.LongTensor)
+                pred = output.view(-1).round().type(torch.LongTensor)
+                tgts = target
+                total_pred.append(pred)
+                total_target.append(tgts)
             else: 
                 total_scores.append(output)
                 pred = output.argmax(dim=1)
                 tgts = target.view_as(pred)
                 total_pred.append(pred)
                 total_target.append(tgts)
-                equal = pred.eq(tgts)
-                TP += (
-                    equal.sum().copy().get().float_precision().long().item()
-                    if args.encrypted_inference
-                    else equal.sum().item()
-                )
+                #print(output.shape)
+                #print(pred.shape)
+                #print(tgts.shape)
+            equal = pred.eq(tgts)
+            TP += (
+                equal.sum().copy().get().float_precision().long().item()
+                if args.encrypted_inference
+                else equal.sum().item()
+            )
     test_loss /= len(val_loader)
     
-    if args.data_dir == "seg_data": 
+    #if args.data_dir == "seg_data": 
         # Segmentation - TEMPORARY 
-        print(f"VALIDATION: Epoch: {epoch}, Val-Loss: {test_loss}, \
-            Val-Acc.: {np.mean(test_accs)}, Dice: {np.mean(test_dices)}")  
+    #    print(f"VALIDATION: Epoch: {epoch}, Val-Loss: {test_loss}, \
+    #        Val-Acc.: {np.mean(test_accs)}, Dice: {np.mean(test_dices)}")  
 
     if args.encrypted_inference:
         objective = 100.0 * TP / (len(val_loader) * args.test_batch_size)
@@ -1564,13 +1624,13 @@ def test(
             )
     else:
         # Segmentation: TEMPORARY
-        if args.data_dir == "seg_data": 
-            matthews_coeff = 0
+        #if args.data_dir == "seg_data": 
+        #    matthews_coeff = 0
             # for now set objective to test_acc
             #objective = np.mean(test_accs)
             # for now set objective to F1-score 
-            objective = np.mean(test_dices)
-        else: 
+        #    objective = np.mean(test_dices)
+        if True: 
             total_pred = torch.cat(total_pred).cpu().numpy()  # pylint: disable=no-member
             total_target = (
                 torch.cat(total_target).cpu().numpy()  # pylint: disable=no-member
@@ -1589,6 +1649,15 @@ def test(
                 )
                 roc_auc = 0.0
         
+            #print((total_target==-1).sum())
+            #print((total_target==1).sum())
+            #print((total_target==0).sum())
+            #print(((total_target!=0).any() and (total_target!=1).any()).sum())
+
+            #print((total_pred==-1).sum())
+            #print((total_pred==1).sum())
+            #print((total_pred==0).sum())
+
             matthews_coeff = mt.matthews_corrcoef(total_target, total_pred)
             objective = 100.0 * matthews_coeff
 

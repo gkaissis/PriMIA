@@ -79,7 +79,7 @@ local:
 # Segmentation 
 local_segmentation:
 	@echo Segmentation Training Locally
-	python train.py --config configs/torch/segmentation.ini --data_dir seg_data 
+	python train.py --config configs/torch/segmentation.ini --data_dir seg_data --cuda --verbose
 	@echo Finished Training Locally
 
 # Gridnode ensemble shortcut
