@@ -25,7 +25,7 @@ from torchlib.models import (
     vgg16,
 )
 
-BATCH_SIZE = 2
+BATCH_SIZE = 1
 SAMPLE_SIZE = None
 NOISE_MULTIPLIER = 0.38
 MAX_GRAD_NORM = 1.2
@@ -222,6 +222,12 @@ for epoch in range(10):
 
         dataloader = dataloaders[worker.id]
         SAMPLE_SIZE = len(dataloader)
+        if BATCH_SIZE / SAMPLE_SIZE > 1.0:
+            raise ValueError(
+                f"Batch size ({BATCH_SIZE}) exceeds the dataset size ({SAMPLE_SIZE}) on worker {worker.id}."
+                "This breaks privacy accounting."
+                "Please select a batch size that's at most equal to the dataset size on the worker."
+            )
         model = models[worker.id]
         optimizer = optimizers[worker.id]
 
