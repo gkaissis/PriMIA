@@ -25,7 +25,7 @@ from torchlib.models import (
     vgg16,
 )
 
-BATCH_SIZE = 1
+BATCH_SIZE = 3
 SAMPLE_SIZE = None
 NOISE_MULTIPLIER = 0.38
 MAX_GRAD_NORM = 1.2
@@ -243,9 +243,9 @@ for epoch in range(10):
 
             optimizer.zero_grad()
 
-            for microbatch in batch:
+            for i in range(batch[0].shape[0]):
                 # calculate potentially unbounded gradient of microbatch
-                data, target = batch
+                data, target = batch[0][i : i + 1], batch[1][i : i + 1]
                 output = model(data)
                 loss = criterion(output, target)
                 loss.backward()
