@@ -10,7 +10,7 @@ import pandas as pd
 import torch
 import torch.nn as nn
 
-import segmentation_models as smp
+import segmentation_models_pytorch as smp
 
 import tqdm
 import albumentations as a
@@ -1372,7 +1372,7 @@ def train(  # never called on websockets
         # TODO: Only for MSD without preprocessing
         #res = data.shape[-1]
         #data, target = data.view(-1, 1, res, res).to(device), target.view(-1, res, res).to(device)
-        data, target = data.to(device), target[0].to(device)
+        data, target = data.to(device), target.unsqueeze(dim=1).to(device)
         #dim = 256*256
         #dim_2 = int(dim/2)
         #model = nn.Sequential(
@@ -1381,22 +1381,39 @@ def train(  # never called on websockets
         #                        nn.ReLU(), 
         #                        nn.Linear(100, dim), 
         #                    ).to(device)
-        #num_classes = 1
-        #model = smp.Unet("resnet18", classes=num_classes, activation="sigmoid")
-        #inpt_channels = 1
-        #if inpt_channels != 3:
-        #    new_encoder = [nn.Conv2d(inpt_channels, 3, 1), model.encoder.conv1]
-        #    model.encoder.conv1 = nn.Sequential(*new_encoder)
+        num_classes = 1
+        model = smp.Unet("resnet18", classes=num_classes, activation="sigmoid")
+        inpt_channels = 1
+        if inpt_channels != 3:
+            new_encoder = [nn.Conv2d(inpt_channels, 3, 1), model.encoder.conv1]
+            model.encoder.conv1 = nn.Sequential(*new_encoder)
         if args.mixup:
             with torch.no_grad():
                 target = oh_converter(target)
                 data, target = mixup((data, target))
         optimizer.zero_grad()
+
+        model = model.to(device)
+
         output = model(data)
 
         #output = output.view_as(target)
 
+        #### manual calculation of the dice loss ####
+        # L = 1 - 2 * precision * recall / (precision + recall)
+        # recall = tp/(tp+fn) 
+        # precision = tp/(tp+fp)
+        # def.: pos = 1 
+        #tp = torch.sum(output[target==1.] >= .5)
+        #tn = torch.sum(output[target==0.] < .5)
+        #fn = torch.sum(output[target==1.] < .5)
+        #fp = torch.sum(output[target==0.] >= .5)
+        #loss = 2 * tp / (2*fp + fn + fp) 
+
         loss = loss_fn(output, target)
+
+        #loss = loss_fn(output, target)
+
         loss.backward()
         optimizer.step()
         if batch_idx % args.log_interval == 0:
@@ -1518,7 +1535,7 @@ def test(
             # TODO: ONLY MSD DATASET (NOT PREPROCESSED)
             #res = data.shape[-1]
             #data, target = data.view(-1, 1, res, res).to(device), target.view(-1, res, res).to(device)
-            data, target = data.to(device), target[0].to(device)
+            data, target = data.to(device), target.unsqueeze(dim=1).to(device)
             #dim = 256*256
             #dim_2 = int(dim/2)
             #model = nn.Sequential(
@@ -1527,21 +1544,29 @@ def test(
             #                    nn.ReLU(), 
             #                    nn.Linear(100, dim), 
             #                    ).to(device)
-            #num_classes = 1
-            #model = smp.Unet("resnet18", classes=num_classes, activation="sigmoid")
-            #model.summary()
-            #inpt_channels = 1
-            #if inpt_channels != 3:
-            #    new_encoder = [nn.Conv2d(inpt_channels, 3, 1), model.encoder.conv1]
-            #    model.encoder.conv1 = nn.Sequential(*new_encoder)
-            #model = model.to(device)
+            num_classes = 1
+            model = smp.Unet("resnet18", classes=num_classes, activation="sigmoid")
+            inpt_channels = 1
+            if inpt_channels != 3:
+                new_encoder = [nn.Conv2d(inpt_channels, 3, 1), model.encoder.conv1]
+                model.encoder.conv1 = nn.Sequential(*new_encoder)
+            model = model.to(device)
             output = model(data)
 
             #output = output.view_as(target)
 
             #output, target = output.cpu(), target.cpu() # for loss_fn
-            loss = loss_fn(output, oh_converter(target) if oh_converter else target)
-            test_loss += loss.item()  # sum up batch loss
+            #loss = loss_fn(output, oh_converter(target if oh_converter else target)
+
+            #tp = torch.sum(output[target==1.] >= .5)
+            #tn = torch.sum(output[target==0.] < .5)
+            #fn = torch.sum(output[target==1.] < .5)
+            #fp = torch.sum(output[target==0.] >= .5)
+            #loss = 2 * tp / (2*fp + fn + fp)
+            loss = loss_fn(output, target)
+
+            test_loss += loss
+            #test_loss += loss.item()  # sum up batch loss
             # Segmentation 
             # TODO: Adapt for all use-cases (train, inference, encrypted, uncencrypted)
             if args.data_dir == "seg_data": 
