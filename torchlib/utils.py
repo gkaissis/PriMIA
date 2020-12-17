@@ -30,6 +30,11 @@ from .dataloader import (
     create_albu_transform,
     CombinedLoader,
 )
+import sys, os.path
+
+sys.path.insert(0, os.path.split(sys.path[0])[0])
+
+import revision_scripts.privacy_analysis as tf_privacy
 
 filterwarnings("ignore", message="invalid value encountered in double_scalars")
 
@@ -133,8 +138,11 @@ class Arguments:
         # self.save_model = config.getboolean("config", "save_model", fallback=False)
         self.optimizer = config.get("config", "optimizer")  # , fallback="SGD")
         self.differentially_private = config.getboolean(
-            "config", "differentially_private", fallback=False
+            "DP", "differentially_private", fallback=False
         )
+        self.noise_multiplier = config.getfloat("DP", "noise_multiplier", fallback=0.38)
+        self.max_grad_norm = config.getfloat("DP", "max_grad_norm", fallback=1.2)
+        self.target_delta = config.getfloat("DP", "target_delta", fallback=1e-5)
         self.DPSSE = config.getboolean("config", "dp_stats_exchange", fallback=False)
         self.dpsse_eps = config.getfloat("config", "dp_sse_epsilon", fallback=1.0)
         assert self.optimizer in ["SGD", "Adam"], "Unknown optimizer"
@@ -336,8 +344,7 @@ class MixUp(torch.nn.Module):
         self.λ = λ
 
     def forward(
-        self,
-        x: Tuple[Union[torch.tensor, Tuple[torch.tensor]], Tuple[torch.Tensor]],
+        self, x: Tuple[Union[torch.tensor, Tuple[torch.tensor]], Tuple[torch.Tensor]],
     ):
         assert len(x) == 2, "need data and target"
         x, y = x
@@ -441,6 +448,16 @@ class Cross_entropy_one_hot(torch.nn.Module):
         else:
             raise NotImplementedError("reduction method unknown")
         return loss
+
+
+def get_privacy_spent(
+    target_delta=None, steps=None, alphas=None, sample_rate=1, noise_multiplier=None
+):
+    rdp = (
+        torch.tensor(tf_privacy.compute_rdp(sample_rate, noise_multiplier, 1, alphas))
+        * steps
+    )
+    return tf_privacy.get_privacy_spent(alphas, rdp, target_delta)
 
 
 class To_one_hot(torch.nn.Module):
@@ -703,6 +720,7 @@ def setup_pysyft(args, hook, verbose=False):
                     batch_size=1,
                     shuffle=True,
                     num_workers=args.num_threads,
+                    drop_last=args.differentially_private,
                 )
                 mixup = MixUp(λ=args.mixup_lambda, p=args.mixup_prob)
                 last_set = None
@@ -736,12 +754,8 @@ def setup_pysyft(args, hook, verbose=False):
                 selected_data = selected_data.squeeze(1)
                 selected_targets = selected_targets.squeeze(1)
             del data, targets
-            selected_data.tag(
-                "#traindata",
-            )
-            selected_targets.tag(
-                "#traintargets",
-            )
+            selected_data.tag("#traindata",)
+            selected_targets.tag("#traintargets",)
             worker.load_data([selected_data, selected_targets])
     if crypto_provider is not None:
         grid = sy.PrivateGridNetwork(*(list(workers.values()) + [crypto_provider]))
@@ -754,14 +768,16 @@ def setup_pysyft(args, hook, verbose=False):
     for worker in data.keys():
         dist_dataset = [  # TODO: in the future transform here would be nice but currently raise errors
             sy.BaseDataset(
-                data[worker][0],
-                target[worker][0],
+                data[worker][0], target[worker][0],
             )  # transform=federated_tf
         ]
         fed_dataset = sy.FederatedDataset(dist_dataset)
         total_L += len(fed_dataset)
         tl = sy.FederatedDataLoader(
-            fed_dataset, batch_size=args.batch_size, shuffle=True
+            fed_dataset,
+            batch_size=args.batch_size,
+            shuffle=True,
+            drop_last=args.differentially_private,
         )
         train_loader[workers[worker]] = tl
     means = [m[0] for m in grid.search("#datamean").values()]
@@ -948,7 +964,7 @@ def train_federated(
     test_params=None,
     vis_params=None,
     verbose=True,
-    privacy_engines=None,
+    alphas=None,
 ):
 
     total_batches = 0
@@ -970,6 +986,7 @@ def train_federated(
         crypto_provider,
         test_params=test_params,
         weights=w_dict,
+        alphas=alphas,
     )
     if args.visdom:
         vis_params["vis"].line(
@@ -982,12 +999,7 @@ def train_federated(
         )
     else:
         if verbose:
-            print(
-                "Train Epoch: {} \tLoss: {:.6f}".format(
-                    epoch,
-                    avg_loss,
-                )
-            )
+            print("Train Epoch: {} \tLoss: {:.6f}".format(epoch, avg_loss,))
     return model
 
 
@@ -1121,7 +1133,11 @@ def secure_aggregation_epoch(
     test_params=None,
     verbose=True,
     privacy_engines=None,
+    alphas=None,
 ):
+    for w, m in models.items():
+        for param in m.parameters():
+            param.accumulated_grads = []
     for worker in train_loaders.keys():
         if models[worker.id].location is not None:
             continue  # model + loss already at a worker, 783/784 don't happen
@@ -1159,6 +1175,7 @@ def secure_aggregation_epoch(
             "out" if args.unencrypted_aggregation else ""
         ),
     )
+    total_optimisation_steps = {w: 0 for w in dataloaders.keys()}
     for batch_idx in pbar:
         for worker, dataloader in tqdm.tqdm(
             dataloaders.items(),
@@ -1169,11 +1186,46 @@ def secure_aggregation_epoch(
             if batch_idx >= num_batches[worker.id]:
                 continue
             optimizers[worker.id].zero_grad()
-            data, target = next(dataloader)
-            pred = models[worker.id](data)
-            loss = loss_fns[worker.id](pred, target)
-            loss.backward()
+            if args.differentially_private:
+                batch = next(dataloader)
+                for i in range(batch[0].shape[0]):
+                    # calculate potentially unbounded gradient of microbatch
+                    data, target = batch[0][i : i + 1], batch[1][i : i + 1]
+                    output = models[worker.id](data)
+                    loss = loss_fns[worker.id](output, target)
+                    loss.backward()
+
+                    with torch.no_grad():
+                        for param in models[worker.id].parameters():
+                            torch.nn.utils.clip_grad_norm_(
+                                param, max_norm=args.max_grad_norm
+                            )
+                            param.accumulated_grads.append(param.grad.clone())
+
+                with torch.no_grad():
+                    for param in models[worker.id].parameters():
+                        param.grad = torch.mean(  # pylint:disable=no-member
+                            torch.stack(  # pylint:disable=no-member
+                                param.accumulated_grads, dim=0
+                            )
+                        )
+                        noise = torch.normal(  # pylint:disable=no-member
+                            0.0,
+                            args.noise_multiplier * args.max_grad_norm,
+                            size=param.grad.shape,
+                        )
+                        noise /= (
+                            args.batch_size
+                        )  # this is important, otherwise the noise is overly aggressive
+                        noise = noise.send(worker.id)
+                        param.grad.add_(noise)
+            else:
+                data, target = next(dataloader)
+                pred = models[worker.id](data)
+                loss = loss_fns[worker.id](pred, target)
+                loss.backward()
             optimizers[worker.id].step()
+            total_optimisation_steps[worker] += 1
             avg_loss.append(loss.detach().cpu().get().item())
         if batch_idx > 0 and batch_idx % args.sync_every_n_batch == 0:
             pbar.set_description_str("Aggregating")
@@ -1232,6 +1284,27 @@ def secure_aggregation_epoch(
     )
     models = send_new_models(models["local_model"], models)
     avg_loss = np.mean(avg_loss)
+    if args.differentially_private:
+        for worker, opt_steps in total_optimisation_steps.items():
+            sample_size = len(dataloaders[worker].federated_dataset)
+            if args.batch_size / sample_size > 1.0:
+                raise ValueError(
+                    f"Batch size ({args.batch_size}) exceeds the dataset size ({sample_size}) on worker {worker.id}."
+                    "This breaks privacy accounting."
+                    "Please select a batch size that's at most equal to the dataset size on the worker."
+                )
+            epsilon, best_alpha = get_privacy_spent(
+                target_delta=args.target_delta,
+                steps=opt_steps,
+                alphas=alphas,
+                noise_multiplier=args.noise_multiplier,
+                sample_rate=args.batch_size / sample_size,
+            )
+
+            print(
+                f"[{worker.id}]\t"
+                f"(ε = {epsilon:.2f}, δ = {args.target_delta}) for α = {best_alpha}"
+            )
 
     return models, avg_loss
 
@@ -1286,12 +1359,7 @@ def train(  # never called on websockets
             else:
                 avg_loss.append(loss.item())
     if not args.visdom and verbose:
-        print(
-            "Train Epoch: {} \tLoss: {:.6f}".format(
-                epoch,
-                np.mean(avg_loss),
-            )
-        )
+        print("Train Epoch: {} \tLoss: {:.6f}".format(epoch, np.mean(avg_loss),))
     return model
 
 
@@ -1347,11 +1415,7 @@ def stats_table(
     headers.extend(
         [class_names[i] if class_names else i for i in range(conf_matrix.shape[0])]
     )
-    return tabulate(
-        rows,
-        headers=headers,
-        tablefmt="fancy_grid",
-    )
+    return tabulate(rows, headers=headers, tablefmt="fancy_grid",)
 
 
 def test(
@@ -1406,11 +1470,7 @@ def test(
         if verbose:
             print(
                 "Test set: Epoch: {:d} Average loss: {:.4f}, Recall: {}/{} ({:.0f}%)\n".format(
-                    epoch,
-                    test_loss,
-                    TP,
-                    L,
-                    objective,
+                    epoch, test_loss, TP, L, objective,
                 ),
                 # end="",
             )

@@ -16,7 +16,6 @@ import torch
 
 import torch.nn as nn
 import torch.optim as optim
-import torchdp as tdp
 import tqdm
 import visdom
 import albumentations as a
@@ -49,6 +48,7 @@ from torchlib.utils import (
     setup_pysyft,
     calc_class_weights,
 )
+from revision_scripts.module_modification import convert_batchnorm_modules
 
 
 def main(args, verbose=True, optuna_trial=None, cmd_args=None):
@@ -69,14 +69,7 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
 
     device = torch.device("cuda" if use_cuda else "cpu")  # pylint: disable=no-member
 
-    kwargs = (
-        {
-            "num_workers": args.num_threads,
-            "pin_memory": True,
-        }
-        if use_cuda
-        else {}
-    )
+    kwargs = {"num_workers": args.num_threads, "pin_memory": True,} if use_cuda else {}
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     exp_name = "{:s}_{:s}_{:s}".format(
@@ -101,11 +94,7 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             worker_names,
             crypto_provider,
             val_mean_std,
-        ) = setup_pysyft(
-            args,
-            hook,
-            verbose=verbose,
-        )
+        ) = setup_pysyft(args, hook, verbose=verbose,)
     else:
         if args.data_dir == "mnist":
             val_mean_std = torch.tensor(  # pylint:disable=not-callable
@@ -156,9 +145,7 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             if not args.pretrained:
                 loader.change_channels(1)
             dataset = datasets.ImageFolder(
-                args.data_dir,
-                transform=stats_tf,
-                loader=loader,
+                args.data_dir, transform=stats_tf, loader=loader,
             )
             assert (
                 len(dataset.classes) == 3
@@ -184,7 +171,11 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
         #     [int(ceil(total_L * (1.0 - fraction))), int(floor(total_L * fraction))],
         # )
         train_loader = torch.utils.data.DataLoader(
-            dataset, batch_size=args.batch_size, shuffle=True, **kwargs
+            dataset,
+            batch_size=args.batch_size,
+            shuffle=True,
+            drop_last=args.differentially_private,
+            **kwargs,
         )
 
         # val_tf = [
@@ -198,10 +189,7 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
         # valset.dataset.transform = AlbumentationsTorchTransform(a.Compose(val_tf))
 
         val_loader = torch.utils.data.DataLoader(
-            valset,
-            batch_size=args.test_batch_size,
-            shuffle=False,
-            **kwargs,
+            valset, batch_size=args.test_batch_size, shuffle=False, **kwargs,
         )
         # del total_L, fraction
 
@@ -317,37 +305,12 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
         if args.train_federated
         else opt(model.parameters(), **opt_kwargs)
     )
-    privacy_engines = None
+    ALPHAS = None
     if args.differentially_private:
-        if type(optimizer) == dict:
-            warn(
-                "Differential Privacy is currently only implemented for local training and models without BatchNorm."
-            )
-            exit()
-            privacy_engines = {
-                idt.id: tdp.PrivacyEngine(
-                    model[idt.id],
-                    args.batch_size,
-                    len(tl.federated_dataset),
-                    alphas=[1, 10, 100],
-                    noise_multiplier=1.3,
-                    max_grad_norm=1.0,
-                )
-                for idt, tl in train_loader.items()
-                if idt.id not in ["local_model", "crypto_provider"]
-            }
-            for w, pe in privacy_engines.items():
-                pe.attach(optimizer[w])
-        else:
-            privacy_engine = tdp.PrivacyEngine(
-                model,
-                args.batch_size,
-                len(train_loader.dataset),
-                alphas=[1, 10, 100],
-                noise_multiplier=1.3,
-                max_grad_norm=1.0,
-            )
-            privacy_engine.attach(optimizer)
+        ALPHAS = [1 + x / 10.0 for x in range(1, 100)] + list(range(12, 64))
+        for key, m in model.items():
+            model[key] = convert_batchnorm_modules(m)
+
     loss_args = {"weight": cw, "reduction": "mean"}
     if args.mixup or (args.weight_classes and args.train_federated):
         loss_fn = Cross_entropy_one_hot
@@ -481,7 +444,7 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
                 test_params=None,
                 vis_params=vis_params,
                 verbose=verbose,
-                privacy_engines=privacy_engines,
+                alphas=ALPHAS,
             )
 
         else:
@@ -554,15 +517,11 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
     model.load_state_dict(state["model_state_dict"])
 
     shutil.copyfile(
-        best_model_file,
-        "model_weights/final_{:s}.pt".format(exp_name),
+        best_model_file, "model_weights/final_{:s}.pt".format(exp_name),
     )
     if args.save_file:
         save_config_results(
-            args,
-            matthews_scores[best_score_idx],
-            timestamp,
-            args.save_file,
+            args, matthews_scores[best_score_idx], timestamp, args.save_file,
         )
 
     # delete old model weights

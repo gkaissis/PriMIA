@@ -36,12 +36,17 @@ symbolic_server_folders:
 
 minimal_server_folders: symbolic_server_folders
 	cd data/server_simulation && python delete_all_but_n.py 4 && python calc_class_distribution.py && cd ../..
+small_server_folders: symbolic_server_folders
+	cd data/server_simulation && python delete_all_but_n.py 10 && python calc_class_distribution.py && cd ../..
 
 # Training
 federated_secure:
 	@echo Training on VirtualWorkers with SecAgg
 	python train.py --config configs/torch/pneumonia-resnet-pretrained.ini --train_federated --data_dir data/server_simulation
 	@echo Finished Training on VirtualWorkers with SecAgg
+
+make federated_DP_secure:
+	python train.py --config configs/torch/pneumonia-resnet-pretrained-DP.ini --train_federated --data_dir data/server_simulation
 
 federated_insecure:
 	@echo Training on VirtualWorkers without SecAgg
