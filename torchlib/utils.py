@@ -1320,16 +1320,20 @@ def train(  # never called on websockets
     num_classes,
     vis_params=None,
     verbose=True,
+    alphas=None,
 ):
     model.train()
     if args.mixup:
         mixup = MixUp(λ=args.mixup_lambda, p=args.mixup_prob)
         oh_converter = To_one_hot(num_classes)
         oh_converter.to(device)
-
+    if args.differentially_private:
+        for param in model.parameters():
+            param.accumulated_grads = []
     L = len(train_loader)
     div = 1.0 / float(L)
     avg_loss = []
+    total_optimisation_steps = 0
     for batch_idx, (data, target) in tqdm.tqdm(
         enumerate(train_loader),
         leave=False,
@@ -1342,10 +1346,45 @@ def train(  # never called on websockets
                 target = oh_converter(target)
                 data, target = mixup((data, target))
         optimizer.zero_grad()
-        output = model(data)
-        loss = loss_fn(output, target)
-        loss.backward()
+        if args.differentially_private:
+            batch = (data, target)
+            for i in range(batch[0].shape[0]):
+                # calculate potentially unbounded gradient of microbatch
+                data, target = batch[0][i : i + 1], batch[1][i : i + 1]
+                output = model(data)
+                loss = loss_fn(output, target)
+                loss.backward()
+
+                with torch.no_grad():
+                    for param in model.parameters():
+                        torch.nn.utils.clip_grad_norm_(
+                            param, max_norm=args.max_grad_norm
+                        )
+                        param.accumulated_grads.append(param.grad.clone())
+
+            with torch.no_grad():
+                for param in model.parameters():
+                    param.grad = torch.mean(  # pylint:disable=no-member
+                        torch.stack(  # pylint:disable=no-member
+                            param.accumulated_grads, dim=0
+                        ),
+                        dim=0,
+                    )
+                    noise = torch.normal(  # pylint:disable=no-member
+                        0.0,
+                        args.noise_multiplier * args.max_grad_norm,
+                        size=param.grad.shape,
+                    )
+                    noise /= (
+                        args.batch_size
+                    )  # this is important, otherwise the noise is overly aggressive
+                    param.grad.add_(noise)
+        else:
+            output = model(data)
+            loss = loss_fn(output, target)
+            loss.backward()
         optimizer.step()
+        total_optimisation_steps += 1
         if batch_idx % args.log_interval == 0:
             if args.visdom:
                 vis_params["vis"].line(
@@ -1358,6 +1397,22 @@ def train(  # never called on websockets
                 )
             else:
                 avg_loss.append(loss.item())
+    if args.differentially_private:
+        sample_size = len(train_loader.dataset)
+        if args.batch_size / sample_size > 1.0:
+            raise ValueError(
+                f"Batch size ({args.batch_size}) exceeds the dataset size ({sample_size})"
+                "This breaks privacy accounting."
+                "Please select a batch size that's at most equal to the dataset size on the worker."
+            )
+        epsilon, best_alpha = get_privacy_spent(
+            target_delta=args.target_delta,
+            steps=total_optimisation_steps,
+            alphas=alphas,
+            noise_multiplier=args.noise_multiplier,
+            sample_rate=args.batch_size / sample_size,
+        )
+        print(f"(ε = {epsilon:.2f}, δ = {args.target_delta}) for α = {best_alpha}")
     if not args.visdom and verbose:
         print("Train Epoch: {} \tLoss: {:.6f}".format(epoch, np.mean(avg_loss),))
     return model

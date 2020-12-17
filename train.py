@@ -159,7 +159,7 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             stats_tf.transform.transforms.transforms.append(
                 a.Normalize(mean, std, max_pixel_value=1.0)
             )
-            valset = datasets.ImageFolder(
+            valset = datasets.ImageFolder(  # TODO hardcoded path
                 "data/test", transform=stats_tf, loader=loader
             )
             # occurances = dataset.get_class_occurances()
@@ -308,8 +308,11 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
     ALPHAS = None
     if args.differentially_private:
         ALPHAS = [1 + x / 10.0 for x in range(1, 100)] + list(range(12, 64))
-        for key, m in model.items():
-            model[key] = convert_batchnorm_modules(m)
+        if args.train_federated:
+            for key, m in model.items():
+                model[key] = convert_batchnorm_modules(m)
+        else:
+            model = convert_batchnorm_modules(model)
 
     loss_args = {"weight": cw, "reduction": "mean"}
     if args.mixup or (args.weight_classes and args.train_federated):
@@ -459,6 +462,7 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
                 num_classes,
                 vis_params=vis_params,
                 verbose=verbose,
+                alphas=ALPHAS,
             )
         # except Exception as e:
 
