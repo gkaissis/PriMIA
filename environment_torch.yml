@@ -77,7 +77,7 @@ dependencies:
   - numpy=1.18.5=py37h8960a57_0
   - olefile=0.46=py37_0
   - openssl=1.1.1g=h516909a_0
-  - optuna=2.0.0
+  - optuna
   - pandas=1.0.3=py37h0da4684_1
   - pathspec=0.7.0=py_0
   - pbr=5.4.5=pyh9f0ad1d_0
@@ -133,8 +133,9 @@ dependencies:
   - zlib=1.2.11=h7b6447c_3
   - zstd=1.4.4=h0b5b093_3
   - albumentations=0.4.6
-  - pytorch-dp=0.1b1
   - plotly=4.9.0
+  - nibabel=3.2.1
+  - nilearn=0.7.0
   - pip:
     - absl-py==0.9.0
     - aioice==0.6.18
@@ -199,5 +200,6 @@ dependencies:
     - zope-event==4.4
     - zope-interface==5.1.0
     - tensorflow-io==0.15.0
+    - segmentation-models-pytorch==0.1.3
     - git+https://github.com/facebookresearch/CrypTen.git@cdecc8de1514d7f36a5268a50c714caba5e57318#egg=crypten
     - git+https://github.com/OpenMined/PySyft.git@9dc09f3d3c2d78390adffe847d0b44a8afbc5f90#egg=syft
