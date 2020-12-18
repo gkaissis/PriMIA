@@ -1327,9 +1327,6 @@ def train(  # never called on websockets
         mixup = MixUp(λ=args.mixup_lambda, p=args.mixup_prob)
         oh_converter = To_one_hot(num_classes)
         oh_converter.to(device)
-    if args.differentially_private:
-        for param in model.parameters():
-            param.accumulated_grads = []
     L = len(train_loader)
     div = 1.0 / float(L)
     avg_loss = []
@@ -1340,6 +1337,9 @@ def train(  # never called on websockets
         desc="training epoch {:d}".format(epoch),
         total=L + 1,
     ):
+        if args.differentially_private:
+            for param in model.parameters():
+                param.accumulated_grads = []
         data, target = data.to(device), target.to(device)
         if args.mixup:
             with torch.no_grad():
@@ -1378,7 +1378,7 @@ def train(  # never called on websockets
                     noise /= (
                         args.batch_size
                     )  # this is important, otherwise the noise is overly aggressive
-                    param.grad.add_(noise)
+                    param.grad.add_(noise.to(device))
         else:
             output = model(data)
             loss = loss_fn(output, target)
