@@ -23,9 +23,10 @@ def objective(trial: opt.trial):
     if cmdln_args.federated:
         epochs = int(epochs // repetitions_dataset)
     args = Namespace(
-        config="optuna",
+        config=f"optuna{cmdln_args.trial_name}",
+        resume_checkpoint=None,
         train_federated=cmdln_args.federated,
-        data_dir="data/server_simulation" if cmdln_args.federated else "data/train",
+        data_dir=cmdln_args.data_dir,
         visdom=False,
         encrypted_inference=False,
         cuda=not cmdln_args.federated,
@@ -62,8 +63,8 @@ def objective(trial: opt.trial):
         mixup=trial.suggest_categorical("mixup", [True, False]),
         repetitions_dataset=repetitions_dataset,
         num_threads=0,  ## somehow necessary for optuna
-        save_file="model_weights/completed_trainings.csv",
-        name="optuna",
+        save_file=f"model_weights/completed_trainings{cmdln_args.trial_name}.csv",
+        name=f"optuna{cmdln_args.trial_name}",
     )
     apply_albu = trial.suggest_categorical("apply albu transforms", [True, False])
     args.albu_prob = trial.suggest_float("albu_prob", 0.0, 1.0) if apply_albu else 0.0
@@ -161,6 +162,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--federated", action="store_true", help="Search on federated setting"
     )
+    parser.add_argument("--data_dir", type=str, help="Path to data")
+    parser.add_argument("--trial_name", type=str, default="", help="Assign identifier")
     parser.add_argument("--websockets", action="store_true", help="Use websockets")
     parser.add_argument(
         "--num_trials", default=30, type=int, help="how many trials to perform"

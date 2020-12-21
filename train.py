@@ -324,7 +324,7 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
         loss_fn = {w: loss_fn.copy() for w in [*workers, "local_model"]}
 
     start_at_epoch = 1
-    if cmd_args.resume_checkpoint:
+    if cmd_args and cmd_args.resume_checkpoint:
         print("Resume training from a given checkpoint.")
         state = torch.load(cmd_args.resume_checkpoint, map_location=device)
         start_at_epoch = state["epoch"]
