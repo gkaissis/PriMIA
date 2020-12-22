@@ -49,6 +49,7 @@ from torchlib.utils import (
     calc_class_weights,
 )
 from revision_scripts.module_modification import convert_batchnorm_modules
+from opacus import PrivacyEngine
 
 
 def main(args, verbose=True, optuna_trial=None, cmd_args=None):
@@ -307,12 +308,46 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
     )
     ALPHAS = None
     if args.differentially_private:
+        if args.mixup:
+            warn("Mixup and DP do not like each other.")
+            exit()
+        if args.weight_decay > 0:
+            warn("We would recommend setting weight decay to 0 when using DP")
+        if (
+            args.clahe
+            or args.randomgamma
+            or args.randombrightness
+            or args.blur
+            or args.elastic
+            or args.optical_distortion
+            or args.grid_distortion
+            or args.grid_shuffle
+            or args.grid_shuffle
+            or args.hsv
+            or args.invert
+            or args.cutout
+            or args.shadow
+            or args.sun_flare
+            or args.fog
+            or args.solarize
+            or args.equalize
+        ):
+            warn("We would recommend not using augmentations with DP")
         ALPHAS = [1 + x / 10.0 for x in range(1, 100)] + list(range(12, 64))
         if args.train_federated:
             for key, m in model.items():
                 model[key] = convert_batchnorm_modules(m)
         else:
             model = convert_batchnorm_modules(model)
+            privacy_engine = PrivacyEngine(
+                model,
+                batch_size=args.batch_size,  # recommended in opacus tutorial
+                sample_size=len(train_loader.dataset),
+                alphas=ALPHAS,
+                noise_multiplier=args.noise_multiplier,
+                max_grad_norm=args.max_grad_norm,
+            )
+            privacy_engine.attach(optimizer)
 
     loss_args = {"weight": cw, "reduction": "mean"}
     if args.mixup or (args.weight_classes and args.train_federated):
@@ -462,7 +497,6 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
                 num_classes,
                 vis_params=vis_params,
                 verbose=verbose,
-                alphas=ALPHAS,
             )
         # except Exception as e:
 
