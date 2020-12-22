@@ -1171,7 +1171,6 @@ def secure_aggregation_epoch(
             "out" if args.unencrypted_aggregation else ""
         ),
     )
-    total_optimisation_steps = {w: 0 for w in dataloaders.keys()}
     for batch_idx in pbar:
         for worker, dataloader in tqdm.tqdm(
             dataloaders.items(),
@@ -1221,7 +1220,8 @@ def secure_aggregation_epoch(
                 loss = loss_fns[worker.id](pred, target)
                 loss.backward()
             optimizers[worker.id].step()
-            total_optimisation_steps[worker] += 1
+            if args.differentially_private:
+                worker.total_dp_steps += 1
             avg_loss.append(loss.detach().cpu().get().item())
         if batch_idx > 0 and batch_idx % args.sync_every_n_batch == 0:
             pbar.set_description_str("Aggregating")
@@ -1281,7 +1281,7 @@ def secure_aggregation_epoch(
     models = send_new_models(models["local_model"], models)
     avg_loss = np.mean(avg_loss)
     if args.differentially_private:
-        for worker, opt_steps in total_optimisation_steps.items():
+        for worker in dataloaders.keys():
             sample_size = len(dataloaders[worker].federated_dataset)
             if args.batch_size / sample_size > 1.0:
                 raise ValueError(
@@ -1291,7 +1291,7 @@ def secure_aggregation_epoch(
                 )
             epsilon, best_alpha = get_privacy_spent(
                 target_delta=args.target_delta,
-                steps=opt_steps,
+                steps=worker.total_dp_steps,
                 alphas=alphas,
                 noise_multiplier=args.noise_multiplier,
                 sample_rate=args.batch_size / sample_size,

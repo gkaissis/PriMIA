@@ -337,6 +337,9 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
         if args.train_federated:
             for key, m in model.items():
                 model[key] = convert_batchnorm_modules(m)
+            for w in train_loader.keys():
+                if not hasattr(w, "total_dp_steps"):
+                    setattr(w, "total_dp_steps", 0)
         else:
             model = convert_batchnorm_modules(model)
             privacy_engine = PrivacyEngine(
