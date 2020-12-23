@@ -23,7 +23,7 @@ def objective(trial: opt.trial):
     if cmdln_args.federated:
         epochs = int(epochs // repetitions_dataset)
     args = Namespace(
-        config=f"optuna{cmdln_args.trial_name}",
+        config=f"optuna_DP{cmdln_args.trial_name}",
         resume_checkpoint=None,
         train_federated=cmdln_args.federated,
         data_dir=cmdln_args.data_dir,
@@ -31,7 +31,7 @@ def objective(trial: opt.trial):
         encrypted_inference=False,
         cuda=not cmdln_args.federated,
         websockets=cmdln_args.websockets,
-        batch_size=200,
+        batch_size=10,
         train_resolution=224,
         inference_resolution=224,
         test_batch_size=10,
@@ -44,96 +44,52 @@ def objective(trial: opt.trial):
         beta1=trial.suggest_float("beta1", 0.25, 0.95),
         beta2=trial.suggest_float("beta2", 0.9, 1.0),
         ## zero not possible but loguniform makes most sense
-        weight_decay=trial.suggest_loguniform("weight_decay", 1e-12, 1e-3),
+        weight_decay=0,
         seed=1,
         log_interval=10,
         deterministic=False,
-        differentially_private=False,
         optimizer="Adam",
         model="resnet-18",
         pretrained=True,
         weight_classes=trial.suggest_categorical("weight_classes", [True, False]),
         pooling_type="max",
-        rotation=trial.suggest_int("rotation", 0, 90),
+        rotation=0,
         translate=0.0,  # trial.suggest_float("translate", 0, 0.2),
-        scale=trial.suggest_float("scale", 0.0, 0.5),
-        shear=trial.suggest_int("shear", 0, 10),
-        noise_std=trial.suggest_float("noise_std", 0.0, 0.1),
-        noise_prob=trial.suggest_float("noise_prob", 0.0, 1.0),
-        mixup=trial.suggest_categorical("mixup", [True, False]),
+        scale=0,
+        shear=0,
+        noise_std=0,
+        noise_prob=0,
+        mixup=False,
         repetitions_dataset=repetitions_dataset,
         num_threads=0,  ## somehow necessary for optuna
         save_file=f"model_weights/completed_trainings{cmdln_args.trial_name}.csv",
         name=f"optuna{cmdln_args.trial_name}",
     )
-    apply_albu = trial.suggest_categorical("apply albu transforms", [True, False])
-    args.albu_prob = trial.suggest_float("albu_prob", 0.0, 1.0) if apply_albu else 0.0
-    args.individual_albu_probs = (
-        trial.suggest_float("individual_albu_probs", 0.0, 1.0) if apply_albu else 0.0
-    )
-    args.clahe = (
-        trial.suggest_categorical("clahe", [True, False]) if apply_albu else False
-    )
-    args.randomgamma = (
-        trial.suggest_categorical("randomgamma", [True, False]) if apply_albu else False
-    )
-    args.randombrightness = (
-        trial.suggest_categorical("randombrightness", [True, False])
-        if apply_albu
-        else False
-    )
-    args.blur = (
-        trial.suggest_categorical("blur", [True, False]) if apply_albu else False
-    )
-    args.elastic = (
-        trial.suggest_categorical("elastic", [True, False]) if apply_albu else False
-    )
-    args.optical_distortion = (
-        trial.suggest_categorical("optical_distortion", [True, False])
-        if apply_albu
-        else False
-    )
-    args.grid_distortion = (
-        trial.suggest_categorical("grid_distortion", [True, False])
-        if apply_albu
-        else False
-    )
-    args.grid_shuffle = (
-        trial.suggest_categorical("grid_shuffle", [True, False])
-        if apply_albu
-        else False
-    )
-    args.hsv = trial.suggest_categorical("hsv", [True, False]) if apply_albu else False
-    args.invert = (
-        trial.suggest_categorical("invert", [True, False]) if apply_albu else False
-    )
-    args.cutout = (
-        trial.suggest_categorical("cutout", [True, False]) if apply_albu else False
-    )
-    args.shadow = (
-        trial.suggest_categorical("shadow", [True, False]) if apply_albu else False
-    )
-    args.fog = trial.suggest_categorical("fog", [True, False]) if apply_albu else False
-    args.sun_flare = (
-        trial.suggest_categorical("sun_flare", [True, False]) if apply_albu else False
-    )
-    args.solarize = (
-        trial.suggest_categorical("solarize", [True, False]) if apply_albu else False
-    )
-    args.equalize = (
-        trial.suggest_categorical("equalize", [True, False]) if apply_albu else False
-    )
-    args.grid_dropout = (
-        trial.suggest_categorical("grid_dropout", [True, False])
-        if apply_albu
-        else False
-    )
-    if args.mixup:  # pylint:disable=no-member
-        args.mixup_lambda = trial.suggest_categorical(
-            "mixup_lambda",
-            (0.1, 0.25, 0.49999, None),  # 0.5 breaks federated weight calculation
-        )
-        args.mixup_prob = trial.suggest_float("mixup_prob", 0.0, 1.0)
+    args.albu_prob = 0.0
+    args.individual_albu_probs = 0.0
+    args.clahe = False
+    args.randomgamma = False
+    args.randombrightness = False
+    args.blur = False
+    args.elastic = False
+    args.optical_distortion = False
+    args.grid_distortion = False
+    args.grid_shuffle = False
+    args.hsv = False
+    args.invert = False
+    args.cutout = False
+    args.shadow = False
+    args.fog = False
+    args.sun_flare = False
+    args.solarize = False
+    args.equalize = False
+    args.grid_dropout = False
+
+    args.differentially_private = True
+    args.target_delta = 1e-5
+    args.noise_multiplier = trial.suggest_float("DP_noise", 0.1, 0.6)
+    args.max_grad_norm = trial.suggest_float("max_grad_norm", 0.1, 1)
+
     if cmdln_args.federated:
         args.unencrypted_aggregation = cmdln_args.unencrypted_aggregation
         args.sync_every_n_batch = trial.suggest_int("sigma", 1, 5)
@@ -147,13 +103,15 @@ def objective(trial: opt.trial):
         args.weighted_averaging = trial.suggest_categorical(
             "weighted_averaging", [True, False]
         )
-        args.DPSSE = False
+        args.DPSSE = True
     try:
         best_val_acc, epsilon = main(args, verbose=False, optuna_trial=trial)
     except Exception as e:
         print(f"Trial failed with exception {e} and arguments {str(args)}.")
         return 0
-    return best_val_acc
+    if epsilon < 1:
+        warn(f"Epsilon is only {epsilon:.2f}. Seems very low.")
+    return best_val_acc / max(epsilon, 1)
 
 
 if __name__ == "__main__":
@@ -175,7 +133,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--db_file",
         type=str,
-        default="sqlite:///model_weights/pneumonia_search.db",
+        default="sqlite:///model_weights/pneumonia_search_DP.db",
         help="Database file to store results.",
     )
     parser.add_argument(

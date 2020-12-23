@@ -471,7 +471,7 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             )
 
         if args.train_federated:
-            model = train_federated(
+            model, epsilon = train_federated(
                 args,
                 model,
                 device,
@@ -489,7 +489,7 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             )
 
         else:
-            model = train(
+            model, epsilon = train(
                 args,
                 model,
                 device,
@@ -569,7 +569,7 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
     for model_file in model_paths:
         remove(model_file)
 
-    return matthews_scores[best_score_idx]
+    return matthews_scores[best_score_idx], epsilon
 
 
 if __name__ == "__main__":

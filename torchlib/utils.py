@@ -947,6 +947,54 @@ def dict_to_mng_dict(dictionary: dict, mng: mp.Manager):
     return return_dict
 
 
+"""
+clip_per_sample_grad_norm_, get_per_sample_norm and get_total_per_sample_grad_norm
+are all taken from here:
+https://github.com/pytorch/opacus/blob/588ddf961f13981a50f8b782a11283a20d6ebc74/torchdp/per_sample_gradient_clip.py
+"""
+
+
+def clip_per_sample_grad_norm_(model, max_norm):
+    r"""Clips the grad_sample stored in .grad_sample by computing a per-sample
+    norm clip factor, using it to rescale each sample's gradient in
+    .grad_sample to norm clip, then averaging them back into .grad.
+    The gradients of the model's parameters are modified in-place.
+    We assume the batch size is the first dimension.
+    Arguments:
+        tensor (Tensor): a single Tensor whose norm will be normalized
+        max_norm (float or int): max norm of the gradients
+    Returns:
+        New total norm of the tensor.
+    """
+    max_norm = float(max_norm)
+    per_sample_norm = get_total_per_sample_grad_norm(model)
+
+    # Each sample gets clipped independently. This is a tensor of size B
+    per_sample_clip_factor = max_norm / (per_sample_norm + 1e-6)
+
+    # We are *clipping* the gradient, so if the factor is ever >1 we set it to 1
+    per_sample_clip_factor = per_sample_clip_factor.clamp(max=1.0)
+
+    # We recompute .grad from .grad_sample by simply averaging it over the B dim
+    for p in model.parameters():
+        g = p.grad.copy()
+        p.grad.zero_()
+        p.grad.add_(per_sample_clip_factor * g)
+
+
+def get_per_sample_norm(t):
+    aggregation_dims = [i for i in range(1, len(t.shape))]  # All dims except the first
+    t_squared = t * t  # elementwise
+    return torch.sqrt(t_squared.sum(dim=aggregation_dims))
+
+
+def get_total_per_sample_grad_norm(model):
+    all_layers_norms = torch.cat(
+        [get_per_sample_norm(p.grad.copy()).flatten() for p in model.parameters()]
+    )
+    return all_layers_norms.norm(2)
+
+
 ## Assuming train loaders is dictionary with {worker : train_loader}
 def train_federated(
     args,
@@ -971,7 +1019,7 @@ def train_federated(
             worker.id: len(tl) / total_batches for worker, tl in train_loaders.items()
         }
 
-    model, avg_loss = secure_aggregation_epoch(
+    model, avg_loss, epsilon = secure_aggregation_epoch(
         args,
         model,
         device,
@@ -996,7 +1044,7 @@ def train_federated(
     else:
         if verbose:
             print("Train Epoch: {} \tLoss: {:.6f}".format(epoch, avg_loss,))
-    return model
+    return model, epsilon
 
 
 def tensor_iterator(model: "torch.Model") -> "Sequence[Iterator]":
@@ -1189,31 +1237,34 @@ def secure_aggregation_epoch(
                     output = models[worker.id](data)
                     loss = loss_fns[worker.id](output, target)
                     loss.backward()
-
                     with torch.no_grad():
+                        # grad_norm = get_total_per_sample_grad_norm(models[worker.id])
+                        clip_per_sample_grad_norm_(
+                            models[worker.id], args.max_grad_norm
+                        )
                         for param in models[worker.id].parameters():
-                            torch.nn.utils.clip_grad_norm_(
-                                param, max_norm=args.max_grad_norm
-                            )
                             param.accumulated_grads.append(param.grad.clone())
-
+                for param in models[worker.id].parameters():
+                    if param.grad is not None:
+                        param.grad.zero_()
                 with torch.no_grad():
                     for param in models[worker.id].parameters():
-                        param.grad = torch.mean(  # pylint:disable=no-member
-                            torch.stack(  # pylint:disable=no-member
-                                param.accumulated_grads, dim=0
+                        param.grad.add_(
+                            torch.mean(  # pylint:disable=no-member
+                                torch.stack(  # pylint:disable=no-member
+                                    param.accumulated_grads, dim=0
+                                )
                             )
                         )
-                        noise = torch.normal(  # pylint:disable=no-member
-                            0.0,
-                            args.noise_multiplier * args.max_grad_norm,
-                            size=param.grad.shape,
+                for p in models[worker.id].parameters():
+                    noise = (
+                        torch.normal(
+                            0, args.noise_multiplier * args.max_grad_norm, p.grad.shape,
                         )
-                        noise /= (
-                            args.batch_size
-                        )  # this is important, otherwise the noise is overly aggressive
-                        noise = noise.send(worker.id)
-                        param.grad.add_(noise)
+                        / args.batch_size
+                    )
+                    noise = noise.send(worker.id)
+                    p.grad.add_(noise)
             else:
                 data, target = next(dataloader)
                 pred = models[worker.id](data)
@@ -1281,6 +1332,7 @@ def secure_aggregation_epoch(
     models = send_new_models(models["local_model"], models)
     avg_loss = np.mean(avg_loss)
     if args.differentially_private:
+        epsila = []
         for worker in dataloaders.keys():
             sample_size = len(dataloaders[worker].federated_dataset)
             if args.batch_size / sample_size > 1.0:
@@ -1296,13 +1348,16 @@ def secure_aggregation_epoch(
                 noise_multiplier=args.noise_multiplier,
                 sample_rate=args.batch_size / sample_size,
             )
-
+            epsila.append(epsilon)
             print(
                 f"[{worker.id}]\t"
                 f"(ε = {epsilon:.2f}, δ = {args.target_delta}) for α = {best_alpha}"
             )
+        epsilon = max(epsila)
+    else:
+        epsilon = 0
 
-    return models, avg_loss
+    return models, avg_loss, epsilon
 
 
 def train(  # never called on websockets
@@ -1359,9 +1414,11 @@ def train(  # never called on websockets
             args.target_delta
         )
         print(f"(ε = {epsilon:.2f}, δ = {args.target_delta}) for α = {best_alpha}")
+    else:
+        epsilon = 0
     if not args.visdom and verbose:
         print("Train Epoch: {} \tLoss: {:.6f}".format(epoch, np.mean(avg_loss),))
-    return model
+    return model, epsilon
 
 
 def stats_table(
