@@ -344,7 +344,8 @@ class MixUp(torch.nn.Module):
         self.λ = λ
 
     def forward(
-        self, x: Tuple[Union[torch.tensor, Tuple[torch.tensor]], Tuple[torch.Tensor]],
+        self,
+        x: Tuple[Union[torch.tensor, Tuple[torch.tensor]], Tuple[torch.Tensor]],
     ):
         assert len(x) == 2, "need data and target"
         x, y = x
@@ -716,7 +717,10 @@ def setup_pysyft(args, hook, verbose=False):
             # repetitions = 1 if worker.id == "validation" else args.repetitions_dataset
             if args.mixup:
                 dataset = torch.utils.data.DataLoader(
-                    dataset, batch_size=1, shuffle=True, num_workers=args.num_threads,
+                    dataset,
+                    batch_size=1,
+                    shuffle=True,
+                    num_workers=args.num_threads,
                 )
                 mixup = MixUp(λ=args.mixup_lambda, p=args.mixup_prob)
                 last_set = None
@@ -750,8 +754,12 @@ def setup_pysyft(args, hook, verbose=False):
                 selected_data = selected_data.squeeze(1)
                 selected_targets = selected_targets.squeeze(1)
             del data, targets
-            selected_data.tag("#traindata",)
-            selected_targets.tag("#traintargets",)
+            selected_data.tag(
+                "#traindata",
+            )
+            selected_targets.tag(
+                "#traintargets",
+            )
             worker.load_data([selected_data, selected_targets])
     if crypto_provider is not None:
         grid = sy.PrivateGridNetwork(*(list(workers.values()) + [crypto_provider]))
@@ -764,7 +772,8 @@ def setup_pysyft(args, hook, verbose=False):
     for worker in data.keys():
         dist_dataset = [  # TODO: in the future transform here would be nice but currently raise errors
             sy.BaseDataset(
-                data[worker][0], target[worker][0],
+                data[worker][0],
+                target[worker][0],
             )  # transform=federated_tf
         ]
         fed_dataset = sy.FederatedDataset(dist_dataset)
@@ -948,51 +957,31 @@ def dict_to_mng_dict(dictionary: dict, mng: mp.Manager):
 
 
 """
-clip_per_sample_grad_norm_, get_per_sample_norm and get_total_per_sample_grad_norm
-are all taken from here:
+clip_per_sample_grad_norm_, get_total_per_sample_grad_norm
+adapted from: 
 https://github.com/pytorch/opacus/blob/588ddf961f13981a50f8b782a11283a20d6ebc74/torchdp/per_sample_gradient_clip.py
 """
 
 
 def clip_per_sample_grad_norm_(model, max_norm):
-    r"""Clips the grad_sample stored in .grad_sample by computing a per-sample
-    norm clip factor, using it to rescale each sample's gradient in
-    .grad_sample to norm clip, then averaging them back into .grad.
-    The gradients of the model's parameters are modified in-place.
-    We assume the batch size is the first dimension.
-    Arguments:
-        tensor (Tensor): a single Tensor whose norm will be normalized
-        max_norm (float or int): max norm of the gradients
-    Returns:
-        New total norm of the tensor.
+    r"""Clip the total L2 norm of the model's gradients to max_norm.
+    Assumes a microbatch as input.
     """
     max_norm = float(max_norm)
-    per_sample_norm = get_total_per_sample_grad_norm(model)
-
-    # Each sample gets clipped independently. This is a tensor of size B
-    per_sample_clip_factor = max_norm / (per_sample_norm + 1e-6)
-
-    # We are *clipping* the gradient, so if the factor is ever >1 we set it to 1
-    per_sample_clip_factor = per_sample_clip_factor.clamp(max=1.0)
-
-    # We recompute .grad from .grad_sample by simply averaging it over the B dim
+    per_sample_norm = get_total_per_sample_grad_norm(model).send(model.location)
+    per_sample_clip_factor = torch.clamp((max_norm / (per_sample_norm + 1e-6)), max=1.0)
     for p in model.parameters():
         g = p.grad.copy()
         p.grad.zero_()
         p.grad.add_(per_sample_clip_factor * g)
 
 
-def get_per_sample_norm(t):
-    aggregation_dims = [i for i in range(1, len(t.shape))]  # All dims except the first
-    t_squared = t * t  # elementwise
-    return torch.sqrt(t_squared.sum(dim=aggregation_dims))
-
-
 def get_total_per_sample_grad_norm(model):
-    all_layers_norms = torch.cat(
-        [get_per_sample_norm(p.grad.copy()).flatten() for p in model.parameters()]
+    """Get the total L2 norm of a microbatch over the entire model's gradients."""
+    return torch.norm(
+        torch.stack([torch.norm(p.grad.copy(), 2) for p in model.parameters()], dim=-1),
+        2,
     )
-    return all_layers_norms.norm(2)
 
 
 ## Assuming train loaders is dictionary with {worker : train_loader}
@@ -1043,7 +1032,12 @@ def train_federated(
         )
     else:
         if verbose:
-            print("Train Epoch: {} \tLoss: {:.6f}".format(epoch, avg_loss,))
+            print(
+                "Train Epoch: {} \tLoss: {:.6f}".format(
+                    epoch,
+                    avg_loss,
+                )
+            )
     return model, epsilon
 
 
@@ -1066,7 +1060,8 @@ def aggregation(
     weights=None,
     secure=True,
 ):
-    """(Very) defensive version of the original secure aggregation relying on actually checking the parameter names and shapes before trying to load them into the model."""
+    """(Very) defensive version of the original secure aggregation relying on actually checking
+    the parameter names and shapes before trying to load them into the model."""
 
     local_keys = local_model.state_dict().keys()
 
@@ -1259,7 +1254,9 @@ def secure_aggregation_epoch(
                 for p in models[worker.id].parameters():
                     noise = (
                         torch.normal(
-                            0, args.noise_multiplier * args.max_grad_norm, p.grad.shape,
+                            0,
+                            args.noise_multiplier * args.max_grad_norm,
+                            p.grad.shape,
                         )
                         / args.batch_size
                     )
@@ -1417,7 +1414,12 @@ def train(  # never called on websockets
     else:
         epsilon = 0
     if not args.visdom and verbose:
-        print("Train Epoch: {} \tLoss: {:.6f}".format(epoch, np.mean(avg_loss),))
+        print(
+            "Train Epoch: {} \tLoss: {:.6f}".format(
+                epoch,
+                np.mean(avg_loss),
+            )
+        )
     return model, epsilon
 
 
@@ -1473,7 +1475,11 @@ def stats_table(
     headers.extend(
         [class_names[i] if class_names else i for i in range(conf_matrix.shape[0])]
     )
-    return tabulate(rows, headers=headers, tablefmt="fancy_grid",)
+    return tabulate(
+        rows,
+        headers=headers,
+        tablefmt="fancy_grid",
+    )
 
 
 def test(
@@ -1528,7 +1534,11 @@ def test(
         if verbose:
             print(
                 "Test set: Epoch: {:d} Average loss: {:.4f}, Recall: {}/{} ({:.0f}%)\n".format(
-                    epoch, test_loss, TP, L, objective,
+                    epoch,
+                    test_loss,
+                    TP,
+                    L,
+                    objective,
                 ),
                 # end="",
             )
