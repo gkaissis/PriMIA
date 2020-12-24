@@ -957,19 +957,17 @@ def dict_to_mng_dict(dictionary: dict, mng: mp.Manager):
 
 
 """
-clip_per_sample_grad_norm_, get_total_per_sample_grad_norm
-adapted from: 
+clip_per_sample_grad_norm_ and get_total_per_sample_grad_norm
+adapted from:
 https://github.com/pytorch/opacus/blob/588ddf961f13981a50f8b782a11283a20d6ebc74/torchdp/per_sample_gradient_clip.py
 """
 
 
 def clip_per_sample_grad_norm_(model, max_norm):
-    r"""Clip the total L2 norm of the model's gradients to max_norm.
-    Assumes a microbatch as input.
-    """
+    """Clips the gradient vector of the microbatch."""
     max_norm = float(max_norm)
-    per_sample_norm = get_total_per_sample_grad_norm(model).send(model.location)
-    per_sample_clip_factor = torch.clamp((max_norm / (per_sample_norm + 1e-6)), max=1.0)
+    per_sample_norm = get_total_per_sample_grad_norm(model)
+    per_sample_clip_factor = (max_norm / (per_sample_norm + 1e-6)).clamp(max=1.0)
     for p in model.parameters():
         g = p.grad.copy()
         p.grad.zero_()
@@ -977,11 +975,11 @@ def clip_per_sample_grad_norm_(model, max_norm):
 
 
 def get_total_per_sample_grad_norm(model):
-    """Get the total L2 norm of a microbatch over the entire model's gradients."""
-    return torch.norm(
-        torch.stack([torch.norm(p.grad.copy(), 2) for p in model.parameters()], dim=-1),
-        2,
-    )
+    """Gets the total L2 norm of the model's flattened
+    parameter vector over the microbatch.
+    """
+    all_layers_norms = torch.cat([p.grad.copy().flatten() for p in model.parameters()])
+    return all_layers_norms.norm(2)
 
 
 ## Assuming train loaders is dictionary with {worker : train_loader}
@@ -1233,35 +1231,31 @@ def secure_aggregation_epoch(
                     loss = loss_fns[worker.id](output, target)
                     loss.backward()
                     with torch.no_grad():
-                        # grad_norm = get_total_per_sample_grad_norm(models[worker.id])
                         clip_per_sample_grad_norm_(
                             models[worker.id], args.max_grad_norm
                         )
                         for param in models[worker.id].parameters():
                             param.accumulated_grads.append(param.grad.clone())
-                for param in models[worker.id].parameters():
-                    if param.grad is not None:
-                        param.grad.zero_()
+                            param.grad.zero_()
                 with torch.no_grad():
                     for param in models[worker.id].parameters():
+                        noise = (
+                            torch.normal(
+                                0,
+                                args.noise_multiplier * args.max_grad_norm,
+                                size=param.grad.shape,
+                            )
+                            / args.batch_size
+                        )
+                        noise = noise.send(worker.id)
                         param.grad.add_(
                             torch.mean(  # pylint:disable=no-member
                                 torch.stack(  # pylint:disable=no-member
                                     param.accumulated_grads, dim=0
                                 )
                             )
+                            + noise
                         )
-                for p in models[worker.id].parameters():
-                    noise = (
-                        torch.normal(
-                            0,
-                            args.noise_multiplier * args.max_grad_norm,
-                            p.grad.shape,
-                        )
-                        / args.batch_size
-                    )
-                    noise = noise.send(worker.id)
-                    p.grad.add_(noise)
             else:
                 data, target = next(dataloader)
                 pred = models[worker.id](data)
