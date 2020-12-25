@@ -956,32 +956,6 @@ def dict_to_mng_dict(dictionary: dict, mng: mp.Manager):
     return return_dict
 
 
-"""
-clip_per_sample_grad_norm_ and get_total_per_sample_grad_norm
-adapted from:
-https://github.com/pytorch/opacus/blob/588ddf961f13981a50f8b782a11283a20d6ebc74/torchdp/per_sample_gradient_clip.py
-"""
-
-
-def clip_per_sample_grad_norm_(model, max_norm):
-    """Clips the gradient vector of the microbatch."""
-    max_norm = float(max_norm)
-    per_sample_norm = get_total_per_sample_grad_norm(model)
-    per_sample_clip_factor = (max_norm / (per_sample_norm + 1e-6)).clamp(max=1.0)
-    for p in model.parameters():
-        g = p.grad.copy()
-        p.grad.zero_()
-        p.grad.add_(per_sample_clip_factor * g)
-
-
-def get_total_per_sample_grad_norm(model):
-    """Gets the total L2 norm of the model's flattened
-    parameter vector over the microbatch.
-    """
-    all_layers_norms = torch.cat([p.grad.copy().flatten() for p in model.parameters()])
-    return all_layers_norms.norm(2)
-
-
 ## Assuming train loaders is dictionary with {worker : train_loader}
 def train_federated(
     args,
@@ -1225,14 +1199,13 @@ def secure_aggregation_epoch(
             if args.differentially_private:
                 batch = next(dataloader)
                 for i in range(batch[0].shape[0]):
-                    # calculate potentially unbounded gradient of microbatch
                     data, target = batch[0][i : i + 1], batch[1][i : i + 1]
                     output = models[worker.id](data)
                     loss = loss_fns[worker.id](output, target)
                     loss.backward()
                     with torch.no_grad():
-                        clip_per_sample_grad_norm_(
-                            models[worker.id], args.max_grad_norm
+                        torch.nn.utils.clip_grad_norm_(
+                            models[worker.id].parameters(), args.max_grad_norm
                         )
                         for param in models[worker.id].parameters():
                             param.accumulated_grads.append(param.grad.clone())
