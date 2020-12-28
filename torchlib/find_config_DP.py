@@ -15,7 +15,11 @@ global cmdln_args
 
 
 def objective(trial: opt.trial):
-    lr = trial.suggest_loguniform("lr", 1e-5, 1e-3,)
+    lr = trial.suggest_loguniform(
+        "lr",
+        1e-5,
+        1e-3,
+    )
     repetitions_dataset = (
         trial.suggest_int("repetitions_dataset", 1, 3) if cmdln_args.federated else 1
     )
@@ -31,12 +35,12 @@ def objective(trial: opt.trial):
         encrypted_inference=False,
         cuda=not cmdln_args.federated,
         websockets=cmdln_args.websockets,
-        batch_size=10,
+        batch_size=trial.suggest_int("batch_size", 32, 200),
         train_resolution=224,
         inference_resolution=224,
-        test_batch_size=10,
+        test_batch_size=200,
         test_interval=1,
-        validation_split=5,
+        validation_split=5,  # meaningless in pneumonia, uses data/test by default
         epochs=epochs,
         lr=lr,
         end_lr=trial.suggest_loguniform("end_lr", 1e-6, lr),
@@ -87,8 +91,8 @@ def objective(trial: opt.trial):
 
     args.differentially_private = True
     args.target_delta = 1e-5
-    args.noise_multiplier = trial.suggest_float("DP_noise", 0.1, 0.6)
-    args.max_grad_norm = trial.suggest_float("max_grad_norm", 0.1, 1)
+    args.noise_multiplier = trial.suggest_float("DP_noise", 0.1, 1.0)
+    args.max_grad_norm = trial.suggest_float("max_grad_norm", 0.1, 2.0)
 
     if cmdln_args.federated:
         args.unencrypted_aggregation = cmdln_args.unencrypted_aggregation
@@ -125,7 +129,7 @@ if __name__ == "__main__":
     parser.add_argument("--trial_name", type=str, default="", help="Assign identifier")
     parser.add_argument("--websockets", action="store_true", help="Use websockets")
     parser.add_argument(
-        "--num_trials", default=30, type=int, help="how many trials to perform"
+        "--num_trials", default=40, type=int, help="how many trials to perform"
     )
     parser.add_argument(
         "--visualize", action="store_true", help="Visualize optuna results."
@@ -189,4 +193,3 @@ if __name__ == "__main__":
             n_jobs=1,
             gc_after_trial=True,
         )
-
