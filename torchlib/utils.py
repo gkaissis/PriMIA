@@ -1225,7 +1225,8 @@ def secure_aggregation_epoch(
                             torch.mean(  # pylint:disable=no-member
                                 torch.stack(  # pylint:disable=no-member
                                     param.accumulated_grads, dim=0
-                                )
+                                ),
+                                dim=0,
                             )
                             + noise
                         )
