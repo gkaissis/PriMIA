@@ -143,8 +143,16 @@ class Arguments:
         self.noise_multiplier = config.getfloat("DP", "noise_multiplier", fallback=0.38)
         self.max_grad_norm = config.getfloat("DP", "max_grad_norm", fallback=1.2)
         self.target_delta = config.getfloat("DP", "target_delta", fallback=1e-5)
-        self.DPSSE = config.getboolean("config", "dp_stats_exchange", fallback=False)
-        self.dpsse_eps = config.getfloat("config", "dp_sse_epsilon", fallback=1.0)
+        self.DPSSE = config.getboolean("DP", "dp_stats_exchange", fallback=False)
+        self.dpsse_eps = config.getfloat("DP", "dp_sse_epsilon", fallback=1.0)
+        self.microbatch_size = config.getint("DP", "microbatch_size", fallback=1)
+        if self.differentially_private and (
+            self.batch_size % self.microbatch_size != 0
+            or self.microbatch_size > self.batch_size
+        ):
+            raise RuntimeError(
+                "Microbatch size must be smaller than and evenly divide the batch size."
+            )
         assert self.optimizer in ["SGD", "Adam"], "Unknown optimizer"
         if self.optimizer == "Adam":
             self.beta1 = config.getfloat("config", "beta1", fallback=0.9)
@@ -1196,10 +1204,17 @@ def secure_aggregation_epoch(
             if batch_idx >= num_batches[worker.id]:
                 continue
             optimizers[worker.id].zero_grad()
-            if args.differentially_private:
+            if args.differentially_private and args.batch_size > args.microbatch_size:
                 batch = next(dataloader)
-                for i in range(batch[0].shape[0]):
-                    data, target = batch[0][i : i + 1], batch[1][i : i + 1]
+                for i in range(
+                    0,
+                    batch[0].shape[0],
+                    args.microbatch_size,
+                ):
+                    data, target = (
+                        batch[0][i : i + args.microbatch_size],
+                        batch[1][i : i + args.microbatch_size],
+                    )
                     output = models[worker.id](data)
                     loss = loss_fns[worker.id](output, target)
                     loss.backward()
@@ -1230,6 +1245,28 @@ def secure_aggregation_epoch(
                             )
                             + noise
                         )
+            elif (
+                args.differentially_private and args.batch_size == args.microbatch_size
+            ):
+                data, target = next(dataloader)
+                pred = models[worker.id](data)
+                loss = loss_fns[worker.id](pred, target)
+                loss.backward()
+                with torch.no_grad():
+                    torch.nn.utils.clip_grad_norm_(
+                        models[worker.id].parameters(), args.max_grad_norm
+                    )
+                    for param in models[worker.id].parameters():
+                        noise = (
+                            torch.normal(
+                                0,
+                                args.noise_multiplier * args.max_grad_norm,
+                                size=param.grad.shape,
+                            )
+                            / args.batch_size
+                        )
+                        noise = noise.send(worker.id)
+                        param.grad.add_(noise)
             else:
                 data, target = next(dataloader)
                 pred = models[worker.id](data)
