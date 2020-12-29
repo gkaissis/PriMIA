@@ -145,7 +145,9 @@ class Arguments:
         self.target_delta = config.getfloat("DP", "target_delta", fallback=1e-5)
         self.DPSSE = config.getboolean("DP", "dp_stats_exchange", fallback=False)
         self.dpsse_eps = config.getfloat("DP", "dp_sse_epsilon", fallback=1.0)
-        self.microbatch_size = config.getint("DP", "microbatch_size", fallback=1)
+        self.microbatch_size = config.getint(
+            "DP", "microbatch_size", fallback=self.batch_size
+        )
         if self.differentially_private and (
             self.batch_size % self.microbatch_size != 0
             or self.microbatch_size > self.batch_size
