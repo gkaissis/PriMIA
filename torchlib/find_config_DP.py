@@ -15,11 +15,7 @@ global cmdln_args
 
 
 def objective(trial: opt.trial):
-    lr = trial.suggest_loguniform(
-        "lr",
-        1e-5,
-        1e-3,
-    )
+    lr = trial.suggest_loguniform("lr", 1e-5, 2e-1,)
     repetitions_dataset = (
         trial.suggest_int("repetitions_dataset", 1, 3) if cmdln_args.federated else 1
     )
@@ -107,7 +103,9 @@ def objective(trial: opt.trial):
         args.weighted_averaging = trial.suggest_categorical(
             "weighted_averaging", [True, False]
         )
-        args.DPSSE = True
+        args.DPSSE = False
+        args.dpsse_eps = 1.0
+        args.microbatch_size = args.batch_size
     try:
         best_val_acc, epsilon = main(args, verbose=False, optuna_trial=trial)
     except Exception as e:
