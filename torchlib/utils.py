@@ -1223,7 +1223,7 @@ def secure_aggregation_epoch(
                             models[worker.id].parameters(), args.max_grad_norm
                         )
                         for param in models[worker.id].parameters():
-                            param.accumulated_grads.append(param.grad.clone())
+                            param.accumulated_grads.append(param.grad.detach().copy())
                             param.grad.zero_()
                 with torch.no_grad():
                     for param in models[worker.id].parameters():
