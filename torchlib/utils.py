@@ -34,7 +34,7 @@ import sys, os.path
 
 sys.path.insert(0, os.path.split(sys.path[0])[0])
 
-import revision_scripts.privacy_analysis as tf_privacy
+from opacus import privacy_analysis as tf_privacy
 
 filterwarnings("ignore", message="invalid value encountered in double_scalars")
 
@@ -145,9 +145,12 @@ class Arguments:
         self.target_delta = config.getfloat("DP", "target_delta", fallback=1e-5)
         self.DPSSE = config.getboolean("DP", "dp_stats_exchange", fallback=False)
         self.dpsse_eps = config.getfloat("DP", "dp_sse_epsilon", fallback=1.0)
-        self.microbatch_size = config.getint(
-            "DP", "microbatch_size", fallback=self.batch_size
-        )
+        self.microbatch_size = config.getint("DP", "microbatch_size", fallback=1)
+        if not self.microbatch_size == 1:
+            warn(
+                "Training privately with microbatch sizes larger than 1 yields faster performance"
+                " but automatically adds multiplicative amounts of noise to preserve guarantees."
+            )
         if self.differentially_private and (
             self.batch_size % self.microbatch_size != 0
             or self.microbatch_size > self.batch_size
@@ -641,29 +644,6 @@ def setup_pysyft(args, hook, verbose=False):
             desc="load data",
         ):
             if args.data_dir == "mnist":
-                # node_id = worker.id
-                # KEEP_LABELS_DICT = {
-                #     "alice": [0, 1, 2, 3],
-                #     "bob": [4, 5, 6],
-                #     "charlie": [7, 8, 9],
-                #     None: list(range(10)),
-                # }
-                # dataset = LabelMNIST(
-                #     labels=KEEP_LABELS_DICT[node_id]
-                #     if node_id in KEEP_LABELS_DICT
-                #     else KEEP_LABELS_DICT[None],
-                #     root="./data",
-                #     train=True,
-                #     download=True,
-                #     transform=AlbumentationsTorchTransform(
-                #         a.Compose(
-                #             [
-                #                 a.ToFloat(max_value=255.0),
-                #                 a.Lambda(image=lambda x, **kwargs: x[:, :, np.newaxis]),
-                #             ]
-                #         )
-                #     ),
-                # )
                 dataset = mnist_datasets[worker.id]
                 mean, std = calc_mean_std(dataset)
                 dataset.dataset.transform.transform.transforms.transforms.append(  # beautiful
@@ -705,9 +685,6 @@ def setup_pysyft(args, hook, verbose=False):
                         To_one_hot(3),
                     ]
                 dataset = datasets.ImageFolder(
-                    # path.join("data/server_simulation/", "validation")
-                    # if worker.id == "validation"
-                    # else
                     data_dir,
                     loader=loader,
                     transform=create_albu_transform(args, mean, std),
@@ -724,7 +701,6 @@ def setup_pysyft(args, hook, verbose=False):
             worker.load_data([mean, std])
 
             data, targets = [], []
-            # repetitions = 1 if worker.id == "validation" else args.repetitions_dataset
             if args.mixup:
                 dataset = torch.utils.data.DataLoader(
                     dataset,
@@ -1158,7 +1134,8 @@ def secure_aggregation_epoch(
 ):
     for w, m in models.items():
         for param in m.parameters():
-            param.accumulated_grads = []
+            if param.requires_grad:
+                param.accumulated_grads = []
     for worker in train_loaders.keys():
         if models[worker.id].location is not None:
             continue  # model + loss already at a worker, 783/784 don't happen
@@ -1178,9 +1155,7 @@ def secure_aggregation_epoch(
                 opt = torch.optim.SGD
             else:
                 raise NotImplementedError("only Adam or SGD supported.")
-            optimizers[worker] = opt(
-                models[worker].parameters(), **kwargs
-            )  # no send operation here?
+            optimizers[worker] = opt(models[worker].parameters(), **kwargs)
             if privacy_engines:
                 privacy_engines[worker].attach(optimizers[worker])
 
@@ -1221,32 +1196,52 @@ def secure_aggregation_epoch(
                     loss = loss_fns[worker.id](output, target)
                     loss.backward()
                     with torch.no_grad():
+                        # Calculate the true clipping norm
+                        true_norm = 0.0
+                        for param in models[worker.id].parameters():
+                            if param.requires_grad:
+                                true_norm += param.grad.copy().norm(2) ** 2
+                        true_norm = torch.sqrt(true_norm)
+                        clipping_norm = min(
+                            args.max_grad_norm / (true_norm + 1e-6), 1.0
+                        )
+                        # operate the clipping
                         torch.nn.utils.clip_grad_norm_(
-                            models[worker.id].parameters(), args.max_grad_norm
+                            (
+                                param
+                                for param in models[worker.id].parameters()
+                                if param.requires_grad
+                            ),
+                            clipping_norm,
                         )
                         for param in models[worker.id].parameters():
-                            param.accumulated_grads.append(param.grad.detach().copy())
-                            param.grad.zero_()
+                            if hasattr(param, "accumulated_grads"):
+                                param.accumulated_grads.append(
+                                    param.grad.detach().copy()
+                                )
+                                param.grad.zero_()
                 with torch.no_grad():
                     for param in models[worker.id].parameters():
-                        noise = (
-                            torch.normal(
-                                0,
-                                args.noise_multiplier * args.max_grad_norm,
-                                size=param.grad.shape,
+                        if param.requires_grad:
+                            noise = (
+                                torch.normal(
+                                    0,
+                                    args.noise_multiplier * args.max_grad_norm,
+                                    size=param.grad.shape,
+                                )
+                                * (args.microbatch_size / args.batch_size)
                             )
-                            / args.batch_size
-                        )
-                        noise = noise.send(worker.id)
-                        param.grad.add_(
-                            torch.mean(  # pylint:disable=no-member
-                                torch.stack(  # pylint:disable=no-member
-                                    param.accumulated_grads, dim=0
-                                ),
-                                dim=0,
+                            noise = noise.send(worker.id)
+                            param.grad.add_(
+                                torch.mean(  # pylint:disable=no-member
+                                    torch.stack(  # pylint:disable=no-member
+                                        param.accumulated_grads, dim=0
+                                    ),
+                                    dim=0,
+                                )
+                                + noise
                             )
-                            + noise
-                        )
+                            param.accumulated_grads = []  # release memory
             elif (
                 args.differentially_private and args.batch_size == args.microbatch_size
             ):
@@ -1256,17 +1251,19 @@ def secure_aggregation_epoch(
                 loss.backward()
                 with torch.no_grad():
                     torch.nn.utils.clip_grad_norm_(
-                        models[worker.id].parameters(), args.max_grad_norm
+                        (
+                            param
+                            for param in models[worker.id].parameters()
+                            if param.requires_grad
+                        ),
+                        args.max_grad_norm,
                     )
                     for param in models[worker.id].parameters():
-                        noise = (
-                            torch.normal(
-                                0,
-                                args.noise_multiplier * args.max_grad_norm,
-                                size=param.grad.shape,
-                            )
-                            / args.batch_size
-                        )
+                        noise = torch.normal(
+                            0,
+                            args.noise_multiplier * args.max_grad_norm,
+                            size=param.grad.shape,
+                        )  # noise proportional to (1/microbatch_size)
                         noise = noise.send(worker.id)
                         param.grad.add_(noise)
             else:
