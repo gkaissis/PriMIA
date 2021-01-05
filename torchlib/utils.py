@@ -1196,33 +1196,29 @@ def secure_aggregation_epoch(
                     loss = loss_fns[worker.id](output, target)
                     loss.backward()
                     with torch.no_grad():
-                        # Calculate the true clipping norm
-                        true_norm = 0.0
-                        for param in models[worker.id].parameters():
-                            if param.requires_grad:
-                                true_norm += param.grad.copy().norm(2) ** 2
-                        true_norm = torch.sqrt(true_norm)
-                        clipping_norm = min(
-                            args.max_grad_norm / (true_norm + 1e-6), 1.0
-                        )
-                        # operate the clipping
+                        # torch internally checks if the parameter requires grad
+                        # and only clips the ones that do, so we don't need to check.
+                        # torch also clips by 'global norm', see https://arxiv.org/abs/1211.5063
+                        # clips inplace and detached from the computation graph
                         torch.nn.utils.clip_grad_norm_(
-                            (
-                                param
-                                for param in models[worker.id].parameters()
-                                if param.requires_grad
-                            ),
-                            clipping_norm,
+                            models[worker.id].parameters(), args.max_grad_norm
                         )
+                        # Since we are operating on microbatches in this case
+                        # we accumulate the clipped microbatch gradients into
+                        # a container to average them later
+                        # then we discard the original gradient for safety
                         for param in models[worker.id].parameters():
                             if hasattr(param, "accumulated_grads"):
                                 param.accumulated_grads.append(
-                                    param.grad.detach().copy()
+                                    param.grad.copy().detach()
                                 )
                                 param.grad.zero_()
                 with torch.no_grad():
+                    # at this point, we have the accumulated gradients
+                    # and need to add noise calibrated by the norm
+                    # larger microbatches get more noise
                     for param in models[worker.id].parameters():
-                        if param.requires_grad:
+                        if param.requires_grad:  # only parameters we clipped get noise
                             noise = (
                                 torch.normal(
                                     0,
@@ -1241,7 +1237,9 @@ def secure_aggregation_epoch(
                                 )
                                 + noise
                             )
-                            param.accumulated_grads = []  # release memory
+                            param.accumulated_grads = (
+                                []
+                            )  # clean up the accumulated gradients
             elif (
                 args.differentially_private and args.batch_size == args.microbatch_size
             ):
@@ -1249,21 +1247,20 @@ def secure_aggregation_epoch(
                 pred = models[worker.id](data)
                 loss = loss_fns[worker.id](pred, target)
                 loss.backward()
+                # here we are operating on the special case where the microbatch
+                # is the same size as the minibatch
+                # we don't need to accumulate gradients manually and can save one loop
+                # but the gradient gets much more noise to compensate
                 with torch.no_grad():
                     torch.nn.utils.clip_grad_norm_(
-                        (
-                            param
-                            for param in models[worker.id].parameters()
-                            if param.requires_grad
-                        ),
-                        args.max_grad_norm,
+                        models[worker.id].parameters(), args.max_grad_norm
                     )
                     for param in models[worker.id].parameters():
                         noise = torch.normal(
                             0,
                             args.noise_multiplier * args.max_grad_norm,
                             size=param.grad.shape,
-                        )  # noise proportional to (1/microbatch_size)
+                        )  # no more scaling by microbatch size here
                         noise = noise.send(worker.id)
                         param.grad.add_(noise)
             else:
