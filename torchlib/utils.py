@@ -1387,23 +1387,22 @@ def train(  # never called on websockets
         #                        nn.ReLU(), 
         #                        nn.Linear(100, dim), 
         #                    ).to(device)
-        
+
         #num_classes = 1
         #model = smp.Unet("resnet18", classes=num_classes, activation="sigmoid")
         #inpt_channels = 1
         #if inpt_channels != 3:
         #    new_encoder = [nn.Conv2d(inpt_channels, 3, 1), model.encoder.conv1]
         #    model.encoder.conv1 = nn.Sequential(*new_encoder)
-        
+
         if args.mixup:
             with torch.no_grad():
                 target = oh_converter(target)
                 data, target = mixup((data, target))
         optimizer.zero_grad()
 
-        #output = model(data)
-
         model = model.to(device)
+
         output = model(data)
 
         #output = output.view_as(target)
