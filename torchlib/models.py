@@ -803,12 +803,6 @@ class SimpleSegNet(nn.Module):
 
         return out 
 
-# for import in train.py 
-
-def simple_seg_net(): 
-    # for now no params
-    return SimpleSegNet()
-
 #from models.MoNet import MoNet
 
 """
@@ -946,6 +940,7 @@ class MoNet(nn.Module):
         n_filters_init=16,
         dropout_enc=0.2,
         dropout_dec=0.2,
+        activation=None,
         ):
         super(MoNet, self).__init__()
         
@@ -1031,6 +1026,12 @@ class MoNet(nn.Module):
         # INSTEAD: Added BCEWithLogitsLoss which combines both in a numerically stable way sssss
 
         self.header = nn.Sequential(*head_list)
+        if activation == "sigmoid":
+            self.activation = nn.Sigmoid()
+        elif activation == "tanh":
+            self.activation = nn.Tanh()
+        else:
+            self.activation = None
 
     def forward(self, x): 
         skip = []
@@ -1056,7 +1057,7 @@ class MoNet(nn.Module):
         # header
         out = self.header(out).squeeze()
 
-        return out
+        if self.activation:
+             out = self.activation(out)
 
-def monet_seg_net(): 
-    return MoNet()
+        return out

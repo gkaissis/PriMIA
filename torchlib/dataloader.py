@@ -612,7 +612,9 @@ class MSD_data(torchdata.Dataset):
         mode="2D",
         label_mode="seg",
         mrg_labels: bool = True,
-        ):
+        transform: Callable = lambda x: x,
+        target_transform: Callable = lambda x: x,
+    ):
         self.path_string = path_string
         self.res = res
         self.res_z = res_z 
@@ -621,11 +623,13 @@ class MSD_data(torchdata.Dataset):
         self.mode = mode
         self.label_mode = label_mode
         self.mrg_labels = mrg_labels
+        self.transform = transform
+        self.target_transform = target_transform
 
         # as in original function 
         assert (crop_height % 16) == 0
         if label_mode == "bbox-coord":
-                raise NotImplementedError()
+            raise NotImplementedError()
 
         # dynamically add search for all *.nii.* files that are 
         # present in the subfolders of **/data_path/imagesTr
@@ -733,7 +737,11 @@ class MSD_data(torchdata.Dataset):
             #label = np.expand_dims(label, 1)
 
         # convert to tensors 
-        return from_numpy(scan.copy()), from_numpy(label.copy()).long()
+        # convert to tensors
+        return (
+             self.transform(from_numpy(scan.copy())),
+             self.target_transform(from_numpy(label.copy()).long()),
+        )
 
 """
     MSD dataset as normal image-dataset. Assumes dataset was already preprocessed. 
@@ -746,10 +754,14 @@ class MSD_data_images(torchdata.Dataset):
     def __init__(
         self, 
         img_path="./data",
+        transform: Callable = lambda x: x,
+        target_transform: Callable = lambda x: x,
         ):
     
         self.input_path = img_path + "/inputs/"
         self.target_path = img_path + "/labels/"
+        self.transform = transform
+        self.target_transform = target_transform
 
         assert os.path.exists(self.input_path) 
         scan_names = [
@@ -809,7 +821,7 @@ class MSD_data_images(torchdata.Dataset):
 
         # no transforms necessary, because all already done in preprocessing
 
-        return scan, label
+        return self.transform(scan), self.target_transform(label)
 
 """
     Data utility functions from I2DL class - N.Remerscheid

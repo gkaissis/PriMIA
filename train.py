@@ -38,8 +38,8 @@ from torchlib.models import (
     conv_at_resolution,  # pylint:disable=import-error
     resnet18,
     vgg16,
-    simple_seg_net, # Segmentation
-    monet_seg_net,
+    SimpleSegNet, # Segmentation
+    MoNet,
 )
 from torchlib.utils import (
     Arguments,
@@ -55,7 +55,7 @@ from torchlib.utils import (
     calc_class_weights,
 )
 from sklearn.model_selection import train_test_split
-import segmentation_models as smp
+import segmentation_models_pytorch as smp
 
 
 def main(args, verbose=True, optuna_trial=None, cmd_args=None):
@@ -169,15 +169,25 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             ## MSD dataset preprocessed version ##
             #PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
             PATH = "/home/NiWaRe/PriMIA/Task03_Liver"
-            dataset = MSD_data_images(PATH+'/train')
-            valset = MSD_data_images(PATH+'/val')
+  
+            #PATH = args.data_dir
+
+            dataset = MSD_data_images(
+                 PATH + "/train", target_transform=lambda x: x.squeeze()
+             )
+            valset = MSD_data_images(
+                 PATH + "/val", target_transform=lambda x: x.squeeze()
+             )
 
             # For now only calculated for saving step below
             val_mean_std = calc_mean_std(dataset)
 
             # Overfit on small dataset 
-            dataset = dataset[:1]
-            valset = valset[:1]
+            #dataset = dataset[:1]
+            #valset = valset[:1]
+
+            # TEMPORARY for overfitting 
+            #valset = dataset
 
             # TODO: Potentially add transforms (possibly based on val_mean_calc as for the others)
 
@@ -319,26 +329,32 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             "pooling": args.pooling_type,
         }
     # Segmentation 
-    elif args.model == "simple_seg_net":
-        model_type = simple_seg_net
+    elif args.model == "SimpleSegNet":
+        model_type = SimpleSegNet
         # no params for now
         model_args = {}
-    elif args.model == "monet_seg_net": 
-        model_type = monet_seg_net
+    elif args.model == "unet":
+         model_type = smp.Unet
+         model_args = {"encoder_name": "resnet18", "classes": 1, "activation": "sigmoid"}
+    elif args.model == "MoNet": 
+        model_type = MoNet
         # no params for now
-        model_args = {}
+        model_args = {"activation" : "sigmoid"}
     else:
         raise ValueError(
             "Model name not understood. Please choose one of 'vgg16, 'simpleconv', resnet-18'."
         )
+
+    model = model_type(**model_args)
+
+    if args.model == "unet":
+         model.encoder.conv1 = nn.Sequential(nn.Conv2d(1, 3, 1), model.encoder.conv1)
+
     if args.train_federated:
-        model = model_type(**model_args)
         model = {
             key: model.copy()
             for key in [w.id for w in workers.values()] + ["local_model"]
         }
-    else:
-        model = model_type(**model_args)
 
     opt_kwargs = {"lr": args.lr, "weight_decay": args.weight_decay}
     if args.optimizer == "SGD":
@@ -404,9 +420,9 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
         # stats for weighting from asmple 0.jpg in /train
         # white_pixels/ all_pixels = 0.0602 -> % of pos. classes 
         # (256*256-a_np.sum())/a_np.sum() -> 15.598 times more negative classes
-        pos_weight = torch.tensor([15]).to(device)
-        loss_args = {"pos_weight" : pos_weight}
-        #loss_args = {}
+        #pos_weight = torch.tensor([15]).to(device)
+        #loss_args = {"pos_weight" : pos_weight}
+        loss_args = {}
     else: 
         loss_args = {"weight": cw, "reduction": "mean"}
     if args.mixup or (args.weight_classes and args.train_federated):
@@ -415,8 +431,8 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
         loss_fn = nn.CrossEntropyLoss
 
     if args.data_dir == "seg_data": 
-        loss_fn = nn.BCEWithLogitsLoss
-        #loss_fn = smp.losses.DiceLoss
+        #loss_fn = nn.BCEWithLogitsLoss
+        loss_fn = smp.utils.losses.DiceLoss
 
     loss_fn = loss_fn(**loss_args)
     

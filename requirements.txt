@@ -1,6 +1,6 @@
 colorama
-matplotlib
-pandas
+#matplotlib
+#pandas
 optuna
 scikit-learn
 visdom

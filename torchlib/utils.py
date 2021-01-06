@@ -10,7 +10,7 @@ import pandas as pd
 import torch
 import torch.nn as nn
 
-import segmentation_models as smp
+import segmentation_models_pytorch as smp
 
 import tqdm
 import albumentations as a
@@ -145,7 +145,14 @@ class Arguments:
             self.beta1 = config.getfloat("config", "beta1", fallback=0.9)
             self.beta2 = config.getfloat("config", "beta2", fallback=0.999)
         self.model = config.get("config", "model")  # , fallback="simpleconv")
-        assert self.model in ["simpleconv", "resnet-18", "vgg16", "simple_seg_net", "monet_seg_net"] # Segmentation 
+        assert self.model in [
+            "simpleconv", 
+            "resnet-18", 
+            "vgg16", 
+            "SimpleSegNet", 
+            "MoNet", 
+            "unet",
+            ] # Segmentation 
         self.pooling_type = config.get("config", "pooling_type", fallback="max")
         self.pretrained = config.getboolean("config", "pretrained")  # , fallback=False)
         self.weight_decay = config.getfloat("config", "weight_decay")  # , fallback=0.0)
@@ -339,8 +346,7 @@ class MixUp(torch.nn.Module):
         self.λ = λ
 
     def forward(
-        self,
-        x: Tuple[Union[torch.tensor, Tuple[torch.tensor]], Tuple[torch.Tensor]],
+        self, x: Tuple[Union[torch.tensor, Tuple[torch.tensor]], Tuple[torch.Tensor]],
     ):
         assert len(x) == 2, "need data and target"
         x, y = x
@@ -639,6 +645,7 @@ def setup_pysyft(args, hook, verbose=False):
             ## MSD dataset preprocessed version ##
             #PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
             PATH = "/home/NiWaRe/PriMIA/Task03_Liver"
+            #PATH = args.data_dir
             dataset = MSD_data_images(PATH+'/train')
             
             lengths = [int(len(dataset) / len(workers)) for _ in workers]
@@ -695,8 +702,8 @@ def setup_pysyft(args, hook, verbose=False):
                 # For now only empty structure 
 
                 dataset = seg_datasets[worker.id]
-                print(len(dataset))
-                print(dataset)
+                #print(len(dataset))
+                #print(dataset)
                 mean, std = calc_mean_std(dataset)
                 
                 # TODO: For now no transforms necessary - possibly add later (same as in local training case)
@@ -806,12 +813,8 @@ def setup_pysyft(args, hook, verbose=False):
                 selected_data = selected_data.squeeze(1)
                 selected_targets = selected_targets.squeeze(1)
             del data, targets
-            selected_data.tag(
-                "#traindata",
-            )
-            selected_targets.tag(
-                "#traintargets",
-            )
+            selected_data.tag("#traindata",)
+            selected_targets.tag("#traintargets",)
             worker.load_data([selected_data, selected_targets])
     if crypto_provider is not None:
         grid = sy.PrivateGridNetwork(*(list(workers.values()) + [crypto_provider]))
@@ -892,6 +895,7 @@ def setup_pysyft(args, hook, verbose=False):
         ## MSD dataset 
         #PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
         PATH = "/home/NiWaRe/PriMIA/Task03_Liver"
+        #PATH = args.data_dir
         valset = MSD_data_images(PATH+'/val')
         pass
     else:
@@ -1277,6 +1281,8 @@ def secure_aggregation_epoch(
             #data, target = data.view(-1, 1, res, res).to(device), target.view(-1, res, res).to(device)
             data, target = data.to(device), target.to(device)
             pred = models[worker.id](data)
+            if args.data_dir == "seg_data":  # TODO do sth better
+                 pred = pred.squeeze()
             loss = loss_fns[worker.id](pred, target)
             loss.backward()
             optimizers[worker.id].step()
@@ -1372,7 +1378,7 @@ def train(  # never called on websockets
         # TODO: Only for MSD without preprocessing
         #res = data.shape[-1]
         #data, target = data.view(-1, 1, res, res).to(device), target.view(-1, res, res).to(device)
-        data, target = data.to(device), target[0].to(device)
+        data, target = data.to(device), target.unsqueeze(dim=1).to(device)
         #dim = 256*256
         #dim_2 = int(dim/2)
         #model = nn.Sequential(
@@ -1381,22 +1387,42 @@ def train(  # never called on websockets
         #                        nn.ReLU(), 
         #                        nn.Linear(100, dim), 
         #                    ).to(device)
+        
         #num_classes = 1
         #model = smp.Unet("resnet18", classes=num_classes, activation="sigmoid")
         #inpt_channels = 1
         #if inpt_channels != 3:
         #    new_encoder = [nn.Conv2d(inpt_channels, 3, 1), model.encoder.conv1]
         #    model.encoder.conv1 = nn.Sequential(*new_encoder)
+        
         if args.mixup:
             with torch.no_grad():
                 target = oh_converter(target)
                 data, target = mixup((data, target))
         optimizer.zero_grad()
+
+        #output = model(data)
+
+        model = model.to(device)
         output = model(data)
 
         #output = output.view_as(target)
 
+        #### manual calculation of the dice loss ####
+        # L = 1 - 2 * precision * recall / (precision + recall)
+        # recall = tp/(tp+fn) 
+        # precision = tp/(tp+fp)
+        # def.: pos = 1 
+        #tp = torch.sum(output[target==1.] >= .5)
+        #tn = torch.sum(output[target==0.] < .5)
+        #fn = torch.sum(output[target==1.] < .5)
+        #fp = torch.sum(output[target==0.] >= .5)
+        #loss = 2 * tp / (2*fp + fn + fp) 
+
         loss = loss_fn(output, target)
+
+        #loss = loss_fn(output, target)
+
         loss.backward()
         optimizer.step()
         if batch_idx % args.log_interval == 0:
@@ -1518,7 +1544,7 @@ def test(
             # TODO: ONLY MSD DATASET (NOT PREPROCESSED)
             #res = data.shape[-1]
             #data, target = data.view(-1, 1, res, res).to(device), target.view(-1, res, res).to(device)
-            data, target = data.to(device), target[0].to(device)
+            data, target = data.to(device), target.unsqueeze(dim=1).to(device)
             #dim = 256*256
             #dim_2 = int(dim/2)
             #model = nn.Sequential(
@@ -1527,21 +1553,36 @@ def test(
             #                    nn.ReLU(), 
             #                    nn.Linear(100, dim), 
             #                    ).to(device)
+            
             #num_classes = 1
             #model = smp.Unet("resnet18", classes=num_classes, activation="sigmoid")
-            #model.summary()
             #inpt_channels = 1
             #if inpt_channels != 3:
             #    new_encoder = [nn.Conv2d(inpt_channels, 3, 1), model.encoder.conv1]
             #    model.encoder.conv1 = nn.Sequential(*new_encoder)
             #model = model.to(device)
+            
+            if (
+                 device if isinstance(device, str) else device.type
+             ) != "cpu":  # TODO ugly bugfix
+                 model = model.to(device)
+
             output = model(data)
 
             #output = output.view_as(target)
 
             #output, target = output.cpu(), target.cpu() # for loss_fn
-            loss = loss_fn(output, oh_converter(target) if oh_converter else target)
-            test_loss += loss.item()  # sum up batch loss
+            #loss = loss_fn(output, oh_converter(target if oh_converter else target)
+
+            #tp = torch.sum(output[target==1.] >= .5)
+            #tn = torch.sum(output[target==0.] < .5)
+            #fn = torch.sum(output[target==1.] < .5)
+            #fp = torch.sum(output[target==0.] >= .5)
+            #loss = 2 * tp / (2*fp + fn + fp)
+            loss = loss_fn(output, target)
+
+            test_loss += loss
+            #test_loss += loss.item()  # sum up batch loss
             # Segmentation 
             # TODO: Adapt for all use-cases (train, inference, encrypted, uncencrypted)
             if args.data_dir == "seg_data": 
@@ -1567,17 +1608,9 @@ def test(
                 #test_dice = []
 
 
-
-
-
-
                 #print(pred[pred!=0])
                 #print(pred.shape)
   
-
-
-
-
 
                 #test_dice = mt.f1_score(target_pred, pred)
 
@@ -1594,11 +1627,11 @@ def test(
                 #total_target.append(target)
 
                 # Make segmentation compatible with classification eval pipeline
-                output = output.view(output.shape[0], -1)
+                output = output.view(-1)
                 total_scores.append(output)
-                target = target.view(-1).type(torch.LongTensor)
-                pred = output.view(-1).round().type(torch.LongTensor)
-                tgts = target
+                target = target.view(-1)
+                pred = output.round().type(torch.LongTensor)
+                tgts = target.type(torch.LongTensor)
                 total_pred.append(pred)
                 total_target.append(tgts)
             else: 
@@ -1645,7 +1678,7 @@ def test(
             #objective = np.mean(test_accs)
             # for now set objective to F1-score 
         #    objective = np.mean(test_dices)
-        if True: 
+        if True: # TEMPORARY
             total_pred = torch.cat(total_pred).cpu().numpy()  # pylint: disable=no-member
             total_target = (
                 torch.cat(total_target).cpu().numpy()  # pylint: disable=no-member
@@ -1653,10 +1686,14 @@ def test(
             total_scores = (
                 torch.cat(total_scores).cpu().numpy()  # pylint: disable=no-member
             )
-            total_scores -= total_scores.min(axis=1)[:, np.newaxis]
-            total_scores = total_scores / total_scores.sum(axis=1)[:, np.newaxis]
+            #total_scores -= total_scores.min(axis=1)[:, np.newaxis]
+            #total_scores = total_scores / total_scores.sum(axis=1)[:, np.newaxis]
+            #print(total_target.shape)
+            #print(total_scores.shape)
+            #roc_auc = mt.roc_auc_score(total_target, total_scores, multi_class="ovo")
             try:
-                roc_auc = mt.roc_auc_score(total_target, total_scores, multi_class="ovo")
+                roc_auc = mt.roc_auc_score(total_target, total_scores)
+                #roc_auc = mt.roc_auc_score(total_target, total_scores, multi_class="ovo")
             except ValueError:
                 warn(
                     "ROC AUC score could not be calculated and was set to zero.",
