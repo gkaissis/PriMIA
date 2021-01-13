@@ -12,7 +12,7 @@ from train import main
 
 
 def parallel_execution(args, results_dict):
-    best_value = main(args, verbose=False)
+    best_value, epsilon = main(args, verbose=False)
     results_dict[str(args.mixup_lambda)] = best_value
     return best_value
 

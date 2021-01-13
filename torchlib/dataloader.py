@@ -5,6 +5,7 @@ import pandas as pd
 import numpy as np
 from PIL import Image
 from tqdm import tqdm
+import torch
 from torch import (  # pylint:disable=no-name-in-module
     manual_seed,
     stack,
@@ -15,6 +16,7 @@ from torch import (  # pylint:disable=no-name-in-module
     from_numpy,
     randperm,
     default_generator,
+    tensor,
 )
 from torch._utils import _accumulate
 import albumentations as a
@@ -29,6 +31,10 @@ from typing import Dict, Union, Set, Callable
 
 from pathlib import Path
 from .dicomtools import DicomLoader
+
+from sklearn.model_selection import LeaveOneOut
+
+from typing import Callable
 
 
 class AlbumentationsTorchTransform:
@@ -52,11 +58,32 @@ class AlbumentationsTorchTransform:
         return img
 
 
+class PoissonSampler(torch.utils.data.Sampler):
+    def __init__(self, num_examples, batch_size):
+        self.inds = np.arange(num_examples)
+        self.batch_size = batch_size
+        self.num_batches = int(np.ceil(num_examples / batch_size))
+        self.sample_rate = self.batch_size / (1.0 * num_examples)
+        super().__init__()
+
+    def __iter__(self):
+        for _ in range(self.num_batches):
+            batch_idxs = np.random.binomial(
+                n=1, p=self.sample_rate, size=len(self.inds)
+            )
+            batch = self.inds[batch_idxs.astype(np.bool)]
+            np.random.shuffle(batch)
+            yield batch
+
+    def __len__(self):
+        return self.num_batches
+
+
 class CombinedLoader:
     """Class that combines several data loaders and their extensions.
 
-    Args: 
-        mapping (Dict): Dictionary that maps loader names to tuples 
+    Args:
+        mapping (Dict): Dictionary that maps loader names to tuples
                         consisting of (corresponding extensions, loader method)
     """
 
@@ -214,16 +241,40 @@ def create_albu_transform(args, mean, std):
             ]
         )
     )
-    return transforms.Compose([train_tf, train_tf_albu,])
+    return transforms.Compose(
+        [
+            train_tf,
+            train_tf_albu,
+        ]
+    )
 
 
-def calc_mean_std(dataset, save_folder=None):
+def l1_sensitivity(query: Callable, d: tensor) -> float:
+    """Calculates L1-sensitivity of a query on a dataset."""
+    L = LeaveOneOut()
+    data = d.copy()
+    sensitivity = 0
+    for idx in L.split(data):
+        val = query(data[idx[0]])
+        if val > sensitivity:
+            sensitivity = val
+    return sensitivity
+
+
+def calc_mean_std(
+    dataset,
+    save_folder=None,
+    epsilon=None,
+):
     """
     Calculates the mean and standard deviation of `dataset` and
     saves them to `save_folder`.
 
-    Needs a dataset where all images have the same size
+    Needs a dataset where all images have the same size.
+
+    If epsilon is provided, does so in a differentially private way.
     """
+
     accumulated_data = []
     for d in tqdm(
         dataset, total=len(dataset), leave=False, desc="accumulate data in dataset"
@@ -241,15 +292,25 @@ def calc_mean_std(dataset, save_folder=None):
         dims = (0, *range(2, len(accumulated_data.shape)))
     else:
         dims = (*range(len(accumulated_data.shape)),)
-    std, mean = std_mean(accumulated_data, dim=dims)
+    if epsilon:
+        mean_sens = l1_sensitivity(torch.mean, accumulated_data)
+        std_sens = l1_sensitivity(torch.std, accumulated_data)
+        std, mean = std_mean(accumulated_data, dim=dims)
+        std += torch.distributions.laplace.Laplace(
+            loc=0, scale=std_sens / epsilon
+        ).rsample()
+        mean += torch.distributions.laplace.Laplace(
+            loc=0, scale=mean_sens / epsilon
+        ).rsample()
+    else:
+        std, mean = std_mean(accumulated_data, dim=dims)
     if save_folder:
         save(stack([mean, std]), os.path.join(save_folder, "mean_std.pt"))
     return mean, std
 
 
 def single_channel_loader(filename):
-    """Converts `filename` to a grayscale PIL Image
-    """
+    """Converts `filename` to a grayscale PIL Image"""
     with open(filename, "rb") as f:
         img = Image.open(f).convert("L")
         return img.copy()
@@ -371,7 +432,11 @@ class ImageFolderFromCSV(torchdata.Dataset):
 
 class PPPP(torchdata.Dataset):
     def __init__(
-        self, label_path="data/Labels.csv", train=False, transform=None, seed=1,
+        self,
+        label_path="data/Labels.csv",
+        train=False,
+        transform=None,
+        seed=1,
     ):
         super().__init__()
         random.seed(seed)
@@ -420,7 +485,8 @@ class PPPP(torchdata.Dataset):
     def __compute_mean_std__(self):
 
         calc_mean_std(
-            self, save_folder="data",
+            self,
+            save_folder="data",
         )
 
 
@@ -966,7 +1032,11 @@ if __name__ == "__main__":
     img.show()
 
     tf = transforms.Compose(
-        [transforms.Resize(224), transforms.CenterCrop(224), transforms.ToTensor(),]
+        [
+            transforms.Resize(224),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+        ]
     )
     ds = PPPP(train=True, transform=tf)
 

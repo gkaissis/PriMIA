@@ -8,7 +8,6 @@ tabulate
 scikit-image
 tensorflow-io==0.15.0
 albumentations
-pytorch-dp 
 gevent ==20.6.2
 gevent-websocket ==0.10.1
 gunicorn ==20.0.4

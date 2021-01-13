@@ -158,3 +158,4 @@ if "ID_PROVIDER" not in globals():
     ID_PROVIDER = IdProvider()
 
 print("Welcome to PriMIA!")
+__version__ = "PriMIA_0.2"

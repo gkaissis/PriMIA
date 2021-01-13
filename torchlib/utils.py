@@ -35,6 +35,11 @@ from .dataloader import (
     MSD_data, 
     MSD_data_images, 
 )
+import sys, os.path
+
+sys.path.insert(0, os.path.split(sys.path[0])[0])
+
+from opacus import privacy_analysis as tf_privacy
 
 filterwarnings("ignore", message="invalid value encountered in double_scalars")
 
@@ -138,8 +143,26 @@ class Arguments:
         # self.save_model = config.getboolean("config", "save_model", fallback=False)
         self.optimizer = config.get("config", "optimizer")  # , fallback="SGD")
         self.differentially_private = config.getboolean(
-            "config", "differentially_private", fallback=False
+            "DP", "differentially_private", fallback=False
         )
+        self.noise_multiplier = config.getfloat("DP", "noise_multiplier", fallback=0.38)
+        self.max_grad_norm = config.getfloat("DP", "max_grad_norm", fallback=1.2)
+        self.target_delta = config.getfloat("DP", "target_delta", fallback=1e-5)
+        self.DPSSE = config.getboolean("DP", "dp_stats_exchange", fallback=False)
+        self.dpsse_eps = config.getfloat("DP", "dp_sse_epsilon", fallback=1.0)
+        self.microbatch_size = config.getint("DP", "microbatch_size", fallback=1)
+        if not self.microbatch_size == 1:
+            warn(
+                "Training privately with microbatch sizes larger than 1 yields faster performance"
+                " but automatically adds multiplicative amounts of noise to preserve guarantees."
+            )
+        if self.differentially_private and (
+            self.batch_size % self.microbatch_size != 0
+            or self.microbatch_size > self.batch_size
+        ):
+            raise RuntimeError(
+                "Microbatch size must be smaller than and evenly divide the batch size."
+            )
         assert self.optimizer in ["SGD", "Adam"], "Unknown optimizer"
         if self.optimizer == "Adam":
             self.beta1 = config.getfloat("config", "beta1", fallback=0.9)
@@ -452,6 +475,16 @@ class Cross_entropy_one_hot(torch.nn.Module):
         return loss
 
 
+def get_privacy_spent(
+    target_delta=None, steps=None, alphas=None, sample_rate=1, noise_multiplier=None
+):
+    rdp = (
+        torch.tensor(tf_privacy.compute_rdp(sample_rate, noise_multiplier, 1, alphas))
+        * steps
+    )
+    return tf_privacy.get_privacy_spent(alphas, rdp, target_delta)
+
+
 class To_one_hot(torch.nn.Module):
     def __init__(self, num_classes):
         super(To_one_hot, self).__init__()
@@ -668,29 +701,6 @@ def setup_pysyft(args, hook, verbose=False):
             desc="load data",
         ):
             if args.data_dir == "mnist":
-                # node_id = worker.id
-                # KEEP_LABELS_DICT = {
-                #     "alice": [0, 1, 2, 3],
-                #     "bob": [4, 5, 6],
-                #     "charlie": [7, 8, 9],
-                #     None: list(range(10)),
-                # }
-                # dataset = LabelMNIST(
-                #     labels=KEEP_LABELS_DICT[node_id]
-                #     if node_id in KEEP_LABELS_DICT
-                #     else KEEP_LABELS_DICT[None],
-                #     root="./data",
-                #     train=True,
-                #     download=True,
-                #     transform=AlbumentationsTorchTransform(
-                #         a.Compose(
-                #             [
-                #                 a.ToFloat(max_value=255.0),
-                #                 a.Lambda(image=lambda x, **kwargs: x[:, :, np.newaxis]),
-                #             ]
-                #         )
-                #     ),
-                # )
                 dataset = mnist_datasets[worker.id]
                 mean, std = calc_mean_std(dataset)
                 dataset.dataset.transform.transform.transforms.transforms.append(  # beautiful
@@ -736,6 +746,7 @@ def setup_pysyft(args, hook, verbose=False):
                 mean, std = calc_mean_std(
                     stats_dataset,
                     save_folder=data_dir,
+                    epsilon=args.dpsse_eps if args.DPSSE else None,
                 )
                 del stats_dataset
 
@@ -746,9 +757,6 @@ def setup_pysyft(args, hook, verbose=False):
                         To_one_hot(3),
                     ]
                 dataset = datasets.ImageFolder(
-                    # path.join("data/server_simulation/", "validation")
-                    # if worker.id == "validation"
-                    # else
                     data_dir,
                     loader=loader,
                     transform=create_albu_transform(args, mean, std),
@@ -765,7 +773,6 @@ def setup_pysyft(args, hook, verbose=False):
             worker.load_data([mean, std])
 
             data, targets = [], []
-            # repetitions = 1 if worker.id == "validation" else args.repetitions_dataset
             if args.mixup:
                 dataset = torch.utils.data.DataLoader(
                     dataset,
@@ -834,7 +841,10 @@ def setup_pysyft(args, hook, verbose=False):
         fed_dataset = sy.FederatedDataset(dist_dataset)
         total_L += len(fed_dataset)
         tl = sy.FederatedDataLoader(
-            fed_dataset, batch_size=args.batch_size, shuffle=True
+            fed_dataset,
+            batch_size=args.batch_size,
+            shuffle=True,
+            drop_last=args.differentially_private,
         )
         train_loader[workers[worker]] = tl
     means = [m[0] for m in grid.search("#datamean").values()]
@@ -1035,7 +1045,7 @@ def train_federated(
     test_params=None,
     vis_params=None,
     verbose=True,
-    privacy_engines=None,
+    alphas=None,
 ):
 
     total_batches = 0
@@ -1046,7 +1056,7 @@ def train_federated(
             worker.id: len(tl) / total_batches for worker, tl in train_loaders.items()
         }
 
-    model, avg_loss = secure_aggregation_epoch(
+    model, avg_loss, epsilon = secure_aggregation_epoch(
         args,
         model,
         device,
@@ -1057,6 +1067,7 @@ def train_federated(
         crypto_provider,
         test_params=test_params,
         weights=w_dict,
+        alphas=alphas,
     )
     if args.visdom:
         vis_params["vis"].line(
@@ -1075,7 +1086,7 @@ def train_federated(
                     avg_loss,
                 )
             )
-    return model
+    return model, epsilon
 
 
 def tensor_iterator(model: "torch.Model") -> "Sequence[Iterator]":
@@ -1097,7 +1108,8 @@ def aggregation(
     weights=None,
     secure=True,
 ):
-    """(Very) defensive version of the original secure aggregation relying on actually checking the parameter names and shapes before trying to load them into the model."""
+    """(Very) defensive version of the original secure aggregation relying on actually checking
+    the parameter names and shapes before trying to load them into the model."""
 
     ## CUDA in FL ##
     # important note: the shifting has to be called on the params 
@@ -1225,7 +1237,12 @@ def secure_aggregation_epoch(
     test_params=None,
     verbose=True,
     privacy_engines=None,
+    alphas=None,
 ):
+    for w, m in models.items():
+        for param in m.parameters():
+            if param.requires_grad:
+                param.accumulated_grads = []
     for worker in train_loaders.keys():
         if models[worker.id].location is not None:
             continue  # model + loss already at a worker, 783/784 don't happen
@@ -1245,9 +1262,7 @@ def secure_aggregation_epoch(
                 opt = torch.optim.SGD
             else:
                 raise NotImplementedError("only Adam or SGD supported.")
-            optimizers[worker] = opt(
-                models[worker].parameters(), **kwargs
-            )  # no send operation here?
+            optimizers[worker] = opt(models[worker].parameters(), **kwargs)
             if privacy_engines:
                 privacy_engines[worker].attach(optimizers[worker])
 
@@ -1273,19 +1288,114 @@ def secure_aggregation_epoch(
             if batch_idx >= num_batches[worker.id]:
                 continue
             optimizers[worker.id].zero_grad()
-            data, target = next(dataloader)
+
+            #data, target = next(dataloader)
             ## CUDA in FL ##
             # model already to cuda in train.py
             ##TODO: Special for MSD scans (ONLY FOR THE NON-PREPROCESSED)
             #res = data.shape[-1]
             #data, target = data.view(-1, 1, res, res).to(device), target.view(-1, res, res).to(device)
-            data, target = data.to(device), target.to(device)
-            pred = models[worker.id](data)
-            if args.data_dir == "seg_data":  # TODO do sth better
-                 pred = pred.squeeze()
-            loss = loss_fns[worker.id](pred, target)
-            loss.backward()
+            #data, target = data.to(device), target.to(device)
+            #pred = models[worker.id](data)
+            #if args.data_dir == "seg_data":  # TODO do sth better
+            #     pred = pred.squeeze()
+            #loss = loss_fns[worker.id](pred, target)
+            #loss.backward()
+
+            _, target = next(dataloader)
+            print(f"ON CUDA: {target.device}")
+
+            if args.differentially_private and args.batch_size > args.microbatch_size:
+                batch = next(dataloader)
+                for i in range(
+                    0,
+                    batch[0].shape[0],
+                    args.microbatch_size,
+                ):
+                    data, target = (
+                        batch[0][i : i + args.microbatch_size],
+                        batch[1][i : i + args.microbatch_size],
+                    )
+                    output = models[worker.id](data)
+                    loss = loss_fns[worker.id](output, target)
+                    loss.backward()
+                    with torch.no_grad():
+                        # torch internally checks if the parameter requires grad
+                        # and only clips the ones that do, so we don't need to check.
+                        # torch also clips by 'global norm', see https://arxiv.org/abs/1211.5063
+                        # clips inplace and detached from the computation graph
+                        torch.nn.utils.clip_grad_norm_(
+                            models[worker.id].parameters(), args.max_grad_norm
+                        )
+                        # Since we are operating on microbatches in this case
+                        # we accumulate the clipped microbatch gradients into
+                        # a container to average them later
+                        # then we discard the original gradient for safety
+                        for param in models[worker.id].parameters():
+                            if hasattr(param, "accumulated_grads"):
+                                param.accumulated_grads.append(
+                                    param.grad.copy().detach()
+                                )
+                                param.grad.zero_()
+                with torch.no_grad():
+                    # at this point, we have the accumulated gradients
+                    # and need to add noise calibrated by the norm
+                    # larger microbatches get more noise
+                    for param in models[worker.id].parameters():
+                        if param.requires_grad:  # only parameters we clipped get noise
+                            noise = (
+                                torch.normal(
+                                    0,
+                                    args.noise_multiplier * args.max_grad_norm,
+                                    size=param.grad.shape,
+                                )
+                                * (args.microbatch_size / args.batch_size)
+                            )
+                            noise = noise.send(worker.id)
+                            param.grad.add_(
+                                torch.mean(  # pylint:disable=no-member
+                                    torch.stack(  # pylint:disable=no-member
+                                        param.accumulated_grads, dim=0
+                                    ),
+                                    dim=0,
+                                )
+                                + noise
+                            )
+                            param.accumulated_grads = (
+                                []
+                            )  # clean up the accumulated gradients
+            elif (
+                args.differentially_private and args.batch_size == args.microbatch_size
+            ):
+                data, target = next(dataloader)
+                pred = models[worker.id](data)
+                loss = loss_fns[worker.id](pred, target)
+                loss.backward()
+                # here we are operating on the special case where the microbatch
+                # is the same size as the minibatch
+                # we don't need to accumulate gradients manually and can save one loop
+                # but the gradient gets much more noise to compensate
+                with torch.no_grad():
+                    torch.nn.utils.clip_grad_norm_(
+                        models[worker.id].parameters(), args.max_grad_norm
+                    )
+                    for param in models[worker.id].parameters():
+                        noise = torch.normal(
+                            0,
+                            args.noise_multiplier * args.max_grad_norm,
+                            size=param.grad.shape,
+                        )  # no more scaling by microbatch size here
+                        noise = noise.send(worker.id)
+                        param.grad.add_(noise)
+            else:
+                data, target = next(dataloader)
+                pred = models[worker.id](data)
+                print(f"PRED SHAPE: {pred.shape}")
+                loss = loss_fns[worker.id](pred, target)
+                loss.backward()
             optimizers[worker.id].step()
+            if args.differentially_private:
+                worker.total_dp_steps += 1
             avg_loss.append(loss.detach().cpu().get().item())
         if batch_idx > 0 and batch_idx % args.sync_every_n_batch == 0:
             pbar.set_description_str("Aggregating")
@@ -1344,8 +1454,33 @@ def secure_aggregation_epoch(
     )
     models = send_new_models(models["local_model"], models)
     avg_loss = np.mean(avg_loss)
+    if args.differentially_private:
+        epsila = []
+        for worker in dataloaders.keys():
+            sample_size = len(dataloaders[worker].federated_dataset)
+            if args.batch_size / sample_size > 1.0:
+                raise ValueError(
+                    f"Batch size ({args.batch_size}) exceeds the dataset size ({sample_size}) on worker {worker.id}."
+                    "This breaks privacy accounting."
+                    "Please select a batch size that's at most equal to the dataset size on the worker."
+                )
+            epsilon, best_alpha = get_privacy_spent(
+                target_delta=args.target_delta,
+                steps=worker.total_dp_steps,
+                alphas=alphas,
+                noise_multiplier=args.noise_multiplier,
+                sample_rate=args.batch_size / sample_size,
+            )
+            epsila.append(epsilon)
+            print(
+                f"[{worker.id}]\t"
+                f"(ε = {epsilon:.2f}, δ = {args.target_delta}) for α = {best_alpha}"
+            )
+        epsilon = max(epsila)
+    else:
+        epsilon = 0
 
-    return models, avg_loss
+    return models, avg_loss, epsilon
 
 
 def train(  # never called on websockets
@@ -1365,7 +1500,6 @@ def train(  # never called on websockets
         mixup = MixUp(λ=args.mixup_lambda, p=args.mixup_prob)
         oh_converter = To_one_hot(num_classes)
         oh_converter.to(device)
-
     L = len(train_loader)
     div = 1.0 / float(L)
     avg_loss = []
@@ -1401,7 +1535,8 @@ def train(  # never called on websockets
                 data, target = mixup((data, target))
         optimizer.zero_grad()
 
-        model = model.to(device)
+        # TODO: necessary? 
+        # model = model.to(device)
 
         output = model(data)
 
@@ -1436,6 +1571,13 @@ def train(  # never called on websockets
                 )
             else:
                 avg_loss.append(loss.item())
+    if args.differentially_private:
+        epsilon, best_alpha = optimizer.privacy_engine.get_privacy_spent(
+            args.target_delta
+        )
+        print(f"(ε = {epsilon:.2f}, δ = {args.target_delta}) for α = {best_alpha}")
+    else:
+        epsilon = 0
     if not args.visdom and verbose:
         print(
             "Train Epoch: {} \tLoss: {:.6f}".format(
@@ -1443,7 +1585,7 @@ def train(  # never called on websockets
                 np.mean(avg_loss),
             )
         )
-    return model
+    return model, epsilon
 
 
 def stats_table(

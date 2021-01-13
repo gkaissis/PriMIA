@@ -36,6 +36,8 @@ symbolic_server_folders:
 
 minimal_server_folders: symbolic_server_folders
 	cd data/server_simulation && python delete_all_but_n.py 4 && python calc_class_distribution.py && cd ../..
+small_server_folders: symbolic_server_folders
+	cd data/server_simulation && python delete_all_but_n.py 10 && python calc_class_distribution.py && cd ../..
 
 # automated script to create image segmentation dataset (jpg) from Medical Decathlon Segmentation dataset 
 # possibly easy to adapt for other medical datasets 
@@ -53,6 +55,13 @@ federated_secure_segmentation:
 	@echo Training a Seg-Net on VirtualWorkers without SecAgg
 	python train.py --config configs/torch/segmentation.ini --train_federated --data_dir seg_data
 	@echo Finished Training on VirtualWorkers with SecAgg
+
+make federated_DP_secure:
+	python train.py --config configs/torch/pneumonia-resnet-pretrained-DP.ini --train_federated --data_dir data/server_simulation
+
+# Segmenation 
+make federated_DP_secure_segmentation:
+	python train.py --config configs/torch/segmentation-DP.ini --train_federated --data_dir seg_data
 
 federated_insecure:
 	@echo Training on VirtualWorkers without SecAgg

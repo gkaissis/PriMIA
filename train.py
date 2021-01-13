@@ -16,7 +16,6 @@ import torch
 
 import torch.nn as nn
 import torch.optim as optim
-import torchdp as tdp
 import tqdm
 import visdom
 import albumentations as a
@@ -56,6 +55,8 @@ from torchlib.utils import (
 )
 from sklearn.model_selection import train_test_split
 import segmentation_models_pytorch as smp
+from revision_scripts.module_modification import convert_batchnorm_modules
+from opacus import PrivacyEngine
 
 
 def main(args, verbose=True, optuna_trial=None, cmd_args=None):
@@ -223,7 +224,7 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             stats_tf.transform.transforms.transforms.append(
                 a.Normalize(mean, std, max_pixel_value=1.0)
             )
-            valset = datasets.ImageFolder(
+            valset = datasets.ImageFolder(  # TODO hardcoded path
                 "data/test", transform=stats_tf, loader=loader
             )
             # occurances = dataset.get_class_occurances()
@@ -235,7 +236,11 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
         #     [int(ceil(total_L * (1.0 - fraction))), int(floor(total_L * fraction))],
         # )
         train_loader = torch.utils.data.DataLoader(
-            dataset, batch_size=args.batch_size, shuffle=True, **kwargs
+            dataset,
+            batch_size=args.batch_size,
+            shuffle=True,
+            drop_last=args.differentially_private,
+            **kwargs,
         )
 
         # val_tf = [
@@ -380,35 +385,49 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
         if args.train_federated
         else opt(model.parameters(), **opt_kwargs)
     )
-    privacy_engines = None
+    ALPHAS = None
     if args.differentially_private:
-        if type(optimizer) == dict:
-            warn(
-                "Differential Privacy is currently only implemented for local training and models without BatchNorm."
-            )
+        if args.mixup:
+            warn("Mixup and DP do not like each other.")
             exit()
-            privacy_engines = {
-                idt.id: tdp.PrivacyEngine(
-                    model[idt.id],
-                    args.batch_size,
-                    len(tl.federated_dataset),
-                    alphas=[1, 10, 100],
-                    noise_multiplier=1.3,
-                    max_grad_norm=1.0,
-                )
-                for idt, tl in train_loader.items()
-                if idt.id not in ["local_model", "crypto_provider"]
-            }
-            for w, pe in privacy_engines.items():
-                pe.attach(optimizer[w])
+        if args.weight_decay > 0:
+            warn("We would recommend setting weight decay to 0 when using DP")
+        if (
+            args.clahe
+            or args.randomgamma
+            or args.randombrightness
+            or args.blur
+            or args.elastic
+            or args.optical_distortion
+            or args.grid_distortion
+            or args.grid_shuffle
+            or args.grid_shuffle
+            or args.hsv
+            or args.invert
+            or args.cutout
+            or args.shadow
+            or args.sun_flare
+            or args.fog
+            or args.solarize
+            or args.equalize
+        ):
+            warn("We would recommend not using augmentations with DP")
+        ALPHAS = [1 + x / 10.0 for x in range(1, 100)] + list(range(12, 64))
+        if args.train_federated:
+            for key, m in model.items():
+                model[key] = convert_batchnorm_modules(m)
+            for w in train_loader.keys():
+                if not hasattr(w, "total_dp_steps"):
+                    setattr(w, "total_dp_steps", 0)
         else:
-            privacy_engine = tdp.PrivacyEngine(
+            model = convert_batchnorm_modules(model)
+            privacy_engine = PrivacyEngine(
                 model,
-                args.batch_size,
-                len(train_loader.dataset),
-                alphas=[1, 10, 100],
-                noise_multiplier=1.3,
-                max_grad_norm=1.0,
+                batch_size=args.batch_size,  # recommended in opacus tutorial
+                sample_size=len(train_loader.dataset),
+                alphas=ALPHAS,
+                noise_multiplier=args.noise_multiplier,
+                max_grad_norm=args.max_grad_norm,
             )
             privacy_engine.attach(optimizer)
 
@@ -440,7 +459,7 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
         loss_fn = {w: loss_fn.copy() for w in [*workers, "local_model"]}
 
     start_at_epoch = 1
-    if cmd_args.resume_checkpoint:
+    if cmd_args and cmd_args.resume_checkpoint:
         print("Resume training from a given checkpoint.")
         state = torch.load(cmd_args.resume_checkpoint, map_location=device)
         start_at_epoch = state["epoch"]
@@ -549,7 +568,7 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             )
 
         if args.train_federated:
-            model = train_federated(
+            model, epsilon = train_federated(
                 args,
                 model,
                 device,
@@ -563,11 +582,11 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
                 test_params=None,
                 vis_params=vis_params,
                 verbose=verbose,
-                privacy_engines=privacy_engines,
+                alphas=ALPHAS,
             )
 
         else:
-            model = train(
+            model, epsilon = train(
                 args,
                 model,
                 device,
@@ -647,7 +666,7 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
     for model_file in model_paths:
         remove(model_file)
 
-    return matthews_scores[best_score_idx]
+    return matthews_scores[best_score_idx], epsilon
 
 
 if __name__ == "__main__":

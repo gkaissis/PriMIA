@@ -168,7 +168,7 @@ if __name__ == "__main__":
             args_copy.sync_every_n_batch = s
             t1 = time()
             with shutup():
-                results_dict[str(s)] = main(args_copy, verbose=False)
+                results_dict[str(s)], epsilon = main(args_copy, verbose=False)
             t = time() - t1
             time_dict[str(s)] = t
         writefile("figure_scripts/sigmas.csv", results_dict, list(sigmas))
