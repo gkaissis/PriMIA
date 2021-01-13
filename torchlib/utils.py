@@ -676,8 +676,8 @@ def setup_pysyft(args, hook, verbose=False):
             """
 
             ## MSD dataset preprocessed version ##
-            #PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
-            PATH = "/home/NiWaRe/PriMIA/Task03_Liver"
+            PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
+            #PATH = "/home/NiWaRe/PriMIA/Task03_Liver"
             #PATH = args.data_dir
             dataset = MSD_data_images(PATH+'/train')
             
@@ -903,8 +903,8 @@ def setup_pysyft(args, hook, verbose=False):
         #valset = SegmentationData(image_paths_file='data/segmentation_data/val.txt')
 
         ## MSD dataset 
-        #PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
-        PATH = "/home/NiWaRe/PriMIA/Task03_Liver"
+        PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
+        #PATH = "/home/NiWaRe/PriMIA/Task03_Liver"
         #PATH = args.data_dir
         valset = MSD_data_images(PATH+'/val')
         pass
@@ -1302,9 +1302,6 @@ def secure_aggregation_epoch(
             #loss = loss_fns[worker.id](pred, target)
             #loss.backward()
 
-            _, target = next(dataloader)
-            print(f"ON CUDA: {target.device}")
-
             if args.differentially_private and args.batch_size > args.microbatch_size:
                 batch = next(dataloader)
                 for i in range(
@@ -1390,7 +1387,6 @@ def secure_aggregation_epoch(
             else:
                 data, target = next(dataloader)
                 pred = models[worker.id](data)
-                print(f"PRED SHAPE: {pred.shape}")
                 loss = loss_fns[worker.id](pred, target)
                 loss.backward()
             optimizers[worker.id].step()
