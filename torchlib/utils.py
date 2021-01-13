@@ -287,7 +287,11 @@ class Arguments:
         if self.websockets:
             assert self.train_federated, "If you use websockets it must be federated"
         self.num_threads = config.getint("system", "num_threads", fallback=0)
-        self.bin_seg = cmd_args.bin_seg
+        self.bin_seg = (
+            cmd_args.bin_seg
+            if hasattr(cmd_args, "bin_seg")
+            else False
+        )
 
     @classmethod
     def from_namespace(cls, args):
@@ -677,8 +681,8 @@ def setup_pysyft(args, hook, verbose=False):
             """
 
             ## MSD dataset preprocessed version ##
-            PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
-            #PATH = "/home/NiWaRe/PriMIA/Task03_Liver"
+            #PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
+            PATH = "/home/NiWaRe/PriMIA/Task03_Liver"
             #PATH = args.data_dir
             dataset = MSD_data_images(PATH+'/train')
             
@@ -904,8 +908,8 @@ def setup_pysyft(args, hook, verbose=False):
         #valset = SegmentationData(image_paths_file='data/segmentation_data/val.txt')
 
         ## MSD dataset 
-        PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
-        #PATH = "/home/NiWaRe/PriMIA/Task03_Liver"
+        #PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
+        PATH = "/home/NiWaRe/PriMIA/Task03_Liver"
         #PATH = args.data_dir
         valset = MSD_data_images(PATH+'/val')
         pass

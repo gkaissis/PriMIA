@@ -168,8 +168,8 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             dataset, valset = torch.utils.data.random_split(dataset, [train_size, val_size])
             """
             ## MSD dataset preprocessed version ##
-            PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
-            #PATH = "/home/NiWaRe/PriMIA/Task03_Liver"
+            #PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
+            PATH = "/home/NiWaRe/PriMIA/Task03_Liver"
   
             #PATH = args.data_dir
 
