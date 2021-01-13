@@ -25,13 +25,14 @@ import albumentations as a
 from random import seed as rseed
 
 from torchlib.utils import stats_table, Arguments  # pylint:disable=import-error
-from torchlib.models import vgg16, resnet18, conv_at_resolution
+from torchlib.models import vgg16, resnet18, conv_at_resolution, MoNet
 from torchlib.run_websocket_server import read_websocket_config
 from torchlib.dataloader import (
     AlbumentationsTorchTransform,
     PathDataset,
     RemoteTensorDataset,
     CombinedLoader,
+    # TODO: MSD_data_images ?
 )
 from collections import Counter
 from syft.serde.compression import NO_COMPRESSION
@@ -72,6 +73,9 @@ if __name__ == "__main__":
         )
         parser.add_argument(
             "--http_protocol", action="store_true", help="Use HTTP only instead of WS."
+        )
+        parser.add_argument(
+            "--bin_seg", action="store_true", help="Binary Segmentation"
         )
         cmd_args = parser.parse_args()
 
@@ -182,6 +186,10 @@ if __name__ == "__main__":
                     transforms.Normalize(mean, std),
                 ]
             )
+        elif args.bin_seg: 
+            num_classes = 1
+            # TODO: target_transform=lambda x: x.squeeze() ? 
+            tf = []
         else:
             num_classes = 3
             tf = [
@@ -270,6 +278,24 @@ if __name__ == "__main__":
                 input_size=args.inference_resolution,
                 pooling=args.pooling_type if hasattr(args, "pooling_type") else "avg",
             )
+        elif args.model == "MoNet":
+            model = MoNet(
+                input_shape=(256, 256, 1),
+                output_classes=1,
+                depth=2,
+                n_filters_init=16,
+                dropout_enc=0.2,
+                dropout_dec=0.2,
+                activation="sigmoid",
+            )
+            model = resnet18(
+                pretrained=args.pretrained,
+                num_classes=num_classes,
+                in_channels=3 if args.pretrained else 1,
+                adptpool=False,
+                input_size=args.inference_resolution,
+                pooling=args.pooling_type if hasattr(args, "pooling_type") else "avg",
+            )
         else:
             raise ValueError(
                 "Model name not recognised. Please enter one of 'vgg16', 'simpleconv', 'resnet-18'."
@@ -314,8 +340,12 @@ if __name__ == "__main__":
                 output = model(data)
                 if args.encrypted_inference:
                     output = output.get().float_prec()
-                pred = output.argmax(dim=1)
-                total_pred.append(pred.detach().cpu().item())
+                if args.bin_seg: # binary segmentation 
+                    pred = output.view(-1).round().type(torch.LongTensor)
+                    total_pred.append(pred.detach().cpu().item())
+                else:
+                    pred = output.argmax(dim=1)
+                    total_pred.append(pred.detach().cpu().item())
                 ## should be unneccessary but somehow required
                 if len(dataset) == i + 1:
                     break

@@ -281,12 +281,13 @@ class Arguments:
         self.encrypted_inference = (
             cmd_args.encrypted_inference if mode == "inference" else False
         )
-        self.data_dir = cmd_args.data_dir  # options: ['pneumonia', 'mnist']
+        self.data_dir = cmd_args.data_dir  # options: ['pneumonia', 'mnist', 'MSD']
         self.cuda = cmd_args.cuda
         self.websockets = cmd_args.websockets if mode == "train" else False
         if self.websockets:
             assert self.train_federated, "If you use websockets it must be federated"
         self.num_threads = config.getint("system", "num_threads", fallback=0)
+        self.bin_seg = cmd_args.bin_seg
 
     @classmethod
     def from_namespace(cls, args):
@@ -1767,6 +1768,7 @@ def test(
                 output = output.view(-1)
                 total_scores.append(output)
                 target = target.view(-1)
+                # binary classification
                 pred = output.round().type(torch.LongTensor)
                 tgts = target.type(torch.LongTensor)
                 total_pred.append(pred)
