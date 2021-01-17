@@ -767,8 +767,11 @@ def setup_pysyft(args, hook, verbose=False):
         tl = sy.FederatedDataLoader(
             fed_dataset,
             batch_size=args.batch_size,
-            shuffle=True,
+            shuffle=True,  # important for DP, see comment on this below
             drop_last=args.differentially_private,
+            iid=args.differentially_private,  # use random uniform subsampling
+            # see Balle et al. 2018, https://arxiv.org/pdf/1807.01647.pdf (Table 1)
+            # and Wang et al. 2018, https://arxiv.org/pdf/1808.00087.pdf
         )
         train_loader[workers[worker]] = tl
     means = [m[0] for m in grid.search("#datamean").values()]

@@ -1,5 +1,10 @@
 import torch
-from torch.utils.data import SequentialSampler, RandomSampler, BatchSampler
+from torch.utils.data import (
+    SequentialSampler,
+    RandomSampler,
+    BatchSampler,
+    WeightedRandomSampler,
+)
 from torch._six import string_classes, int_classes, container_abcs
 
 import logging
@@ -67,7 +72,8 @@ class _DataLoaderIter(object):
 
         # Create a sample iterator for each worker
         self.sample_iter = {
-            worker: iter(batch_sampler) for worker, batch_sampler in loader.batch_samplers.items()
+            worker: iter(batch_sampler)
+            for worker, batch_sampler in loader.batch_samplers.items()
         }
 
     def __len__(self):
@@ -82,7 +88,9 @@ class _DataLoaderIter(object):
 
         try:
             indices = next(self.sample_iter[worker])
-            batch = self.collate_fn([self.federated_dataset[worker][i] for i in indices])
+            batch = self.collate_fn(
+                [self.federated_dataset[worker][i] for i in indices]
+            )
             return batch
         # All the data for this worker has been used
         except StopIteration:
@@ -133,7 +141,9 @@ class _DataLoaderOneWorkerIter(object):
 
         try:
             indices = next(self.sample_iter)
-            batch = self.collate_fn([self.federated_dataset[self.worker][i] for i in indices])
+            batch = self.collate_fn(
+                [self.federated_dataset[self.worker][i] for i in indices]
+            )
             return batch
         # All the data for this worker has been used
         except StopIteration:
@@ -191,6 +201,7 @@ class FederatedDataLoader(object):
         drop_last=False,
         collate_fn=default_collate,
         iter_per_worker=False,
+        iid=False,
         **kwargs,
     ):
         if len(kwargs) > 0:
@@ -209,15 +220,23 @@ class FederatedDataLoader(object):
         self.batch_size = batch_size
         self.drop_last = drop_last
         self.collate_fn = collate_fn
-        self.iter_class = _DataLoaderOneWorkerIter if iter_per_worker else _DataLoaderIter
+        self.iter_class = (
+            _DataLoaderOneWorkerIter if iter_per_worker else _DataLoaderIter
+        )
 
         # Build a batch sampler per worker
         self.batch_samplers = {}
         for worker in self.workers:
             data_range = range(len(federated_dataset[worker]))
-            if shuffle:
+            if shuffle and not iid:  # we want permutation sampling
                 sampler = RandomSampler(data_range)
-            else:
+            elif shuffle and iid:  # we want random subsampling without replacement
+                sampler = WeightedRandomSampler(
+                    weights=torch.ones(len(data_range), dtype=torch.float),
+                    replacement=False,
+                    num_samples=len(federated_dataset[worker]),
+                )
+            else:  # we want serial sampling
                 sampler = SequentialSampler(data_range)
             batch_sampler = BatchSampler(sampler, batch_size, drop_last)
             self.batch_samplers[worker] = batch_sampler
