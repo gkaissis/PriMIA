@@ -767,12 +767,22 @@ def setup_pysyft(args, hook, verbose=False):
         tl = sy.FederatedDataLoader(
             fed_dataset,
             batch_size=args.batch_size,
-            shuffle=True,  # important for DP, see comment on this below
+            shuffle=True,
             drop_last=args.differentially_private,
-            iid=args.differentially_private,  # use random uniform subsampling
-            # see Balle et al. 2018, https://arxiv.org/pdf/1807.01647.pdf (Table 1)
-            # and Wang et al. 2018, https://arxiv.org/pdf/1808.00087.pdf
+            poisson=args.differentially_private,  # See below
         )
+        """
+        The original implementation of DP-SGD by Abadi et al. (https://arxiv.org/abs/1607.00133) relies
+        on the moments accountant to perform privacy budgeting. We are using the RDP accountant 
+        (https://arxiv.org/pdf/1908.10530) which provides the same guarantees. Both implementations 
+        assume Poisson sampling of the minibatches. Instead of shuffling, then serially iterating through
+        the dataset, Poisson sampling randomly selects a "lot" (original wording) of samples with probability
+        L/n. In the infinite limit, the expectation of the batch size is identical to args.batch_size, but
+        the individual batches are neither exactly that large nor identical. This is why we are patching
+        Syft's DataLoader to include a Poisson sampler in order to conform fully to the assumptions of the
+        RDP accountant.
+        """
+
         train_loader[workers[worker]] = tl
     means = [m[0] for m in grid.search("#datamean").values()]
     stds = [s[0] for s in grid.search("#datastd").values()]

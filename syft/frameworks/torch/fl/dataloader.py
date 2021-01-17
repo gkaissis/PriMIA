@@ -9,6 +9,8 @@ from torch._six import string_classes, int_classes, container_abcs
 
 import logging
 import math
+import numpy as np
+
 
 numpy_type_map = {
     "float64": torch.DoubleTensor,
@@ -166,6 +168,40 @@ class _DataLoaderOneWorkerIter(object):
         raise StopIteration
 
 
+class PoissonBatchSampler(torch.utils.data.Sampler):
+    """
+    Poisson Sampler to satisfy privacy accounting. Produces uneven batch sizes by design.
+    Although not 100% correct, this sampler will never produce an empty batch to not crash
+    the training.
+    """
+
+    def __init__(self, sampler, batch_size, drop_last):
+        self.sampler = sampler
+        self.batch_size = batch_size
+        self.sample_size = len(self.sampler)
+        self.drop_last = drop_last
+        self.sample_rate = self.batch_size / self.sample_size
+
+    def __iter__(self):
+        s_idcs = np.array(list(self.sampler))
+        for _ in range(len(self)):
+            batch = []
+            while len(batch) == 0:
+                batch = s_idcs[
+                    np.random.binomial(1, self.sample_rate, size=len(s_idcs)).astype(
+                        np.bool
+                    )
+                ]
+            np.random.shuffle(batch)
+            yield batch
+
+    def __len__(self):
+        if self.drop_last:
+            return len(self.sampler) // self.batch_size
+        else:
+            return (len(self.sampler) + self.batch_size - 1) // self.batch_size
+
+
 class FederatedDataLoader(object):
     """
     Data loader. Combines a dataset and a sampler, and provides
@@ -201,7 +237,7 @@ class FederatedDataLoader(object):
         drop_last=False,
         collate_fn=default_collate,
         iter_per_worker=False,
-        iid=False,
+        poisson=False,
         **kwargs,
     ):
         if len(kwargs) > 0:
@@ -227,18 +263,19 @@ class FederatedDataLoader(object):
         # Build a batch sampler per worker
         self.batch_samplers = {}
         for worker in self.workers:
+            """Behold the case for a switch-case statement in Python."""
             data_range = range(len(federated_dataset[worker]))
-            if shuffle and not iid:  # we want permutation sampling
+            if shuffle and not poisson:  # user wants "regular" permutation sampling
                 sampler = RandomSampler(data_range)
-            elif shuffle and iid:  # we want random subsampling without replacement
-                sampler = WeightedRandomSampler(
-                    weights=torch.ones(len(data_range), dtype=torch.float),
-                    replacement=False,
-                    num_samples=len(federated_dataset[worker]),
-                )
-            else:  # we want serial sampling
+                batch_sampler = BatchSampler(sampler, batch_size, drop_last)
+            elif shuffle and poisson:  # user wants poisson
                 sampler = SequentialSampler(data_range)
-            batch_sampler = BatchSampler(sampler, batch_size, drop_last)
+                batch_sampler = PoissonBatchSampler(sampler, batch_size, drop_last)
+            elif not (shuffle or poisson):  # user wants serial sampling
+                sampler = SequentialSampler(data_range)
+                batch_sampler = BatchSampler(sampler, batch_size, drop_last)
+            else:  # user asked for poisson without shuffling
+                raise ValueError("The Poisson sampling procedure shuffles by default.")
             self.batch_samplers[worker] = batch_sampler
 
         if iter_per_worker:
