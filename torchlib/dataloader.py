@@ -58,27 +58,6 @@ class AlbumentationsTorchTransform:
         return img
 
 
-class PoissonSampler(torch.utils.data.Sampler):
-    def __init__(self, num_examples, batch_size):
-        self.inds = np.arange(num_examples)
-        self.batch_size = batch_size
-        self.num_batches = int(np.ceil(num_examples / batch_size))
-        self.sample_rate = self.batch_size / (1.0 * num_examples)
-        super().__init__()
-
-    def __iter__(self):
-        for _ in range(self.num_batches):
-            batch_idxs = np.random.binomial(
-                n=1, p=self.sample_rate, size=len(self.inds)
-            )
-            batch = self.inds[batch_idxs.astype(np.bool)]
-            np.random.shuffle(batch)
-            yield batch
-
-    def __len__(self):
-        return self.num_batches
-
-
 class CombinedLoader:
     """Class that combines several data loaders and their extensions.
 
