@@ -142,6 +142,9 @@ class Arguments:
         # self.save_interval = config.getint("config", "save_interval", fallback=10)
         # self.save_model = config.getboolean("config", "save_model", fallback=False)
         self.optimizer = config.get("config", "optimizer")  # , fallback="SGD")
+        self.bin_seg = config.getboolean(
+            "config", "binary_segmentation", fallback=False
+        )
         self.differentially_private = config.getboolean(
             "DP", "differentially_private", fallback=False
         )
@@ -287,11 +290,6 @@ class Arguments:
         if self.websockets:
             assert self.train_federated, "If you use websockets it must be federated"
         self.num_threads = config.getint("system", "num_threads", fallback=0)
-        self.bin_seg = (
-            cmd_args.bin_seg
-            if hasattr(cmd_args, "bin_seg")
-            else False
-        )
 
     @classmethod
     def from_namespace(cls, args):
@@ -1723,6 +1721,7 @@ def test(
              ) != "cpu":  # TODO ugly bugfix
                  model = model.to(device)
 
+            # is on CUDA
             output = model(data)
 
             #output = output.view_as(target)

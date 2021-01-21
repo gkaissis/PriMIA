@@ -180,11 +180,10 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
 
             # For now only calculated for saving step below
             val_mean_std = calc_mean_std(dataset)
-
+            mean, std = val_mean_std
             if args.pretrained:
                 mean, std = mean[None, None, :], std[None, None, :]
-            dataset.transform = create_albu_transform(args, mean, std)
-            class_names = dataset.classes
+            #dataset.transform = create_albu_transform(args, mean, std)
 
             # Overfit on small dataset 
             #dataset = dataset[:1]
@@ -434,6 +433,12 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             )
             privacy_engine.attach(optimizer)
 
+    loss_args = {"weight": cw, "reduction": "mean"}
+    if args.mixup or (args.weight_classes and args.train_federated):
+        loss_fn = Cross_entropy_one_hot
+    else:
+        loss_fn = nn.CrossEntropyLoss
+
     # Segmentation - we have to ignore the classes with label -1, they represent unlabeled data
     # Only for MSRC dataset
     if args.bin_seg: 
@@ -444,17 +449,10 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
         # (256*256-a_np.sum())/a_np.sum() -> 15.598 times more negative classes
         #pos_weight = torch.tensor([15]).to(device)
         #loss_args = {"pos_weight" : pos_weight}
-        loss_args = {}
-    else: 
-        loss_args = {"weight": cw, "reduction": "mean"}
-    if args.mixup or (args.weight_classes and args.train_federated):
-        loss_fn = Cross_entropy_one_hot
-    else:
-        loss_fn = nn.CrossEntropyLoss
 
-    if args.bin_seg: 
         #loss_fn = nn.BCEWithLogitsLoss
         loss_fn = smp.utils.losses.DiceLoss
+        loss_args = {}
 
     loss_fn = loss_fn(**loss_args)
     
