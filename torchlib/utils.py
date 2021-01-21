@@ -651,7 +651,7 @@ def setup_pysyft(args, hook, verbose=False):
             mnist_datasets = {worker: d for d, worker in zip(mnist_datasets, workers)}
         
         # Segmentation 
-        elif args.data_dir == "seg_data": 
+        elif args.bin_seg: 
             # Imagepath to the two the parent directory of the two label files 
             ## MSRC dataset ##
             #dataset = SegmentationData(image_paths_file='data/segmentation_data/train.txt')
@@ -682,9 +682,8 @@ def setup_pysyft(args, hook, verbose=False):
 
             ## MSD dataset preprocessed version ##
             #PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
-            PATH = "/home/NiWaRe/PriMIA/Task03_Liver"
-            #PATH = args.data_dir
-            dataset = MSD_data_images(PATH+'/train')
+            #PATH = "/home/NiWaRe/PriMIA/Task03_Liver"
+            dataset = MSD_data_images(args.data_dir+'/train')
             
             lengths = [int(len(dataset) / len(workers)) for _ in workers]
             ##assert sum of lenghts is whole dataset on the cost of the last worker
@@ -712,14 +711,14 @@ def setup_pysyft(args, hook, verbose=False):
                     a.Normalize(mean, std, max_pixel_value=1.0)
                 )
             # Segmentation 
-            elif args.data_dir == "seg_data": 
+            #elif args.data_dir == "seg_data": 
                 #TODO: Add transforms if necessary 
                 # For now only empty structure 
 
-                dataset = seg_datasets[worker.id]
+            #   dataset = seg_datasets[worker.id]
                 #print(len(dataset))
                 #print(dataset)
-                mean, std = calc_mean_std(dataset)
+            #    mean, std = calc_mean_std(dataset)
                 
                 # TODO: For now no transforms necessary - possibly add later (same as in local training case)
                 #dataset.dataset.transform.transform.transforms.transforms.append(  # beautiful
@@ -756,7 +755,7 @@ def setup_pysyft(args, hook, verbose=False):
                 del stats_dataset
 
                 target_tf = None
-                if args.mixup or args.weight_classes:
+                if (args.mixup or args.weight_classes) and not args.data_dir == "seg_data":
                     target_tf = [
                         lambda x: torch.tensor(x),  # pylint:disable=not-callable
                         To_one_hot(3),
@@ -769,9 +768,10 @@ def setup_pysyft(args, hook, verbose=False):
                     if target_tf
                     else None,
                 )
-                assert (
-                    len(dataset.classes) == 3
-                ), "We can only handle data that has 3 classes: normal, bacterial and viral"
+                if not args.bin_seg: 
+                    assert (
+                        len(dataset.classes) == 3
+                    ), "We can only handle data that has 3 classes: normal, bacterial and viral"
 
             mean.tag("#datamean")
             std.tag("#datastd")
@@ -809,7 +809,7 @@ def setup_pysyft(args, hook, verbose=False):
                     targets.append(t)
             selected_data = torch.stack(data)  # pylint:disable=no-member
             # Segmentation 
-            if args.data_dir == "seg_data": 
+            if args.bin_seg: 
                 # Problem with the "torch.tensor(targets)" 
                 # this is normally used to convert list of scalar tensors into a torch array 
                 # however in segmentation we don't have only one scalar as target per sample but a whole mask (2D array)
@@ -900,7 +900,7 @@ def setup_pysyft(args, hook, verbose=False):
             ),
         )
     # Segmentation 
-    elif args.data_dir == "seg_data": 
+    elif args.bin_seg: 
         # TODO: possibly add transforms (also for local case)
         # Again for now WITHOUT transforms, just play loading of the valset 
 
@@ -909,10 +909,9 @@ def setup_pysyft(args, hook, verbose=False):
 
         ## MSD dataset 
         #PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
-        PATH = "/home/NiWaRe/PriMIA/Task03_Liver"
+        #PATH = "/home/NiWaRe/PriMIA/Task03_Liver"
         #PATH = args.data_dir
-        valset = MSD_data_images(PATH+'/val')
-        pass
+        valset = MSD_data_images(args.data_dir+'/val')
     else:
 
         val_tf = [
@@ -1318,6 +1317,11 @@ def secure_aggregation_epoch(
                         batch[0][i : i + args.microbatch_size],
                         batch[1][i : i + args.microbatch_size],
                     )
+
+                    # Check on CUDA
+                    print(data.device)
+                    print(target.device)
+
                     output = models[worker.id](data)
                     loss = loss_fns[worker.id](output, target)
                     loss.backward()
@@ -1370,6 +1374,11 @@ def secure_aggregation_epoch(
                 args.differentially_private and args.batch_size == args.microbatch_size
             ):
                 data, target = next(dataloader)
+
+                # Check on CUDA
+                print(data.device)
+                print(target.device)
+
                 pred = models[worker.id](data)
                 loss = loss_fns[worker.id](pred, target)
                 loss.backward()
@@ -1391,6 +1400,11 @@ def secure_aggregation_epoch(
                         param.grad.add_(noise)
             else:
                 data, target = next(dataloader)
+
+                # Check on CUDA
+                print(data.device)
+                print(target.device)
+
                 pred = models[worker.id](data)
                 loss = loss_fns[worker.id](pred, target)
                 loss.backward()
@@ -1727,7 +1741,7 @@ def test(
             #test_loss += loss.item()  # sum up batch loss
             # Segmentation 
             # TODO: Adapt for all use-cases (train, inference, encrypted, uncencrypted)
-            if args.data_dir == "seg_data": 
+            if args.bin_seg: 
                 # As for normal classification consider the most probable class (for every pixel)
                 # the second dimension in model output is again the class-dimension
                 # that's why the max should be taken over that dimension

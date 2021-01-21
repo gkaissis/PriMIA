@@ -135,7 +135,7 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
                 dataset,
                 [int(ceil(total_L * (1.0 - fraction))), int(floor(total_L * fraction))],
             )
-        elif args.data_dir == "seg_data": 
+        elif args.bin_seg: 
 
             # For now: - transforms fixed in datalaoder class (SegmentationData class), 
             #          - train-val-split by different predfined datasets 
@@ -169,19 +169,22 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             """
             ## MSD dataset preprocessed version ##
             #PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
-            PATH = "/home/NiWaRe/PriMIA/Task03_Liver"
-  
-            #PATH = args.data_dir
+            #PATH = "/home/NiWaRe/PriMIA/Task03_Liver"
 
             dataset = MSD_data_images(
-                 PATH + "/train", target_transform=lambda x: x.squeeze()
+                 args.data_dir + "/train", target_transform=lambda x: x.squeeze()
              )
             valset = MSD_data_images(
-                 PATH + "/val", target_transform=lambda x: x.squeeze()
+                 args.data_dir + "/val", target_transform=lambda x: x.squeeze()
              )
 
             # For now only calculated for saving step below
             val_mean_std = calc_mean_std(dataset)
+
+            if args.pretrained:
+                mean, std = mean[None, None, :], std[None, None, :]
+            dataset.transform = create_albu_transform(args, mean, std)
+            class_names = dataset.classes
 
             # Overfit on small dataset 
             #dataset = dataset[:1]
@@ -433,7 +436,7 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
 
     # Segmentation - we have to ignore the classes with label -1, they represent unlabeled data
     # Only for MSRC dataset
-    if args.data_dir == "seg_data": 
+    if args.bin_seg: 
         #loss_args = {"ignore_index":-1, "reduction":"mean"}
         # reduction mean is set by defaut 
         # stats for weighting from asmple 0.jpg in /train
@@ -449,7 +452,7 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
     else:
         loss_fn = nn.CrossEntropyLoss
 
-    if args.data_dir == "seg_data": 
+    if args.bin_seg: 
         #loss_fn = nn.BCEWithLogitsLoss
         loss_fn = smp.utils.losses.DiceLoss
 
