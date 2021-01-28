@@ -709,14 +709,14 @@ def setup_pysyft(args, hook, verbose=False):
                     a.Normalize(mean, std, max_pixel_value=1.0)
                 )
             # Segmentation 
-            #elif args.data_dir == "seg_data": 
+            elif args.bin_seg: 
                 #TODO: Add transforms if necessary 
                 # For now only empty structure 
 
-            #   dataset = seg_datasets[worker.id]
+                dataset = seg_datasets[worker.id]
                 #print(len(dataset))
                 #print(dataset)
-            #    mean, std = calc_mean_std(dataset)
+                mean, std = calc_mean_std(dataset)
                 
                 # TODO: For now no transforms necessary - possibly add later (same as in local training case)
                 #dataset.dataset.transform.transform.transforms.transforms.append(  # beautiful
@@ -753,7 +753,7 @@ def setup_pysyft(args, hook, verbose=False):
                 del stats_dataset
 
                 target_tf = None
-                if (args.mixup or args.weight_classes) and not args.data_dir == "seg_data":
+                if (args.mixup or args.weight_classes):
                     target_tf = [
                         lambda x: torch.tensor(x),  # pylint:disable=not-callable
                         To_one_hot(3),
@@ -766,10 +766,9 @@ def setup_pysyft(args, hook, verbose=False):
                     if target_tf
                     else None,
                 )
-                if not args.bin_seg: 
-                    assert (
-                        len(dataset.classes) == 3
-                    ), "We can only handle data that has 3 classes: normal, bacterial and viral"
+                assert (
+                   len(dataset.classes) == 3
+                ), "We can only handle data that has 3 classes: normal, bacterial and viral"
 
             mean.tag("#datamean")
             std.tag("#datastd")
@@ -1049,7 +1048,6 @@ def train_federated(
     verbose=True,
     alphas=None,
 ):
-
     total_batches = 0
     total_batches = sum([len(tl) for tl in train_loaders.values()])
     w_dict = None
@@ -1312,13 +1310,9 @@ def secure_aggregation_epoch(
                     args.microbatch_size,
                 ):
                     data, target = (
-                        batch[0][i : i + args.microbatch_size],
-                        batch[1][i : i + args.microbatch_size],
+                        batch[0][i : i + args.microbatch_size].to(device),
+                        batch[1][i : i + args.microbatch_size].to(device),
                     )
-
-                    # Check on CUDA
-                    print(data.device)
-                    print(target.device)
 
                     output = models[worker.id](data)
                     loss = loss_fns[worker.id](output, target)
@@ -1354,7 +1348,7 @@ def secure_aggregation_epoch(
                                     size=param.grad.shape,
                                 )
                                 * (args.microbatch_size / args.batch_size)
-                            )
+                            ).to(device)
                             noise = noise.send(worker.id)
                             param.grad.add_(
                                 torch.mean(  # pylint:disable=no-member
@@ -1372,10 +1366,7 @@ def secure_aggregation_epoch(
                 args.differentially_private and args.batch_size == args.microbatch_size
             ):
                 data, target = next(dataloader)
-
-                # Check on CUDA
-                print(data.device)
-                print(target.device)
+                data, target = data.to(device), target.to(device)
 
                 pred = models[worker.id](data)
                 loss = loss_fns[worker.id](pred, target)
@@ -1398,10 +1389,12 @@ def secure_aggregation_epoch(
                         param.grad.add_(noise)
             else:
                 data, target = next(dataloader)
+                data, target = data.to(device), target.to(device)
 
                 # Check on CUDA
-                print(data.device)
-                print(target.device)
+                # without .get() we always get device of the ptr
+                #print(data.get().device)
+                #print(target.get().device)
 
                 pred = models[worker.id](data)
                 loss = loss_fns[worker.id](pred, target)
@@ -1525,7 +1518,7 @@ def train(  # never called on websockets
         # TODO: Only for MSD without preprocessing
         #res = data.shape[-1]
         #data, target = data.view(-1, 1, res, res).to(device), target.view(-1, res, res).to(device)
-        data, target = data.to(device), target.unsqueeze(dim=1).to(device)
+        data, target = data.to(device), target.to(device)
         #dim = 256*256
         #dim_2 = int(dim/2)
         #model = nn.Sequential(
@@ -1547,10 +1540,6 @@ def train(  # never called on websockets
                 target = oh_converter(target)
                 data, target = mixup((data, target))
         optimizer.zero_grad()
-
-        # TODO: necessary? 
-        # model = model.to(device)
-
         output = model(data)
 
         #output = output.view_as(target)
@@ -1565,7 +1554,6 @@ def train(  # never called on websockets
         #fn = torch.sum(output[target==1.] < .5)
         #fp = torch.sum(output[target==0.] >= .5)
         #loss = 2 * tp / (2*fp + fn + fp) 
-
         loss = loss_fn(output, target)
 
         #loss = loss_fn(output, target)
@@ -1698,7 +1686,7 @@ def test(
             # TODO: ONLY MSD DATASET (NOT PREPROCESSED)
             #res = data.shape[-1]
             #data, target = data.view(-1, 1, res, res).to(device), target.view(-1, res, res).to(device)
-            data, target = data.to(device), target.unsqueeze(dim=1).to(device)
+            data, target = data.to(device), target.to(device)
             #dim = 256*256
             #dim_2 = int(dim/2)
             #model = nn.Sequential(
@@ -1716,10 +1704,11 @@ def test(
             #    model.encoder.conv1 = nn.Sequential(*new_encoder)
             #model = model.to(device)
             
-            if (
-                 device if isinstance(device, str) else device.type
-             ) != "cpu":  # TODO ugly bugfix
-                 model = model.to(device)
+            # not necessary
+            #if (
+            #     device if isinstance(device, str) else device.type
+            # ) != "cpu":  # TODO ugly bugfix
+            #     model = model.to(device)
 
             # is on CUDA
             output = model(data)
@@ -1734,6 +1723,8 @@ def test(
             #fn = torch.sum(output[target==1.] < .5)
             #fp = torch.sum(output[target==0.] >= .5)
             #loss = 2 * tp / (2*fp + fn + fp)
+
+            # NOTE: if loss negative (dice) check if output and target have the same shape
             loss = loss_fn(output, target)
 
             test_loss += loss
@@ -1796,9 +1787,6 @@ def test(
                 tgts = target.view_as(pred)
                 total_pred.append(pred)
                 total_target.append(tgts)
-                #print(output.shape)
-                #print(pred.shape)
-                #print(tgts.shape)
             equal = pred.eq(tgts)
             TP += (
                 equal.sum().copy().get().float_precision().long().item()
@@ -1847,6 +1835,7 @@ def test(
             #print(total_target.shape)
             #print(total_scores.shape)
             #roc_auc = mt.roc_auc_score(total_target, total_scores, multi_class="ovo")
+            # TODO: the whole stats block until the print of the stats table takes around 40 sec.?
             try:
                 roc_auc = mt.roc_auc_score(total_target, total_scores)
                 #roc_auc = mt.roc_auc_score(total_target, total_scores, multi_class="ovo")
@@ -1856,7 +1845,6 @@ def test(
                     category=UserWarning,
                 )
                 roc_auc = 0.0
-        
             #print((total_target==-1).sum())
             #print((total_target==1).sum())
             #print((total_target==0).sum())
@@ -1868,7 +1856,6 @@ def test(
 
             matthews_coeff = mt.matthews_corrcoef(total_target, total_pred)
             objective = 100.0 * matthews_coeff
-
             if verbose:
                 conf_matrix = mt.confusion_matrix(total_target, total_pred)
                 report = mt.classification_report(

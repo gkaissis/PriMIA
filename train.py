@@ -1,4 +1,4 @@
-from os import path, remove, environ
+from os import path, remove, environ, getcwd
 
 environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 import argparse
@@ -39,6 +39,7 @@ from torchlib.models import (
     vgg16,
     SimpleSegNet, # Segmentation
     MoNet,
+    getMoNet
 )
 from torchlib.utils import (
     Arguments,
@@ -305,6 +306,8 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             env=vis_env,
         )
         vis_params = {"vis": vis, "vis_env": vis_env}
+    # for the models that are loaded in directly (e.g. U-Net)
+    already_loaded = False
     if args.model == "vgg16":
         model_type = vgg16
         model_args = {
@@ -341,18 +344,29 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
         # no params for now
         model_args = {}
     elif args.model == "unet":
-         model_type = smp.Unet
-         model_args = {"encoder_name": "resnet18", "classes": 1, "activation": "sigmoid"}
+        # because we don't call any function but directly create model
+        already_loaded = True
+        PRETRAINED_PATH = getcwd() + '/pretrained_models/best_unet.pt'
+        model_args = {
+             "encoder_name": "resnet18", 
+             "classes": 1, 
+             "activation": "sigmoid", 
+        }
+        model = smp.Unet(**model_args)
+        model = torch.load(PRETRAINED_PATH)
     elif args.model == "MoNet": 
-        model_type = MoNet
-        # no params for now
-        model_args = {"activation" : "sigmoid"}
+        model_type = getMoNet
+        model_args = {
+            "pretrained" : args.pretrained,
+            "activation" : "sigmoid",
+        }
     else:
         raise ValueError(
             "Model name not understood. Please choose one of 'vgg16, 'simpleconv', resnet-18'."
         )
 
-    model = model_type(**model_args)
+    if not already_loaded:
+        model = model_type(**model_args)
 
     if args.model == "unet":
          model.encoder.conv1 = nn.Sequential(nn.Conv2d(1, 3, 1), model.encoder.conv1)
