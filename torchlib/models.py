@@ -7,6 +7,7 @@ from torch import nn
 from torch.hub import load_state_dict_from_url
 from numpy.random import seed as npseed
 from random import seed as rseed
+import os
 
 
 model_urls = {
@@ -847,8 +848,6 @@ class ConvBnElu(nn.Module):
         # BatchNorm
         self.batch_norm = nn.BatchNorm2d(filters)
 
-        #TODO: In paper there is a dropout layer at the end - left out in this implementation. (Should I include it?)
-
     def forward(self, x): 
         out = self.conv(x)
         out = self.batch_norm(out)
@@ -872,7 +871,6 @@ class deconv(nn.Module):
 
         # TODO: kernel_initializer="he_uniform",
 
-        # TODO: here we conserve the number of channels, but in paper they are reduced to the half? 
         self.transp_conv = nn.ConvTranspose2d(
             in_channels=old_filters, 
             out_channels=old_filters, 
@@ -1061,3 +1059,15 @@ class MoNet(nn.Module):
              out = self.activation(out)
 
         return out
+
+def getMoNet(pretrained=False, **kwargs): 
+    PRETRAINED_PATH = os.getcwd() + '/pretrained_models/best_monet_2021-01-21_13-26.pt'
+    #PRETRAINED_PATH = '/home/nico/PrivateSegmentation/pretrained_models/best_monet_2021-01-21_13-26.pt'
+    # Init. MoNet
+    model = MoNet(**kwargs)
+    if pretrained: 
+        # load weights from store 
+        #model  = torch.load(PRETRAINED_PATH)
+        model.load_state_dict(torch.load(PRETRAINED_PATH))
+
+    return model

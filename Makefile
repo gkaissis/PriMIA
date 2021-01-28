@@ -53,7 +53,7 @@ federated_secure:
 # Segmentation 
 federated_secure_segmentation:
 	@echo Training a Seg-Net on VirtualWorkers without SecAgg
-	python train.py --config configs/torch/segmentation.ini --train_federated --data_dir /Task03_Liver
+	python train.py --config configs/torch/segmentation.ini --train_federated --cuda --data_dir ./Task03_Liver
 	@echo Finished Training on VirtualWorkers with SecAgg
 
 make federated_DP_secure:
@@ -61,7 +61,7 @@ make federated_DP_secure:
 
 # Segmenation 
 make federated_DP_secure_segmentation:
-	python train.py --config configs/torch/segmentation-DP.ini --train_federated --data_dir /Task03_Liver
+	python train.py --config configs/torch/segmentation-DP.ini --train_federated --cuda --data_dir ./Task03_Liver
 
 federated_insecure:
 	@echo Training on VirtualWorkers without SecAgg
@@ -71,7 +71,7 @@ federated_insecure:
 # Segmentation 
 federated_insecure_segmentation: 
 	@echo Training a Seg-Net on VirtualWorkers without SecAgg
-	python train.py --config configs/torch/segmentation.ini --train_federated --unencrypted_aggregation --data_dir /Task03_Liver
+	python train.py --config configs/torch/segmentation.ini --train_federated --cuda --unencrypted_aggregation --data_dir ./Task03_Liver
 	@echo Finished Training on VirtualWorkers without SecAgg
 
 federated_gridnode_secure:
@@ -88,7 +88,7 @@ local:
 # Segmentation 
 local_segmentation:
 	@echo Segmentation Training Locally
-	python train.py --config configs/torch/segmentation.ini --cuda --verbose --data_dir ../PriMIA/Task03_Liver
+	python train.py --config configs/torch/segmentation.ini --cuda --verbose --data_dir ./Task03_Liver
 	@echo Finished Training Locally
 
 # Gridnode ensemble shortcut
