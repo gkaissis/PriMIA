@@ -58,7 +58,7 @@ from sklearn.model_selection import train_test_split
 import segmentation_models_pytorch as smp
 from revision_scripts.module_modification import convert_batchnorm_modules
 from opacus import PrivacyEngine
-
+import pickle
 
 def main(args, verbose=True, optuna_trial=None, cmd_args=None):
 
@@ -173,11 +173,11 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             #PATH = "/home/NiWaRe/PriMIA/Task03_Liver"
 
             dataset = MSD_data_images(
-                 args.data_dir + "/train", target_transform=lambda x: x.squeeze()
-             )
+                args.data_dir + "/train", target_transform=lambda x: x.unsqueeze(dim=0)
+            )
             valset = MSD_data_images(
-                 args.data_dir + "/val", target_transform=lambda x: x.squeeze()
-             )
+                args.data_dir + "/val", target_transform=lambda x: x.unsqueeze(dim=0)
+            )
 
             # For now only calculated for saving step below
             val_mean_std = calc_mean_std(dataset)
@@ -344,16 +344,26 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
         # no params for now
         model_args = {}
     elif args.model == "unet":
-        # because we don't call any function but directly create model
+        # because we don't call any function but directly create the model
         already_loaded = True
-        PRETRAINED_PATH = getcwd() + '/pretrained_models/best_unet.pt'
+        # preprocessing step due to version problem (model was saved from torch 1.7.1)
+        PRETRAINED_PATH = getcwd() + '/pretrained_models/unet_weights.pickle'
         model_args = {
              "encoder_name": "resnet18", 
              "classes": 1, 
              "activation": "sigmoid", 
+             "encoder_weights": None,
         }
         model = smp.Unet(**model_args)
-        model = torch.load(PRETRAINED_PATH)
+        model.encoder.conv1 = nn.Sequential(nn.Conv2d(1, 3, 1), model.encoder.conv1)
+        if args.pretrained:
+            with open(PRETRAINED_PATH, 'rb') as handle:
+                state_dict = pickle.load(handle)
+                #state_dict['encoder.conv1.weight'] = torch.randn(torch.Size([64, 3, 7, 7]))
+                #state_dict.pop("encoder.conv1.0.weight")
+                #state_dict.pop("encoder.conv1.0.bias")
+                #state_dict.pop("encoder.conv1.1.weight")
+                model.load_state_dict(state_dict)
     elif args.model == "MoNet": 
         model_type = getMoNet
         model_args = {
@@ -367,9 +377,6 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
 
     if not already_loaded:
         model = model_type(**model_args)
-
-    if args.model == "unet":
-         model.encoder.conv1 = nn.Sequential(nn.Conv2d(1, 3, 1), model.encoder.conv1)
 
     if args.train_federated:
         model = {

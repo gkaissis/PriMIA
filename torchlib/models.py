@@ -7,7 +7,7 @@ from torch import nn
 from torch.hub import load_state_dict_from_url
 from numpy.random import seed as npseed
 from random import seed as rseed
-import os
+import os, pickle
 
 
 model_urls = {
@@ -1061,13 +1061,14 @@ class MoNet(nn.Module):
         return out
 
 def getMoNet(pretrained=False, **kwargs): 
-    PRETRAINED_PATH = os.getcwd() + '/pretrained_models/best_monet_2021-01-21_13-26.pt'
-    #PRETRAINED_PATH = '/home/nico/PrivateSegmentation/pretrained_models/best_monet_2021-01-21_13-26.pt'
+    # preprocessing step due to version problem (model was saved from torch 1.7.1)
+    PRETRAINED_PATH = os.getcwd() + '/pretrained_models/monet_weights.pickle'
+    with open(PRETRAINED_PATH, 'rb') as handle:
+        state_dict = pickle.load(handle)
     # Init. MoNet
     model = MoNet(**kwargs)
     if pretrained: 
-        # load weights from store 
-        #model  = torch.load(PRETRAINED_PATH)
-        model.load_state_dict(torch.load(PRETRAINED_PATH))
-
+        # load weights from storage 
+        #model.load_state_dict(torch.load(PRETRAINED_PATH))
+        model.load_state_dict(state_dict)
     return model

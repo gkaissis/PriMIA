@@ -1535,6 +1535,8 @@ def train(  # never called on websockets
         #    new_encoder = [nn.Conv2d(inpt_channels, 3, 1), model.encoder.conv1]
         #    model.encoder.conv1 = nn.Sequential(*new_encoder)
 
+        print(data.shape, target.shape)
+
         if args.mixup:
             with torch.no_grad():
                 target = oh_converter(target)
@@ -1712,7 +1714,6 @@ def test(
 
             # is on CUDA
             output = model(data)
-
             #output = output.view_as(target)
 
             #output, target = output.cpu(), target.cpu() # for loss_fn
