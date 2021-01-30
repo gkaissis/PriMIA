@@ -344,14 +344,21 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
         # no params for now
         model_args = {}
     elif args.model == "unet":
+<<<<<<< HEAD
         # because we don't call any function but directly create the model
         already_loaded = True
         # preprocessing step due to version problem (model was saved from torch 1.7.1)
         PRETRAINED_PATH = getcwd() + '/pretrained_models/unet_weights.pickle'
+=======
+        # because we don't call any function but directly create model
+        already_loaded = True
+        PRETRAINED_PATH = getcwd() + '/pretrained_models/best_unet.pt'
+>>>>>>> ceb9131c9a6af62a74fa1a65bda5a83601fdf5c8
         model_args = {
              "encoder_name": "resnet18", 
              "classes": 1, 
              "activation": "sigmoid", 
+<<<<<<< HEAD
              "encoder_weights": None,
         }
         model = smp.Unet(**model_args)
@@ -364,6 +371,11 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
                 #state_dict.pop("encoder.conv1.0.bias")
                 #state_dict.pop("encoder.conv1.1.weight")
                 model.load_state_dict(state_dict)
+=======
+        }
+        model = smp.Unet(**model_args)
+        model = torch.load(PRETRAINED_PATH)
+>>>>>>> ceb9131c9a6af62a74fa1a65bda5a83601fdf5c8
     elif args.model == "MoNet": 
         model_type = getMoNet
         model_args = {
@@ -377,6 +389,12 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
 
     if not already_loaded:
         model = model_type(**model_args)
+<<<<<<< HEAD
+=======
+
+    if args.model == "unet":
+         model.encoder.conv1 = nn.Sequential(nn.Conv2d(1, 3, 1), model.encoder.conv1)
+>>>>>>> ceb9131c9a6af62a74fa1a65bda5a83601fdf5c8
 
     if args.train_federated:
         model = {
