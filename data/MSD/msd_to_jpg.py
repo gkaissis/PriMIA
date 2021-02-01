@@ -36,7 +36,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     RES = 256
     RES_Z = 64
-    CROP_HEIGHT = 16
     parser.add_argument(
         "--data",
         type=str,
@@ -80,12 +79,11 @@ if __name__ == "__main__":
 
     # Preprocessing
     print("## preprocessing ##")
-    X_train_partial, y_train_partial, X_val, y_val, X_test, y_test = prepare_data(PATH,
+    X_train_partial, y_train_partial, X_val, y_val, X_test, y_test = prepare_data(
+                                                                                    PATH,
                                                                                     res=RES,
                                                                                     res_z=RES_Z,
-                                                                                    crop_height=CROP_HEIGHT,
-                                                                                    num_samples=50)
-
+                                                                                )
     print("## converting and saving ##")
     save_to_img(PATH+'/train/inputs/', X_train_partial, False)
     save_to_img(PATH+'/val/inputs/', X_val, False)
