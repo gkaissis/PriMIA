@@ -213,6 +213,15 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
                             -1, args.train_resolution, args.train_resolution
                         )
                     ),
+                    transforms.Lambda(
+                        lambda x: np.where(
+                            x > 0.0,
+                            torch.ones_like(x),
+                            torch.zeros_like(
+                                x
+                            ),  # i don't like this but I didn't find sth better yet
+                        )
+                    ),
                 ]
             )
             dataset.target_transform = label_transform
