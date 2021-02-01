@@ -141,6 +141,7 @@ data/LabelMNIST
 data/server_simulation/train_total
 data/server_simulation/test
 data/server_simulation/validation
+data/MSD
 data/server_simulation/worker*
 data/*.pt
 minimal_inference.py
