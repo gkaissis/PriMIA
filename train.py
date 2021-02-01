@@ -29,17 +29,17 @@ from torchlib.dataloader import (
     random_split,
     create_albu_transform,
     CombinedLoader,
-    SegmentationData, # Segmentation 
-    MSD_data, 
+    SegmentationData,  # Segmentation
+    MSD_data,
     MSD_data_images,
 )  # pylint:disable=import-error
 from torchlib.models import (
     conv_at_resolution,  # pylint:disable=import-error
     resnet18,
     vgg16,
-    SimpleSegNet, # Segmentation
+    SimpleSegNet,  # Segmentation
     MoNet,
-    getMoNet
+    getMoNet,
 )
 from torchlib.utils import (
     Arguments,
@@ -59,6 +59,7 @@ import segmentation_models_pytorch as smp
 from revision_scripts.module_modification import convert_batchnorm_modules
 from opacus import PrivacyEngine
 import pickle
+
 
 def main(args, verbose=True, optuna_trial=None, cmd_args=None):
 
@@ -136,20 +137,14 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
                 dataset,
                 [int(ceil(total_L * (1.0 - fraction))), int(floor(total_L * fraction))],
             )
-        elif args.bin_seg: 
+        elif args.bin_seg:
 
-            # For now: - transforms fixed in datalaoder class (SegmentationData class), 
-            #          - train-val-split by different predfined datasets 
-            #          - fixed centralized data 
+            #### MSRC dataset ####
+            # dataset = SegmentationData(image_paths_file='data/segmentation_data/train.txt')
+            # valset = SegmentationData(image_paths_file='data/segmentation_data/val.txt')
 
-            # Imagepath to the two the parent directory of the two label files 
-            ## MSRC dataset 
-            #dataset = SegmentationData(image_paths_file='data/segmentation_data/train.txt')
-            #valset = SegmentationData(image_paths_file='data/segmentation_data/val.txt')
-
-            ## MSD dataset
+            #### MSD dataset ####
             """
-            PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
             RES = 256
             RES_Z = 64
             CROP_HEIGHT = 16
@@ -168,32 +163,78 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             val_size = len(dataset) - train_size
             dataset, valset = torch.utils.data.random_split(dataset, [train_size, val_size])
             """
-            ## MSD dataset preprocessed version ##
-            #PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
-            #PATH = "/home/NiWaRe/PriMIA/Task03_Liver"
 
+            # NOTE: next steps:
+            # finish albumentation local --> resolve issue
+            # finish albumentation federated + DP
+            # create new dataset with script
+
+            ####              MSD dataset preprocessed version              ####
+            # NOTE: Albumentations need the input (width, height, channel)     #
+            #       --> otherwise: instead (1, 256, 256) -> (256, 256, 256)    #
+            # NOTE: Torch transforms need the input (channel, width, height)   #
+            #       --> otherwise: type not subscriptable error                #
+            # NOTE: The AlbumentationsTorchTransform wrapper auto. changes     #
+            #       (256, 256, 1) back to (1, 256, 256) after the transforms.  #
+            ####################################################################
+
+            stats_tf = AlbumentationsTorchTransform(
+                a.Compose(
+                    [
+                        a.Resize(args.inference_resolution, args.inference_resolution),
+                        a.RandomCrop(args.train_resolution, args.train_resolution),
+                        a.ToFloat(max_value=255.0),
+                    ]
+                )
+            )
+            # create first dataset to calculate stats
             dataset = MSD_data_images(
-                args.data_dir + "/train", target_transform=lambda x: x.unsqueeze(dim=0)
+                args.data_dir + "/train", transform=stats_tf, target_transform=stats_tf,
             )
-            valset = MSD_data_images(
-                args.data_dir + "/val", target_transform=lambda x: x.unsqueeze(dim=0)
-            )
-
-            # For now only calculated for saving step below
+            # get stats
             val_mean_std = calc_mean_std(dataset)
             mean, std = val_mean_std
-            if args.pretrained:
-                mean, std = mean[None, None, :], std[None, None, :]
-            #dataset.transform = create_albu_transform(args, mean, std)
-
-            # Overfit on small dataset 
-            #dataset = dataset[:1]
-            #valset = valset[:1]
-
-            # TEMPORARY for overfitting 
-            #valset = dataset
-
-            # TODO: Potentially add transforms (possibly based on val_mean_calc as for the others)
+            # change transforms based on stats
+            dataset.transform = transforms.Compose(
+                [
+                    create_albu_transform(args, mean, std),
+                    transforms.Lambda(
+                        lambda x: x.view(
+                            -1, args.train_resolution, args.train_resolution
+                        )
+                    ),
+                ]
+            )
+            label_transform = transforms.Compose(
+                [
+                    stats_tf,
+                    transforms.Lambda(
+                        lambda x: x.view(
+                            -1, args.train_resolution, args.train_resolution
+                        )
+                    ),
+                ]
+            )
+            dataset.target_transform = label_transform
+            # valset
+            valset = MSD_data_images(
+                args.data_dir + "/val",
+                transform=stats_tf,
+                target_transform=label_transform,
+            )
+            valset.transform.transform.transforms.transforms.append(
+                a.Normalize(mean, std, max_pixel_value=1.0),
+            )
+            valset.transform = transforms.Compose(
+                [
+                    valset.transform,
+                    transforms.Lambda(
+                        lambda x: x.view(
+                            -1, args.train_resolution, args.train_resolution
+                        )
+                    ),
+                ]
+            )
 
         else:
             # Different train and inference resolution only works with adaptive
@@ -215,11 +256,13 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             dataset = datasets.ImageFolder(
                 args.data_dir, transform=stats_tf, loader=loader,
             )
+            # TODO: issue #1 - this only creates two 2 new dimensions in case of three channels
             assert (
                 len(dataset.classes) == 3
             ), "Dataset must have exactly 3 classes: normal, bacterial and viral"
             val_mean_std = calc_mean_std(dataset)
             mean, std = val_mean_std
+            # TODO: issue #1 - this only creates two 2 new dimensions in case of three channels
             if args.pretrained:
                 mean, std = mean[None, None, :], std[None, None, :]
             dataset.transform = create_albu_transform(args, mean, std)
@@ -338,49 +381,33 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             "input_size": args.inference_resolution,
             "pooling": args.pooling_type,
         }
-    # Segmentation 
+    # Segmentation
     elif args.model == "SimpleSegNet":
         model_type = SimpleSegNet
         # no params for now
         model_args = {}
     elif args.model == "unet":
-<<<<<<< HEAD
         # because we don't call any function but directly create the model
         already_loaded = True
         # preprocessing step due to version problem (model was saved from torch 1.7.1)
-        PRETRAINED_PATH = getcwd() + '/pretrained_models/unet_weights.pickle'
-=======
-        # because we don't call any function but directly create model
-        already_loaded = True
-        PRETRAINED_PATH = getcwd() + '/pretrained_models/best_unet.pt'
->>>>>>> ceb9131c9a6af62a74fa1a65bda5a83601fdf5c8
+        PRETRAINED_PATH = getcwd() + "/pretrained_models/unet_weights.pickle"
         model_args = {
-             "encoder_name": "resnet18", 
-             "classes": 1, 
-             "activation": "sigmoid", 
-<<<<<<< HEAD
-             "encoder_weights": None,
+            "encoder_name": "resnet18",
+            "classes": 1,
+            "activation": "sigmoid",
+            "encoder_weights": None,
         }
         model = smp.Unet(**model_args)
         model.encoder.conv1 = nn.Sequential(nn.Conv2d(1, 3, 1), model.encoder.conv1)
         if args.pretrained:
-            with open(PRETRAINED_PATH, 'rb') as handle:
+            with open(PRETRAINED_PATH, "rb") as handle:
                 state_dict = pickle.load(handle)
-                #state_dict['encoder.conv1.weight'] = torch.randn(torch.Size([64, 3, 7, 7]))
-                #state_dict.pop("encoder.conv1.0.weight")
-                #state_dict.pop("encoder.conv1.0.bias")
-                #state_dict.pop("encoder.conv1.1.weight")
                 model.load_state_dict(state_dict)
-=======
-        }
-        model = smp.Unet(**model_args)
-        model = torch.load(PRETRAINED_PATH)
->>>>>>> ceb9131c9a6af62a74fa1a65bda5a83601fdf5c8
-    elif args.model == "MoNet": 
+    elif args.model == "MoNet":
         model_type = getMoNet
         model_args = {
-            "pretrained" : args.pretrained,
-            "activation" : "sigmoid",
+            "pretrained": args.pretrained,
+            "activation": "sigmoid",
         }
     else:
         raise ValueError(
@@ -389,12 +416,6 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
 
     if not already_loaded:
         model = model_type(**model_args)
-<<<<<<< HEAD
-=======
-
-    if args.model == "unet":
-         model.encoder.conv1 = nn.Sequential(nn.Conv2d(1, 3, 1), model.encoder.conv1)
->>>>>>> ceb9131c9a6af62a74fa1a65bda5a83601fdf5c8
 
     if args.train_federated:
         model = {
@@ -480,21 +501,21 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
 
     # Segmentation - we have to ignore the classes with label -1, they represent unlabeled data
     # Only for MSRC dataset
-    if args.bin_seg: 
-        #loss_args = {"ignore_index":-1, "reduction":"mean"}
-        # reduction mean is set by defaut 
+    if args.bin_seg:
+        # loss_args = {"ignore_index":-1, "reduction":"mean"}
+        # reduction mean is set by defaut
         # stats for weighting from asmple 0.jpg in /train
-        # white_pixels/ all_pixels = 0.0602 -> % of pos. classes 
+        # white_pixels/ all_pixels = 0.0602 -> % of pos. classes
         # (256*256-a_np.sum())/a_np.sum() -> 15.598 times more negative classes
-        #pos_weight = torch.tensor([15]).to(device)
-        #loss_args = {"pos_weight" : pos_weight}
+        # pos_weight = torch.tensor([15]).to(device)
+        # loss_args = {"pos_weight" : pos_weight}
 
-        #loss_fn = nn.BCEWithLogitsLoss
+        # loss_fn = nn.BCEWithLogitsLoss
         loss_fn = smp.utils.losses.DiceLoss
         loss_args = {}
 
     loss_fn = loss_fn(**loss_args)
-    
+
     if args.train_federated:
         loss_fn = {w: loss_fn.copy() for w in [*workers, "local_model"]}
 
@@ -772,7 +793,7 @@ if __name__ == "__main__":
         if not args.train_federated:
             raise RuntimeError("WebSockets can only be used when in federated mode.")
     ## CUDA in FL ##
-    #if args.cuda and args.train_federated:
+    # if args.cuda and args.train_federated:
     #    warn(
     #        "CUDA is currently not supported by the backend. This option will be available at a later release",
     #        category=FutureWarning,
