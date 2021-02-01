@@ -31,9 +31,9 @@ from .dataloader import (
     random_split,
     create_albu_transform,
     CombinedLoader,
-    SegmentationData, # Segmentation 
-    MSD_data, 
-    MSD_data_images, 
+    SegmentationData,  # Segmentation
+    MSD_data,
+    MSD_data_images,
 )
 import sys, os.path
 
@@ -172,13 +172,13 @@ class Arguments:
             self.beta2 = config.getfloat("config", "beta2", fallback=0.999)
         self.model = config.get("config", "model")  # , fallback="simpleconv")
         assert self.model in [
-            "simpleconv", 
-            "resnet-18", 
-            "vgg16", 
-            "SimpleSegNet", 
-            "MoNet", 
+            "simpleconv",
+            "resnet-18",
+            "vgg16",
+            "SimpleSegNet",
+            "MoNet",
             "unet",
-            ] # Segmentation 
+        ]  # Segmentation
         self.pooling_type = config.get("config", "pooling_type", fallback="max")
         self.pretrained = config.getboolean("config", "pretrained")  # , fallback=False)
         self.weight_decay = config.getfloat("config", "weight_decay")  # , fallback=0.0)
@@ -647,12 +647,12 @@ def setup_pysyft(args, hook, verbose=False):
             lengths[-1] += len(dataset) - sum(lengths)
             mnist_datasets = random_split(dataset, lengths)
             mnist_datasets = {worker: d for d, worker in zip(mnist_datasets, workers)}
-        
-        # Segmentation 
-        elif args.bin_seg: 
-            # Imagepath to the two the parent directory of the two label files 
+
+        # Segmentation
+        elif args.bin_seg:
+            # Imagepath to the two the parent directory of the two label files
             ## MSRC dataset ##
-            #dataset = SegmentationData(image_paths_file='data/segmentation_data/train.txt')
+            # dataset = SegmentationData(image_paths_file='data/segmentation_data/train.txt')
 
             ## MSD dataset ##
             """
@@ -679,10 +679,10 @@ def setup_pysyft(args, hook, verbose=False):
             """
 
             ## MSD dataset preprocessed version ##
-            #PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
-            #PATH = "/home/NiWaRe/PriMIA/Task03_Liver"
-            dataset = MSD_data_images(args.data_dir+'/train')
-            
+            # PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
+            # PATH = "/home/NiWaRe/PriMIA/Task03_Liver"
+            dataset = MSD_data_images(args.data_dir + "/train")
+
             lengths = [int(len(dataset) / len(workers)) for _ in workers]
             ##assert sum of lenghts is whole dataset on the cost of the last worker
             ##-> because int() floors division, means that rest is send to last worker
@@ -708,20 +708,20 @@ def setup_pysyft(args, hook, verbose=False):
                 dataset.dataset.transform.transform.transforms.transforms.append(  # beautiful
                     a.Normalize(mean, std, max_pixel_value=1.0)
                 )
-            # Segmentation 
-            elif args.bin_seg: 
-                #TODO: Add transforms if necessary 
-                # For now only empty structure 
+            # Segmentation
+            elif args.bin_seg:
+                # TODO: Add transforms if necessary
+                # For now only empty structure
 
                 dataset = seg_datasets[worker.id]
-                #print(len(dataset))
-                #print(dataset)
+                # print(len(dataset))
+                # print(dataset)
                 mean, std = calc_mean_std(dataset)
-                
+
                 # TODO: For now no transforms necessary - possibly add later (same as in local training case)
-                #dataset.dataset.transform.transform.transforms.transforms.append(  # beautiful
+                # dataset.dataset.transform.transform.transforms.transforms.append(  # beautiful
                 #    a.Normalize(mean, std, max_pixel_value=1.0)
-                #)
+                # )
 
             else:
                 data_dir = join(args.data_dir, "worker{:d}".format(i + 1))
@@ -753,7 +753,7 @@ def setup_pysyft(args, hook, verbose=False):
                 del stats_dataset
 
                 target_tf = None
-                if (args.mixup or args.weight_classes):
+                if args.mixup or args.weight_classes:
                     target_tf = [
                         lambda x: torch.tensor(x),  # pylint:disable=not-callable
                         To_one_hot(3),
@@ -767,7 +767,7 @@ def setup_pysyft(args, hook, verbose=False):
                     else None,
                 )
                 assert (
-                   len(dataset.classes) == 3
+                    len(dataset.classes) == 3
                 ), "We can only handle data that has 3 classes: normal, bacterial and viral"
 
             mean.tag("#datamean")
@@ -777,10 +777,7 @@ def setup_pysyft(args, hook, verbose=False):
             data, targets = [], []
             if args.mixup:
                 dataset = torch.utils.data.DataLoader(
-                    dataset,
-                    batch_size=1,
-                    shuffle=True,
-                    num_workers=args.num_threads,
+                    dataset, batch_size=1, shuffle=True, num_workers=args.num_threads,
                 )
                 mixup = MixUp(λ=args.mixup_lambda, p=args.mixup_prob)
                 last_set = None
@@ -805,14 +802,14 @@ def setup_pysyft(args, hook, verbose=False):
                     data.append(d)
                     targets.append(t)
             selected_data = torch.stack(data)  # pylint:disable=no-member
-            # Segmentation 
-            if args.bin_seg: 
-                # Problem with the "torch.tensor(targets)" 
-                # this is normally used to convert list of scalar tensors into a torch array 
+            # Segmentation
+            if args.bin_seg:
+                # Problem with the "torch.tensor(targets)"
+                # this is normally used to convert list of scalar tensors into a torch array
                 # however in segmentation we don't have only one scalar as target per sample but a whole mask (2D array)
-                selected_targets = torch.stack(targets)  
+                selected_targets = torch.stack(targets)
 
-            else: 
+            else:
                 selected_targets = (
                     torch.stack(targets)  # pylint:disable=no-member
                     if args.mixup or args.weight_classes
@@ -836,8 +833,7 @@ def setup_pysyft(args, hook, verbose=False):
     for worker in data.keys():
         dist_dataset = [  # TODO: in the future transform here would be nice but currently raise errors
             sy.BaseDataset(
-                data[worker][0],
-                target[worker][0],
+                data[worker][0], target[worker][0],
             )  # transform=federated_tf
         ]
         fed_dataset = sy.FederatedDataset(dist_dataset)
@@ -896,19 +892,19 @@ def setup_pysyft(args, hook, verbose=False):
                 )
             ),
         )
-    # Segmentation 
-    elif args.bin_seg: 
+    # Segmentation
+    elif args.bin_seg:
         # TODO: possibly add transforms (also for local case)
-        # Again for now WITHOUT transforms, just play loading of the valset 
+        # Again for now WITHOUT transforms, just play loading of the valset
 
         ## MSCR dataset
-        #valset = SegmentationData(image_paths_file='data/segmentation_data/val.txt')
+        # valset = SegmentationData(image_paths_file='data/segmentation_data/val.txt')
 
-        ## MSD dataset 
-        #PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
-        #PATH = "/home/NiWaRe/PriMIA/Task03_Liver"
-        #PATH = args.data_dir
-        valset = MSD_data_images(args.data_dir+'/val')
+        ## MSD dataset
+        # PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
+        # PATH = "/home/NiWaRe/PriMIA/Task03_Liver"
+        # PATH = args.data_dir
+        valset = MSD_data_images(args.data_dir + "/val")
     else:
 
         val_tf = [
@@ -1080,12 +1076,7 @@ def train_federated(
         )
     else:
         if verbose:
-            print(
-                "Train Epoch: {} \tLoss: {:.6f}".format(
-                    epoch,
-                    avg_loss,
-                )
-            )
+            print("Train Epoch: {} \tLoss: {:.6f}".format(epoch, avg_loss,))
     return model, epsilon
 
 
@@ -1112,12 +1103,12 @@ def aggregation(
     the parameter names and shapes before trying to load them into the model."""
 
     ## CUDA in FL ##
-    # important note: the shifting has to be called on the params 
+    # important note: the shifting has to be called on the params
     # and summed params (after sec. agg.) directly on model as whole
-    # doesn't work. 
+    # doesn't work.
     # set device (so that we don't need to pass it all around)
-    # get first param tensor to then get device 
-    if secure: 
+    # get first param tensor to then get device
+    if secure:
         rand_key = next(iter(local_model.state_dict().values()))
         device = rand_key.device
 
@@ -1177,9 +1168,7 @@ def aggregation(
                     models[worker if type(worker) == str else worker.id]
                     ## CUDA for FL ##
                     # nothing to add here because only encrypted computations are a problem in CUDA
-                    .state_dict()[key]
-                    .data.copy()
-                    .get()
+                    .state_dict()[key].data.copy().get()
                     * (
                         weights[worker if type(worker) == str else worker.id]
                         if weights
@@ -1206,7 +1195,7 @@ def aggregation(
                 torch.stack(remote_param_list), dim=0  # pylint:disable=no-member
             )
         fresh_state_dict[key] = sumstacked if weights else sumstacked / len(workers)
-    
+
     local_model.load_state_dict(fresh_state_dict)
     return local_model
 
@@ -1289,26 +1278,22 @@ def secure_aggregation_epoch(
                 continue
             optimizers[worker.id].zero_grad()
 
-            #data, target = next(dataloader)
+            # data, target = next(dataloader)
             ## CUDA in FL ##
             # model already to cuda in train.py
             ##TODO: Special for MSD scans (ONLY FOR THE NON-PREPROCESSED)
-            #res = data.shape[-1]
-            #data, target = data.view(-1, 1, res, res).to(device), target.view(-1, res, res).to(device)
-            #data, target = data.to(device), target.to(device)
-            #pred = models[worker.id](data)
-            #if args.data_dir == "seg_data":  # TODO do sth better
+            # res = data.shape[-1]
+            # data, target = data.view(-1, 1, res, res).to(device), target.view(-1, res, res).to(device)
+            # data, target = data.to(device), target.to(device)
+            # pred = models[worker.id](data)
+            # if args.data_dir == "seg_data":  # TODO do sth better
             #     pred = pred.squeeze()
-            #loss = loss_fns[worker.id](pred, target)
-            #loss.backward()
+            # loss = loss_fns[worker.id](pred, target)
+            # loss.backward()
 
             if args.differentially_private and args.batch_size > args.microbatch_size:
                 batch = next(dataloader)
-                for i in range(
-                    0,
-                    batch[0].shape[0],
-                    args.microbatch_size,
-                ):
+                for i in range(0, batch[0].shape[0], args.microbatch_size,):
                     data, target = (
                         batch[0][i : i + args.microbatch_size].to(device),
                         batch[1][i : i + args.microbatch_size].to(device),
@@ -1393,8 +1378,8 @@ def secure_aggregation_epoch(
 
                 # Check on CUDA
                 # without .get() we always get device of the ptr
-                #print(data.get().device)
-                #print(target.get().device)
+                # print(data.get().device)
+                # print(target.get().device)
 
                 pred = models[worker.id](data)
                 loss = loss_fns[worker.id](pred, target)
@@ -1516,26 +1501,26 @@ def train(  # never called on websockets
         total=L + 1,
     ):
         # TODO: Only for MSD without preprocessing
-        #res = data.shape[-1]
-        #data, target = data.view(-1, 1, res, res).to(device), target.view(-1, res, res).to(device)
+        # res = data.shape[-1]
+        # data, target = data.view(-1, 1, res, res).to(device), target.view(-1, res, res).to(device)
         data, target = data.to(device), target.to(device)
-        #dim = 256*256
-        #dim_2 = int(dim/2)
-        #model = nn.Sequential(
+        # dim = 256*256
+        # dim_2 = int(dim/2)
+        # model = nn.Sequential(
         #                        nn.Flatten(),
-        #                        nn.Linear(dim, 100), 
-        #                        nn.ReLU(), 
-        #                        nn.Linear(100, dim), 
+        #                        nn.Linear(dim, 100),
+        #                        nn.ReLU(),
+        #                        nn.Linear(100, dim),
         #                    ).to(device)
 
-        #num_classes = 1
-        #model = smp.Unet("resnet18", classes=num_classes, activation="sigmoid")
-        #inpt_channels = 1
-        #if inpt_channels != 3:
+        # num_classes = 1
+        # model = smp.Unet("resnet18", classes=num_classes, activation="sigmoid")
+        # inpt_channels = 1
+        # if inpt_channels != 3:
         #    new_encoder = [nn.Conv2d(inpt_channels, 3, 1), model.encoder.conv1]
         #    model.encoder.conv1 = nn.Sequential(*new_encoder)
 
-        print(data.shape, target.shape)
+        # print(data.shape, target.shape)
 
         if args.mixup:
             with torch.no_grad():
@@ -1544,21 +1529,21 @@ def train(  # never called on websockets
         optimizer.zero_grad()
         output = model(data)
 
-        #output = output.view_as(target)
+        # output = output.view_as(target)
 
         #### manual calculation of the dice loss ####
         # L = 1 - 2 * precision * recall / (precision + recall)
-        # recall = tp/(tp+fn) 
+        # recall = tp/(tp+fn)
         # precision = tp/(tp+fp)
-        # def.: pos = 1 
-        #tp = torch.sum(output[target==1.] >= .5)
-        #tn = torch.sum(output[target==0.] < .5)
-        #fn = torch.sum(output[target==1.] < .5)
-        #fp = torch.sum(output[target==0.] >= .5)
-        #loss = 2 * tp / (2*fp + fn + fp) 
+        # def.: pos = 1
+        # tp = torch.sum(output[target==1.] >= .5)
+        # tn = torch.sum(output[target==0.] < .5)
+        # fn = torch.sum(output[target==1.] < .5)
+        # fp = torch.sum(output[target==0.] >= .5)
+        # loss = 2 * tp / (2*fp + fn + fp)
         loss = loss_fn(output, target)
 
-        #loss = loss_fn(output, target)
+        # loss = loss_fn(output, target)
 
         loss.backward()
         optimizer.step()
@@ -1582,12 +1567,7 @@ def train(  # never called on websockets
     else:
         epsilon = 0
     if not args.visdom and verbose:
-        print(
-            "Train Epoch: {} \tLoss: {:.6f}".format(
-                epoch,
-                np.mean(avg_loss),
-            )
-        )
+        print("Train Epoch: {} \tLoss: {:.6f}".format(epoch, np.mean(avg_loss),))
     return model, epsilon
 
 
@@ -1643,11 +1623,7 @@ def stats_table(
     headers.extend(
         [class_names[i] if class_names else i for i in range(conf_matrix.shape[0])]
     )
-    return tabulate(
-        rows,
-        headers=headers,
-        tablefmt="fancy_grid",
-    )
+    return tabulate(rows, headers=headers, tablefmt="fancy_grid",)
 
 
 def test(
@@ -1670,7 +1646,7 @@ def test(
     test_loss, TP = 0, 0
     total_pred, total_target, total_scores = [], [], []
 
-    # Segmentation - TEMPORARY 
+    # Segmentation - TEMPORARY
     test_accs = []
     test_dices = []
 
@@ -1686,92 +1662,90 @@ def test(
             else val_loader
         ):
             # TODO: ONLY MSD DATASET (NOT PREPROCESSED)
-            #res = data.shape[-1]
-            #data, target = data.view(-1, 1, res, res).to(device), target.view(-1, res, res).to(device)
+            # res = data.shape[-1]
+            # data, target = data.view(-1, 1, res, res).to(device), target.view(-1, res, res).to(device)
             data, target = data.to(device), target.to(device)
-            #dim = 256*256
-            #dim_2 = int(dim/2)
-            #model = nn.Sequential(
+            # dim = 256*256
+            # dim_2 = int(dim/2)
+            # model = nn.Sequential(
             #                    nn.Flatten(),
-            #                    nn.Linear(dim, 100), 
-            #                    nn.ReLU(), 
-            #                    nn.Linear(100, dim), 
+            #                    nn.Linear(dim, 100),
+            #                    nn.ReLU(),
+            #                    nn.Linear(100, dim),
             #                    ).to(device)
-            
-            #num_classes = 1
-            #model = smp.Unet("resnet18", classes=num_classes, activation="sigmoid")
-            #inpt_channels = 1
-            #if inpt_channels != 3:
+
+            # num_classes = 1
+            # model = smp.Unet("resnet18", classes=num_classes, activation="sigmoid")
+            # inpt_channels = 1
+            # if inpt_channels != 3:
             #    new_encoder = [nn.Conv2d(inpt_channels, 3, 1), model.encoder.conv1]
             #    model.encoder.conv1 = nn.Sequential(*new_encoder)
-            #model = model.to(device)
-            
+            # model = model.to(device)
+
             # not necessary
-            #if (
+            # if (
             #     device if isinstance(device, str) else device.type
             # ) != "cpu":  # TODO ugly bugfix
             #     model = model.to(device)
 
             # is on CUDA
             output = model(data)
-            #output = output.view_as(target)
+            # output = output.view_as(target)
 
-            #output, target = output.cpu(), target.cpu() # for loss_fn
-            #loss = loss_fn(output, oh_converter(target if oh_converter else target)
+            # output, target = output.cpu(), target.cpu() # for loss_fn
+            # loss = loss_fn(output, oh_converter(target if oh_converter else target)
 
-            #tp = torch.sum(output[target==1.] >= .5)
-            #tn = torch.sum(output[target==0.] < .5)
-            #fn = torch.sum(output[target==1.] < .5)
-            #fp = torch.sum(output[target==0.] >= .5)
-            #loss = 2 * tp / (2*fp + fn + fp)
+            # tp = torch.sum(output[target==1.] >= .5)
+            # tn = torch.sum(output[target==0.] < .5)
+            # fn = torch.sum(output[target==1.] < .5)
+            # fp = torch.sum(output[target==0.] >= .5)
+            # loss = 2 * tp / (2*fp + fn + fp)
 
             # NOTE: if loss negative (dice) check if output and target have the same shape
             loss = loss_fn(output, target)
 
             test_loss += loss
-            #test_loss += loss.item()  # sum up batch loss
-            # Segmentation 
+            # test_loss += loss.item()  # sum up batch loss
+            # Segmentation
             # TODO: Adapt for all use-cases (train, inference, encrypted, uncencrypted)
-            if args.bin_seg: 
+            if args.bin_seg:
                 # As for normal classification consider the most probable class (for every pixel)
                 # the second dimension in model output is again the class-dimension
                 # that's why the max should be taken over that dimension
-                #_, pred = torch.max(output, 1)
-                #pred = torch.round(output).type(torch.LongTensor).view(-1).cpu().numpy()
+                # _, pred = torch.max(output, 1)
+                # pred = torch.round(output).type(torch.LongTensor).view(-1).cpu().numpy()
 
                 # TODO: Mask only for MSRC
-                # Only allow images/pixels with label >= 0 e.g. for segmentation 
+                # Only allow images/pixels with label >= 0 e.g. for segmentation
                 # (because of unlabeled datapoints with label: -1)
-                #targets_mask = target >= 0
-                #test_acc = np.mean((pred == target)[targets_mask].data.cpu().numpy())
-                #_, target_pred = torch.max(target, 1)
-                #target_pred = target.type(torch.LongTensor).view(-1).cpu().numpy()
-               
-                #test_acc = np.mean((pred==target_pred))
-                #test_accs.append(test_acc)
+                # targets_mask = target >= 0
+                # test_acc = np.mean((pred == target)[targets_mask].data.cpu().numpy())
+                # _, target_pred = torch.max(target, 1)
+                # target_pred = target.type(torch.LongTensor).view(-1).cpu().numpy()
 
-                # f1-score 
-                #test_dice = np.mean([mt.f1_score(tar, pred) for tar, pred in zip(target_pred.numpy(), pred.numpy())])
-                #test_dice = []
+                # test_acc = np.mean((pred==target_pred))
+                # test_accs.append(test_acc)
 
+                # f1-score
+                # test_dice = np.mean([mt.f1_score(tar, pred) for tar, pred in zip(target_pred.numpy(), pred.numpy())])
+                # test_dice = []
 
-                #print(pred[pred!=0])
-                #print(pred.shape)
-  
+                # print(pred[pred!=0])
+                # print(pred.shape)
 
-                #test_dice = mt.f1_score(target_pred, pred)
+                # test_dice = mt.f1_score(target_pred, pred)
 
                 ### Too inefficient ###
-                #for i in range(target_pred.shape[1]): 
-                #    for j in range(target_pred.shape[2]): 
-                        # all classifcations for one pixel 
+                # for i in range(target_pred.shape[1]):
+                #    for j in range(target_pred.shape[2]):
+                # all classifcations for one pixel
                 #        test_dice.append(mt.f1_score(target_pred[:, i, j], pred[:, i, j]))
 
-               #test_dices.append(test_dice)
+                # test_dices.append(test_dice)
 
                 # Added from above (TO BE EXTENDED)
-                #total_pred.append(pred)
-                #total_target.append(target)
+                # total_pred.append(pred)
+                # total_target.append(target)
 
                 # Make segmentation compatible with classification eval pipeline
                 output = output.view(-1)
@@ -1782,7 +1756,7 @@ def test(
                 tgts = target.type(torch.LongTensor)
                 total_pred.append(pred)
                 total_target.append(tgts)
-            else: 
+            else:
                 total_scores.append(output)
                 pred = output.argmax(dim=1)
                 tgts = target.view_as(pred)
@@ -1795,11 +1769,11 @@ def test(
                 else equal.sum().item()
             )
     test_loss /= len(val_loader)
-    
-    #if args.data_dir == "seg_data": 
-        # Segmentation - TEMPORARY 
+
+    # if args.data_dir == "seg_data":
+    # Segmentation - TEMPORARY
     #    print(f"VALIDATION: Epoch: {epoch}, Val-Loss: {test_loss}, \
-    #        Val-Acc.: {np.mean(test_accs)}, Dice: {np.mean(test_dices)}")  
+    #        Val-Acc.: {np.mean(test_accs)}, Dice: {np.mean(test_dices)}")
 
     if args.encrypted_inference:
         objective = 100.0 * TP / (len(val_loader) * args.test_batch_size)
@@ -1807,53 +1781,56 @@ def test(
         if verbose:
             print(
                 "Test set: Epoch: {:d} Average loss: {:.4f}, Recall: {}/{} ({:.0f}%)\n".format(
-                    epoch,
-                    test_loss,
-                    TP,
-                    L,
-                    objective,
+                    epoch, test_loss, TP, L, objective,
                 ),
                 # end="",
             )
     else:
         # Segmentation: TEMPORARY
-        #if args.data_dir == "seg_data": 
+        # if args.data_dir == "seg_data":
         #    matthews_coeff = 0
-            # for now set objective to test_acc
-            #objective = np.mean(test_accs)
-            # for now set objective to F1-score 
+        # for now set objective to test_acc
+        # objective = np.mean(test_accs)
+        # for now set objective to F1-score
         #    objective = np.mean(test_dices)
-        if True: # TEMPORARY
-            total_pred = torch.cat(total_pred).cpu().numpy()  # pylint: disable=no-member
+        if True:  # TEMPORARY
+            total_pred = (
+                torch.cat(total_pred).cpu().numpy()
+            )  # pylint: disable=no-member
             total_target = (
                 torch.cat(total_target).cpu().numpy()  # pylint: disable=no-member
             )
             total_scores = (
                 torch.cat(total_scores).cpu().numpy()  # pylint: disable=no-member
             )
-            #total_scores -= total_scores.min(axis=1)[:, np.newaxis]
-            #total_scores = total_scores / total_scores.sum(axis=1)[:, np.newaxis]
-            #print(total_target.shape)
-            #print(total_scores.shape)
-            #roc_auc = mt.roc_auc_score(total_target, total_scores, multi_class="ovo")
+            thresh = 1_000_000
+            if total_pred.shape[0] > thresh:
+                total_pred = total_pred[:thresh]
+                total_target = total_target[:thresh]
+                total_scores = total_scores[:thresh]
+            # total_scores -= total_scores.min(axis=1)[:, np.newaxis]
+            # total_scores = total_scores / total_scores.sum(axis=1)[:, np.newaxis]
+            # print(total_target.shape)
+            # print(total_scores.shape)
+            # roc_auc = mt.roc_auc_score(total_target, total_scores, multi_class="ovo")
             # TODO: the whole stats block until the print of the stats table takes around 40 sec.?
             try:
                 roc_auc = mt.roc_auc_score(total_target, total_scores)
-                #roc_auc = mt.roc_auc_score(total_target, total_scores, multi_class="ovo")
+                # roc_auc = mt.roc_auc_score(total_target, total_scores, multi_class="ovo")
             except ValueError:
                 warn(
                     "ROC AUC score could not be calculated and was set to zero.",
                     category=UserWarning,
                 )
                 roc_auc = 0.0
-            #print((total_target==-1).sum())
-            #print((total_target==1).sum())
-            #print((total_target==0).sum())
-            #print(((total_target!=0).any() and (total_target!=1).any()).sum())
+            # print((total_target==-1).sum())
+            # print((total_target==1).sum())
+            # print((total_target==0).sum())
+            # print(((total_target!=0).any() and (total_target!=1).any()).sum())
 
-            #print((total_pred==-1).sum())
-            #print((total_pred==1).sum())
-            #print((total_pred==0).sum())
+            # print((total_pred==-1).sum())
+            # print((total_pred==1).sum())
+            # print((total_pred==0).sum())
 
             matthews_coeff = mt.matthews_corrcoef(total_target, total_pred)
             objective = 100.0 * matthews_coeff

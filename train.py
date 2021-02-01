@@ -11,6 +11,7 @@ from warnings import warn
 import numpy as np
 import syft as sy
 import torch
+import cv2
 
 # torch.set_num_threads(36)
 
@@ -181,7 +182,10 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             stats_tf = AlbumentationsTorchTransform(
                 a.Compose(
                     [
-                        a.Resize(args.inference_resolution, args.inference_resolution),
+                        a.Resize(
+                            args.inference_resolution, 
+                            args.inference_resolution, 
+                            cv2.INTER_NEAREST),
                         a.RandomCrop(args.train_resolution, args.train_resolution),
                         a.ToFloat(max_value=255.0),
                     ]
@@ -189,14 +193,7 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             )
             # create first dataset to calculate stats
             dataset = MSD_data_images(
-                args.data_dir + "/train",
-                transform=transforms.Compose(
-                    [
-                        # transforms.Lambda(lambda x: x.unsqueeze(dim=-1)),
-                        stats_tf
-                    ]
-                ),
-                target_transform=transforms.Lambda(lambda x: x.unsqueeze(dim=0)),
+                args.data_dir + "/train", transform=stats_tf, target_transform=stats_tf,
             )
             # get stats
             val_mean_std = calc_mean_std(dataset)
@@ -204,21 +201,53 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             # change transforms based on stats
             dataset.transform = transforms.Compose(
                 [
-                    # dim=0 because this starts with a torch transform
-                    # transforms.Lambda(lambda x: x.unsqueeze(dim=0)),
-                    create_albu_transform(args, mean, std)
+                    create_albu_transform(args, mean, std),
+                    transforms.Lambda(
+                        lambda x: x.view(
+                            -1, args.train_resolution, args.train_resolution
+                        )
+                    ),
                 ]
             )
-            # valset
-            stats_tf.transform.transforms.transforms.append(
-                a.Normalize(mean, std, max_pixel_value=1.0)
+            label_transform = transforms.Compose(
+                [
+                    stats_tf,
+                    transforms.Lambda(
+                        lambda x: x.view(
+                            -1, args.train_resolution, args.train_resolution
+                        )
+                    ),
+                    # TODO: potentially not necessary (according to current value test during debug)
+                    transforms.Lambda(
+                        lambda x: np.where(
+                            x > 0.0,
+                            torch.ones_like(x),
+                            torch.zeros_like(
+                                x
+                            ),  # i don't like this but I didn't find sth better yet
+                        )
+                    ),
+                ]
             )
+            dataset.target_transform = label_transform
+            # valset
             valset = MSD_data_images(
                 args.data_dir + "/val",
-                transform=transforms.Compose(
-                    [transforms.Lambda(lambda x: x.unsqueeze(dim=-1)), stats_tf]
-                ),
-                target_transform=transforms.Lambda(lambda x: x.unsqueeze(dim=0)),
+                transform=stats_tf,
+                target_transform=label_transform,
+            )
+            valset.transform.transform.transforms.transforms.append(
+                a.Normalize(mean, std, max_pixel_value=1.0),
+            )
+            valset.transform = transforms.Compose(
+                [
+                    valset.transform,
+                    transforms.Lambda(
+                        lambda x: x.view(
+                            -1, args.train_resolution, args.train_resolution
+                        )
+                    ),
+                ]
             )
 
         else:

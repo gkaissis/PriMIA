@@ -245,8 +245,9 @@ def create_albu_transform(args, mean, std):
         [
             train_tf,
             # TODO: How did that work without that?
-            transforms.Lambda(lambda x: x.squeeze()),
-            transforms.Lambda(lambda x: x.unsqueeze(dim=-1)),
+            # [Alex] wtf is this
+            # transforms.Lambda(lambda x: x.squeeze()),
+            # transforms.Lambda(lambda x: x.unsqueeze(dim=-1)),
             train_tf_albu,
         ]
     )
@@ -265,9 +266,7 @@ def l1_sensitivity(query: Callable, d: tensor) -> float:
 
 
 def calc_mean_std(
-    dataset,
-    save_folder=None,
-    epsilon=None,
+    dataset, save_folder=None, epsilon=None,
 ):
     """
     Calculates the mean and standard deviation of `dataset` and
@@ -435,11 +434,7 @@ class ImageFolderFromCSV(torchdata.Dataset):
 
 class PPPP(torchdata.Dataset):
     def __init__(
-        self,
-        label_path="data/Labels.csv",
-        train=False,
-        transform=None,
-        seed=1,
+        self, label_path="data/Labels.csv", train=False, transform=None, seed=1,
     ):
         super().__init__()
         random.seed(seed)
@@ -488,8 +483,7 @@ class PPPP(torchdata.Dataset):
     def __compute_mean_std__(self):
 
         calc_mean_std(
-            self,
-            save_folder="data",
+            self, save_folder="data",
         )
 
 
@@ -518,6 +512,7 @@ def random_split(dataset, lengths, generator=default_generator):
         for offset, length in zip(_accumulate(lengths), lengths)
     ]
 
+
 """
     Data utility functions for the Medical Segmentation Decathlon
     http://medicaldecathlon.com/#tasks
@@ -539,7 +534,8 @@ from nilearn.image import resample_img
 from pathlib import Path, WindowsPath, PureWindowsPath, PosixPath, PurePosixPath
 from tqdm import tqdm
 
-# additional utility functions from original function 
+# additional utility functions from original function
+
 
 def scale_array(array: np.array) -> np.array:
     """ Scales a numpy array from 0 to 1. Works in 3D 
@@ -560,6 +556,7 @@ def preprocess_scan(scan) -> np.array:
 
     return scan
 
+
 def rotate_label(label_volume) -> np.array:
     """ Rotates and flips the label in the same way the scans were rotated and flipped
         Return: np.array """
@@ -568,6 +565,7 @@ def rotate_label(label_volume) -> np.array:
     label_volume = np.fliplr(label_volume)
 
     return label_volume.astype(np.float32)
+
 
 def preprocess_and_convert_to_numpy(
     nifti_scan: nib.Nifti1Image, nifti_mask: nib.Nifti1Image
@@ -584,6 +582,7 @@ def preprocess_and_convert_to_numpy(
 
     return np_scan, np_label
 
+
 def get_name(nifti: nib.Nifti1Image, path: Path) -> str:
     "Gets the original filename of a Nifti."
     file_dir = nifti.get_filename()
@@ -593,14 +592,16 @@ def get_name(nifti: nib.Nifti1Image, path: Path) -> str:
         file_name = file_dir.split("\\")[-1]
     return file_name
 
+
 def merge_labels(label_volume: np.array) -> np.array:
     """ Merges Tumor and Pancreas labels into one volume with background=0, pancreas & tumor = 1
         Input: label_volume = 3D numpy array
         Return: Merged Label volume """
     merged_label = np.zeros(label_volume.shape, dtype=np.float32)
-    merged_label[label_volume == 1] = 1.
-    merged_label[label_volume == 2] = 1.
+    merged_label[label_volume == 1] = 1.0
+    merged_label[label_volume == 2] = 1.0
     return merged_label
+
 
 def bbox_dim_3D(img: np.array):
     """Finds the corresponding dimensions for the 3D Bounding Box from the Segmentation Label volume
@@ -619,6 +620,7 @@ def bbox_dim_3D(img: np.array):
 
     return rmin, rmax, cmin, cmax, zmin, zmax
 
+
 def create_2D_label(rmin: int, rmax: int, cmin: int, cmax: int, res: int) -> np.array:
     """Creates a 2D Label from a Bounding Box 
         Input: rmin, rmax, cmin, cmax = dimensions of Bounding Box, res = resolution of required label
@@ -626,6 +628,7 @@ def create_2D_label(rmin: int, rmax: int, cmin: int, cmax: int, res: int) -> np.
     label = np.zeros((res, res), dtype=np.float32)
     label[rmin:rmax, cmin:cmax] = 1
     return label
+
 
 def create_3D_label(
     rmin: int,
@@ -644,6 +647,7 @@ def create_3D_label(
     label_volume[rmin:rmax, cmin:cmax, zmin:zmax] = 1.0
     return label_volume
 
+
 def convert_to_2d(arr: np.array) -> np.array:
     """Takes a 4d array of shape: (num_samples, res_x, res_y, sample_height) and destacks the 3d scans 
         converting it to a 3d array of shape: (num_samples*sample_height, res_x, res_y)"""
@@ -651,6 +655,7 @@ def convert_to_2d(arr: np.array) -> np.array:
     reshaped = np.concatenate(arr, axis=-1)
     assert len(reshaped.shape) == 3
     return np.moveaxis(reshaped, -1, 0)
+
 
 def crop_volume(
     data_volume: np.array, label_volume: np.array, crop_height: int = 32
@@ -669,10 +674,10 @@ def crop_volume(
 
     return cropped_data_volume, cropped_label_volume
 
-class MSD_data(torchdata.Dataset):
 
+class MSD_data(torchdata.Dataset):
     def __init__(
-        self, 
+        self,
         path_string: str,
         res: int,
         res_z: int,
@@ -686,7 +691,7 @@ class MSD_data(torchdata.Dataset):
     ):
         self.path_string = path_string
         self.res = res
-        self.res_z = res_z 
+        self.res_z = res_z
         self.sample_limit = sample_limit
         self.crop_height = crop_height
         self.mode = mode
@@ -695,41 +700,45 @@ class MSD_data(torchdata.Dataset):
         self.transform = transform
         self.target_transform = target_transform
 
-        # as in original function 
+        # as in original function
         assert (crop_height % 16) == 0
         if label_mode == "bbox-coord":
             raise NotImplementedError()
 
-        # dynamically add search for all *.nii.* files that are 
+        # dynamically add search for all *.nii.* files that are
         # present in the subfolders of **/data_path/imagesTr
-        # and check if for every scan there exists one label 
+        # and check if for every scan there exists one label
         scan_path = Path(path_string) / "imagesTr"
-        assert scan_path.exists() # as in original function 
+        assert scan_path.exists()  # as in original function
         scan_names = [
-            # TODO: Solve problem: don't want to load in all images but how do I call get_names then? 
+            # TODO: Solve problem: don't want to load in all images but how do I call get_names then?
             #       Is what I'm doing here also valid or not the real file names? NO - assert doesn't pass
-            #       What is the difference? 
-            #get_name(file, scan_path) for i, file in enumerate(scan_path.rglob("*.nii.*")) if i < sample_limit 
-            file for i, file in enumerate(scan_path.rglob("*.nii.*")) if i < sample_limit 
+            #       What is the difference?
+            # get_name(file, scan_path) for i, file in enumerate(scan_path.rglob("*.nii.*")) if i < sample_limit
+            file
+            for i, file in enumerate(scan_path.rglob("*.nii.*"))
+            if i < sample_limit
         ]
 
         label_path = Path(path_string) / "labelsTr"
-        assert label_path.exists() # as in original function 
+        assert label_path.exists()  # as in original function
         label_names = [
-            #get_name(file, label_path) for i, file in enumerate(label_path.rglob("*.nii.*")) if i < sample_limit
-            file for i, file in enumerate(label_path.rglob("*.nii.*")) if i < sample_limit
+            # get_name(file, label_path) for i, file in enumerate(label_path.rglob("*.nii.*")) if i < sample_limit
+            file
+            for i, file in enumerate(label_path.rglob("*.nii.*"))
+            if i < sample_limit
         ]
 
-        # Make sure that for each scan there exists a label 
+        # Make sure that for each scan there exists a label
         # (the labels have the same name as the scans
         #  there just stored in another folder)
-        #TODO: Change with get_name
-        #assert scan_names==label_names
+        # TODO: Change with get_name
+        # assert scan_names==label_names
 
-        self.scan_names = scan_names 
-        self.label_names = label_names 
+        self.scan_names = scan_names
+        self.label_names = label_names
 
-    #TODO: Possible change that? The same way as in Moritzes version? 
+    # TODO: Possible change that? The same way as in Moritzes version?
     def __len__(self):
         """
             If we don't specify how many samples we want we get all samples
@@ -753,7 +762,7 @@ class MSD_data(torchdata.Dataset):
             raise TypeError("Invalid argument type.")
 
     def get_item_from_index(self, index):
-        scan_id = self.scan_names[index] 
+        scan_id = self.scan_names[index]
         label_id = self.label_names[index]
 
         scan = nib.load(str(scan_id))
@@ -779,19 +788,24 @@ class MSD_data(torchdata.Dataset):
             )
 
         # cropping scan and label volumes to reduce the number of non-pancreas slices
-        cropped_scan, cropped_label = crop_volume(scan, label, crop_height=self.crop_height)
+        cropped_scan, cropped_label = crop_volume(
+            scan, label, crop_height=self.crop_height
+        )
         assert cropped_scan.shape == cropped_label.shape
 
         scan = resize(
             cropped_scan, (self.res, self.res, self.res_z), preserve_range=True, order=1
         ).astype(np.float32)
         label = resize(
-            cropped_label, (self.res, self.res, self.res_z), preserve_range=True, order=0
+            cropped_label,
+            (self.res, self.res, self.res_z),
+            preserve_range=True,
+            order=0,
         ).astype(np.uint8)
 
         if self.mode == "2D":
-            #print("... converting data to 2D slices")
-            # convert_to_2d expects an array of shape: num_samples, xres, yres, height 
+            # print("... converting data to 2D slices")
+            # convert_to_2d expects an array of shape: num_samples, xres, yres, height
             # will return num_samples*height, xres, yres
             scan = np.expand_dims(scan, 0)
             label = np.expand_dims(label, 0)
@@ -803,14 +817,15 @@ class MSD_data(torchdata.Dataset):
             # we shift the slices to the number of samples and introduce an empty channel-dim
             # MoNet expects samples of batch_size x channel (=1) x 2D_image_dim
             scan = np.expand_dims(scan, 1)
-            #label = np.expand_dims(label, 1)
+            # label = np.expand_dims(label, 1)
 
-        # convert to tensors 
+        # convert to tensors
         # convert to tensors
         return (
-             self.transform(from_numpy(scan.copy())),
-             self.target_transform(from_numpy(label.copy()).long()),
+            self.transform(from_numpy(scan.copy())),
+            self.target_transform(from_numpy(label.copy()).long()),
         )
+
 
 """
     MSD dataset as normal image-dataset. Assumes dataset was already preprocessed. 
@@ -819,37 +834,42 @@ class MSD_data(torchdata.Dataset):
 from os import listdir
 from os.path import isfile, join
 
-class MSD_data_images(torchdata.Dataset): 
+
+class MSD_data_images(torchdata.Dataset):
     def __init__(
-        self, 
+        self,
         img_path="./data",
         transform: Callable = lambda x: x,
         target_transform: Callable = lambda x: x,
-        ):
-    
+    ):
+
         self.input_path = img_path + "/inputs/"
         self.target_path = img_path + "/labels/"
         self.transform = transform
         self.target_transform = target_transform
 
-        assert os.path.exists(self.input_path) 
+        assert os.path.exists(self.input_path)
         scan_names = [
-            file for file in listdir(self.input_path) if isfile(join(self.input_path, file))
+            file
+            for file in listdir(self.input_path)
+            if isfile(join(self.input_path, file))
         ]
 
-        assert os.path.exists(self.target_path) 
+        assert os.path.exists(self.target_path)
         label_names = [
-            file for file in listdir(self.target_path) if isfile(join(self.target_path, file))
+            file
+            for file in listdir(self.target_path)
+            if isfile(join(self.target_path, file))
         ]
 
         # check that for each scan there exists a label
         # sort important in-case files are not structured the same way (problem in Colab e.g.)
         scan_names.sort()
         label_names.sort()
-        assert scan_names==label_names
+        assert scan_names == label_names
 
-        self.scan_names = scan_names 
-        self.label_names = label_names 
+        self.scan_names = scan_names
+        self.label_names = label_names
 
     def __len__(self):
         return len(self.scan_names)
@@ -871,76 +891,71 @@ class MSD_data_images(torchdata.Dataset):
 
     def get_item_from_index(self, index):
         # because images are named from 0.jpg, 1.jpg, ...
-        scan_path = self.input_path + f'{index}.jpg'
-        label_path = self.target_path + f'{index}.jpg'
+        scan_path = self.input_path + f"{index}.jpg"
+        label_path = self.target_path + f"{index}.jpg"
 
         scan_img = Image.open(scan_path)
         label_img = Image.open(label_path)
 
-        scan_np = np.array(scan_img, dtype=np.float32) / 255
-        label_np = np.array(label_img, dtype=np.float32) / 255
+        ## [Alex] do this as transform!
 
-        # MoNet expects a tensor of shape channel x xres x yres 
-        # channel = 1
-        #scan_np = np.expand_dims(scan_np, axis=0)
+        # scan_np = np.array(scan_img, dtype=np.float32)  / 255
+        # label_np = np.array(label_img, dtype=np.float32) / 255
 
-        scan = from_numpy(scan_np)
-        # BCELoss expects float tensors and not byte tensors
-        label = from_numpy(label_np)
+        # # MoNet expects a tensor of shape channel x xres x yres
+        # # channel = 1
+        # # scan_np = np.expand_dims(scan_np, axis=0)
 
         return self.transform(scan), self.target_transform(label)
 
-"""
-    Data utility functions from I2DL class - N.Remerscheid
-""" 
+        # scan = from_numpy(scan_np)
+        # # BCELoss expects float tensors and not byte tensors
+        # label = from_numpy(label_np)
 
-import _pickle as pickle
+
 
 # pylint: disable=C0326
 SEG_LABELS_LIST = [
-    {"id": -1, "name": "void",       "rgb_values": [0,   0,    0]},
-    {"id": 0,  "name": "building",   "rgb_values": [128, 0,    0]},
-    {"id": 1,  "name": "grass",      "rgb_values": [0,   128,  0]},
-    {"id": 2,  "name": "tree",       "rgb_values": [128, 128,  0]},
-    {"id": 3,  "name": "cow",        "rgb_values": [0,   0,    128]},
-    {"id": 4,  "name": "horse",      "rgb_values": [128, 0,    128]},
-    {"id": 5,  "name": "sheep",      "rgb_values": [0,   128,  128]},
-    {"id": 6,  "name": "sky",        "rgb_values": [128, 128,  128]},
-    {"id": 7,  "name": "mountain",   "rgb_values": [64,  0,    0]},
-    {"id": 8,  "name": "airplane",   "rgb_values": [192, 0,    0]},
-    {"id": 9,  "name": "water",      "rgb_values": [64,  128,  0]},
-    {"id": 10, "name": "face",       "rgb_values": [192, 128,  0]},
-    {"id": 11, "name": "car",        "rgb_values": [64,  0,    128]},
-    {"id": 12, "name": "bicycle",    "rgb_values": [192, 0,    128]},
-    {"id": 13, "name": "flower",     "rgb_values": [64,  128,  128]},
-    {"id": 14, "name": "sign",       "rgb_values": [192, 128,  128]},
-    {"id": 15, "name": "bird",       "rgb_values": [0,   64,   0]},
-    {"id": 16, "name": "book",       "rgb_values": [128, 64,   0]},
-    {"id": 17, "name": "chair",      "rgb_values": [0,   192,  0]},
-    {"id": 18, "name": "road",       "rgb_values": [128, 64,   128]},
-    {"id": 19, "name": "cat",        "rgb_values": [0,   192,  128]},
-    {"id": 20, "name": "dog",        "rgb_values": [128, 192,  128]},
-    {"id": 21, "name": "body",       "rgb_values": [64,  64,   0]},
-    {"id": 22, "name": "boat",       "rgb_values": [192, 64,   0]}]
+    {"id": 0, "name": "building", "rgb_values": [128, 0, 0]},
+    {"id": 1, "name": "grass", "rgb_values": [0, 128, 0]},
+    {"id": 2, "name": "tree", "rgb_values": [128, 128, 0]},
+    {"id": 3, "name": "cow", "rgb_values": [0, 0, 128]},
+    {"id": 4, "name": "horse", "rgb_values": [128, 0, 128]},
+    {"id": 5, "name": "sheep", "rgb_values": [0, 128, 128]},
+    {"id": 6, "name": "sky", "rgb_values": [128, 128, 128]},
+    {"id": 7, "name": "mountain", "rgb_values": [64, 0, 0]},
+    {"id": 8, "name": "airplane", "rgb_values": [192, 0, 0]},
+    {"id": 9, "name": "water", "rgb_values": [64, 128, 0]},
+    {"id": 10, "name": "face", "rgb_values": [192, 128, 0]},
+    {"id": 11, "name": "car", "rgb_values": [64, 0, 128]},
+    {"id": 12, "name": "bicycle", "rgb_values": [192, 0, 128]},
+    {"id": 13, "name": "flower", "rgb_values": [64, 128, 128]},
+    {"id": 14, "name": "sign", "rgb_values": [192, 128, 128]},
+    {"id": 15, "name": "bird", "rgb_values": [0, 64, 0]},
+    {"id": 16, "name": "book", "rgb_values": [128, 64, 0]},
+    {"id": 17, "name": "chair", "rgb_values": [0, 192, 0]},
+    {"id": 18, "name": "road", "rgb_values": [128, 64, 128]},
+    {"id": 19, "name": "cat", "rgb_values": [0, 192, 128]},
+    {"id": 20, "name": "dog", "rgb_values": [128, 192, 128]},
+    {"id": 21, "name": "body", "rgb_values": [64, 64, 0]},
+    {"id": 22, "name": "boat", "rgb_values": [192, 64, 0]},
+]
 
 
 def label_img_to_rgb(label_img):
     label_img = np.squeeze(label_img)
     labels = np.unique(label_img)
-    label_infos = [l for l in SEG_LABELS_LIST if l['id'] in labels]
+    label_infos = [l for l in SEG_LABELS_LIST if l["id"] in labels]
 
-    label_img_rgb = np.array([label_img,
-                              label_img,
-                              label_img]).transpose(1,2,0)
+    label_img_rgb = np.array([label_img, label_img, label_img]).transpose(1, 2, 0)
     for l in label_infos:
-        mask = label_img == l['id']
-        label_img_rgb[mask] = l['rgb_values']
+        mask = label_img == l["id"]
+        label_img_rgb[mask] = l["rgb_values"]
 
     return label_img_rgb.astype(np.uint8)
 
 
 class SegmentationData(torchdata.Dataset):
-
     def __init__(self, image_paths_file):
         self.root_dir_name = os.path.dirname(image_paths_file)
 
@@ -967,34 +982,35 @@ class SegmentationData(torchdata.Dataset):
 
     def get_item_from_index(self, index):
         to_tensor = transforms.ToTensor()
-        img_id = self.image_names[index].replace('.bmp', '')
+        img_id = self.image_names[index].replace(".bmp", "")
 
-        img = Image.open(os.path.join(self.root_dir_name,
-                                      'images',
-                                      img_id + '.bmp')).convert('RGB')
+        img = Image.open(
+            os.path.join(self.root_dir_name, "images", img_id + ".bmp")
+        ).convert("RGB")
         center_crop = transforms.CenterCrop(240)
         # TODO: TEMP.
-        #center_crop = transforms.CenterCrop(240)
-        #img = center_crop(img)
-        #img = to_tensor(img)
+        # center_crop = transforms.CenterCrop(240)
+        # img = center_crop(img)
+        # img = to_tensor(img)
 
         # TODO: TEMP. (only one channel -> for testing)
-        #img = img[:1, :, :]
+        # img = img[:1, :, :]
 
-        target = Image.open(os.path.join(self.root_dir_name,
-                                         'targets',
-                                         img_id + '_GT.bmp'))
+        target = Image.open(
+            os.path.join(self.root_dir_name, "targets", img_id + "_GT.bmp")
+        )
         target = center_crop(target)
         target = np.array(target, dtype=np.int64)
 
         target_labels = target[..., 0]
         for label in SEG_LABELS_LIST:
-            mask = np.all(target == label['rgb_values'], axis=2)
-            target_labels[mask] = label['id']
+            mask = np.all(target == label["rgb_values"], axis=2)
+            target_labels[mask] = label["id"]
 
         target_labels = from_numpy(target_labels.copy())
 
         return img, target_labels
+
 
 if __name__ == "__main__":
     # import matplotlib.pyplot as plt
@@ -1033,11 +1049,7 @@ if __name__ == "__main__":
     img.show()
 
     tf = transforms.Compose(
-        [
-            transforms.Resize(224),
-            transforms.CenterCrop(224),
-            transforms.ToTensor(),
-        ]
+        [transforms.Resize(224), transforms.CenterCrop(224), transforms.ToTensor(),]
     )
     ds = PPPP(train=True, transform=tf)
 
