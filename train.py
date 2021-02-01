@@ -11,6 +11,7 @@ from warnings import warn
 import numpy as np
 import syft as sy
 import torch
+import cv2
 
 # torch.set_num_threads(36)
 
@@ -181,7 +182,10 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             stats_tf = AlbumentationsTorchTransform(
                 a.Compose(
                     [
-                        a.Resize(args.inference_resolution, args.inference_resolution),
+                        a.Resize(
+                            args.inference_resolution, 
+                            args.inference_resolution, 
+                            cv2.INTER_NEAREST),
                         a.RandomCrop(args.train_resolution, args.train_resolution),
                         a.ToFloat(max_value=255.0),
                     ]
@@ -213,6 +217,7 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
                             -1, args.train_resolution, args.train_resolution
                         )
                     ),
+                    # TODO: potentially not necessary (according to current value test during debug)
                     transforms.Lambda(
                         lambda x: np.where(
                             x > 0.0,
