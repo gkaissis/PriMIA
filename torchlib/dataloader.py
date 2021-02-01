@@ -228,7 +228,7 @@ def create_albu_transform(args, mean, std):
         a.ToFloat(max_value=255.0),
         a.Normalize(mean, std, max_pixel_value=1.0),
     ]
-    if not args.pretrained:
+    if not args.pretrained and not args.bin_seg:
         end_transformations.append(
             a.Lambda(image=lambda x, **kwargs: x[:, :, np.newaxis])
         )
@@ -244,6 +244,9 @@ def create_albu_transform(args, mean, std):
     return transforms.Compose(
         [
             train_tf,
+            # TODO: How did that work without that?
+            transforms.Lambda(lambda x: x.squeeze()),
+            transforms.Lambda(lambda x: x.unsqueeze(dim=-1)),
             train_tf_albu,
         ]
     )
@@ -879,13 +882,11 @@ class MSD_data_images(torchdata.Dataset):
 
         # MoNet expects a tensor of shape channel x xres x yres 
         # channel = 1
-        scan_np = np.expand_dims(scan_np, axis=0)
+        #scan_np = np.expand_dims(scan_np, axis=0)
 
         scan = from_numpy(scan_np)
         # BCELoss expects float tensors and not byte tensors
         label = from_numpy(label_np)
-
-        # no transforms necessary, because all already done in preprocessing
 
         return self.transform(scan), self.target_transform(label)
 
