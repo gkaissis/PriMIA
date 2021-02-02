@@ -11,7 +11,7 @@ from warnings import warn
 import numpy as np
 import syft as sy
 import torch
-import cv2
+from cv2 import INTER_NEAREST
 
 # torch.set_num_threads(36)
 
@@ -80,7 +80,14 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
 
     device = torch.device("cuda" if use_cuda else "cpu")  # pylint: disable=no-member
 
-    kwargs = {"num_workers": args.num_threads, "pin_memory": True,} if use_cuda else {}
+    kwargs = (
+        {
+            "num_workers": args.num_threads,
+            "pin_memory": True,
+        }
+        if use_cuda
+        else {}
+    )
 
     timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     exp_name = "{:s}_{:s}_{:s}".format(
@@ -105,7 +112,11 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             worker_names,
             crypto_provider,
             val_mean_std,
-        ) = setup_pysyft(args, hook, verbose=verbose,)
+        ) = setup_pysyft(
+            args,
+            hook,
+            verbose=verbose,
+        )
     else:
         if args.data_dir == "mnist":
             val_mean_std = torch.tensor(  # pylint:disable=not-callable
@@ -152,14 +163,14 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
 
             sample_limit = 2
             dataset = MSD_data(
-                path_string=PATH, 
-                res=RES, 
+                path_string=PATH,
+                res=RES,
                 res_z=RES_Z,
                 crop_height=CROP_HEIGHT,
                 sample_limit=sample_limit,
             )
 
-            # split into val and train set 
+            # split into val and train set
             train_size = int(0.8 * len(dataset))
             val_size = len(dataset) - train_size
             dataset, valset = torch.utils.data.random_split(dataset, [train_size, val_size])
@@ -183,9 +194,10 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
                 a.Compose(
                     [
                         a.Resize(
-                            args.inference_resolution, 
-                            args.inference_resolution, 
-                            cv2.INTER_NEAREST),
+                            args.inference_resolution,
+                            args.inference_resolution,
+                            INTER_NEAREST,
+                        ),
                         a.RandomCrop(args.train_resolution, args.train_resolution),
                         a.ToFloat(max_value=255.0),
                     ]
@@ -193,7 +205,9 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             )
             # create first dataset to calculate stats
             dataset = MSD_data_images(
-                args.data_dir + "/train", transform=stats_tf, target_transform=stats_tf,
+                args.data_dir + "/train",
+                transform=stats_tf,
+                target_transform=stats_tf,
             )
             # get stats
             val_mean_std = calc_mean_std(dataset)
@@ -268,7 +282,9 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             if not args.pretrained:
                 loader.change_channels(1)
             dataset = datasets.ImageFolder(
-                args.data_dir, transform=stats_tf, loader=loader,
+                args.data_dir,
+                transform=stats_tf,
+                loader=loader,
             )
             # TODO: issue #1 - this only creates two 2 new dimensions in case of three channels
             assert (
@@ -314,7 +330,10 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
         # valset.dataset.transform = AlbumentationsTorchTransform(a.Compose(val_tf))
 
         val_loader = torch.utils.data.DataLoader(
-            valset, batch_size=args.test_batch_size, shuffle=True, **kwargs,
+            valset,
+            batch_size=args.test_batch_size,
+            shuffle=True,
+            **kwargs,
         )
         # del total_L, fraction
 
@@ -408,11 +427,12 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
         model_args = {
             "encoder_name": "resnet18",
             "classes": 1,
+            "in_channels": 1,
             "activation": "sigmoid",
             "encoder_weights": None,
         }
         model = smp.Unet(**model_args)
-        model.encoder.conv1 = nn.Sequential(nn.Conv2d(1, 3, 1), model.encoder.conv1)
+        # model.encoder.conv1 = nn.Sequential(nn.Conv2d(1, 3, 1), model.encoder.conv1)
         if args.pretrained:
             with open(PRETRAINED_PATH, "rb") as handle:
                 state_dict = pickle.load(handle)
@@ -532,6 +552,11 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
 
     if args.train_federated:
         loss_fn = {w: loss_fn.copy() for w in [*workers, "local_model"]}
+
+    gradient_dump = {} if args.dump_gradients_every else None
+    if args.dump_gradients_every and args.train_federated:
+        print("[Warning] Dump gradients only supported for local training")
+        exit()
 
     start_at_epoch = 1
     if cmd_args and cmd_args.resume_checkpoint:
@@ -661,7 +686,7 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             )
 
         else:
-            model, epsilon = train(
+            model, epsilon, gradient_dump = train(
                 args,
                 model,
                 device,
@@ -672,6 +697,7 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
                 num_classes,
                 vis_params=vis_params,
                 verbose=verbose,
+                gradient_dump=gradient_dump,
             )
         # except Exception as e:
 
@@ -730,16 +756,23 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
     model.load_state_dict(state["model_state_dict"])
 
     shutil.copyfile(
-        best_model_file, "model_weights/final_{:s}.pt".format(exp_name),
+        best_model_file,
+        "model_weights/final_{:s}.pt".format(exp_name),
     )
     if args.save_file:
         save_config_results(
-            args, matthews_scores[best_score_idx], timestamp, args.save_file,
+            args,
+            matthews_scores[best_score_idx],
+            timestamp,
+            args.save_file,
         )
 
     # delete old model weights
     for model_file in model_paths:
         remove(model_file)
+
+    if args.dump_gradients_every:
+        torch.save(gradient_dump, f"model_weights/gradient_dump_{exp_name}.pt")
 
     return matthews_scores[best_score_idx], epsilon
 
@@ -795,6 +828,12 @@ if __name__ == "__main__":
         default=None,
         type=str,
         help="Optional name to be stored in csv file to later identify training.",
+    )
+    parser.add_argument(
+        "--dump_gradients_every",
+        default=None,
+        type=int,
+        help="Dump gradients during training every n steps",
     )
     cmd_args = parser.parse_args()
 

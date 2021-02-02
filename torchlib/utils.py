@@ -290,6 +290,7 @@ class Arguments:
         if self.websockets:
             assert self.train_federated, "If you use websockets it must be federated"
         self.num_threads = config.getint("system", "num_threads", fallback=0)
+        self.dump_gradients_every = cmd_args.dump_gradients_every
 
     @classmethod
     def from_namespace(cls, args):
@@ -372,7 +373,8 @@ class MixUp(torch.nn.Module):
         self.λ = λ
 
     def forward(
-        self, x: Tuple[Union[torch.tensor, Tuple[torch.tensor]], Tuple[torch.Tensor]],
+        self,
+        x: Tuple[Union[torch.tensor, Tuple[torch.tensor]], Tuple[torch.Tensor]],
     ):
         assert len(x) == 2, "need data and target"
         x, y = x
@@ -663,16 +665,16 @@ def setup_pysyft(args, hook, verbose=False):
 
             sample_limit = 9
             dataset = MSD_data(
-                path_string=PATH, 
-                res=RES, 
+                path_string=PATH,
+                res=RES,
                 res_z=RES_Z,
                 crop_height=CROP_HEIGHT,
                 sample_limit=sample_limit,
             )
 
-            #TODO: Does it make sense to split already here? 
-            #      Different than normal for the other datasets. 
-            # split into val and train set 
+            #TODO: Does it make sense to split already here?
+            #      Different than normal for the other datasets.
+            # split into val and train set
             train_size = int(0.8 * len(dataset))
             val_size = len(dataset) - train_size
             dataset, valset = torch.utils.data.random_split(dataset, [train_size, val_size])
@@ -777,7 +779,10 @@ def setup_pysyft(args, hook, verbose=False):
             data, targets = [], []
             if args.mixup:
                 dataset = torch.utils.data.DataLoader(
-                    dataset, batch_size=1, shuffle=True, num_workers=args.num_threads,
+                    dataset,
+                    batch_size=1,
+                    shuffle=True,
+                    num_workers=args.num_threads,
                 )
                 mixup = MixUp(λ=args.mixup_lambda, p=args.mixup_prob)
                 last_set = None
@@ -819,8 +824,12 @@ def setup_pysyft(args, hook, verbose=False):
                 selected_data = selected_data.squeeze(1)
                 selected_targets = selected_targets.squeeze(1)
             del data, targets
-            selected_data.tag("#traindata",)
-            selected_targets.tag("#traintargets",)
+            selected_data.tag(
+                "#traindata",
+            )
+            selected_targets.tag(
+                "#traintargets",
+            )
             worker.load_data([selected_data, selected_targets])
     if crypto_provider is not None:
         grid = sy.PrivateGridNetwork(*(list(workers.values()) + [crypto_provider]))
@@ -833,7 +842,8 @@ def setup_pysyft(args, hook, verbose=False):
     for worker in data.keys():
         dist_dataset = [  # TODO: in the future transform here would be nice but currently raise errors
             sy.BaseDataset(
-                data[worker][0], target[worker][0],
+                data[worker][0],
+                target[worker][0],
             )  # transform=federated_tf
         ]
         fed_dataset = sy.FederatedDataset(dist_dataset)
@@ -1076,7 +1086,12 @@ def train_federated(
         )
     else:
         if verbose:
-            print("Train Epoch: {} \tLoss: {:.6f}".format(epoch, avg_loss,))
+            print(
+                "Train Epoch: {} \tLoss: {:.6f}".format(
+                    epoch,
+                    avg_loss,
+                )
+            )
     return model, epsilon
 
 
@@ -1293,7 +1308,11 @@ def secure_aggregation_epoch(
 
             if args.differentially_private and args.batch_size > args.microbatch_size:
                 batch = next(dataloader)
-                for i in range(0, batch[0].shape[0], args.microbatch_size,):
+                for i in range(
+                    0,
+                    batch[0].shape[0],
+                    args.microbatch_size,
+                ):
                     data, target = (
                         batch[0][i : i + args.microbatch_size].to(device),
                         batch[1][i : i + args.microbatch_size].to(device),
@@ -1485,6 +1504,7 @@ def train(  # never called on websockets
     num_classes,
     vis_params=None,
     verbose=True,
+    gradient_dump=None,
 ):
     model.train()
     if args.mixup:
@@ -1559,6 +1579,12 @@ def train(  # never called on websockets
                 )
             else:
                 avg_loss.append(loss.item())
+        if args.dump_gradients_every:
+            steps = epoch * len(train_loader) + batch_idx
+            if steps % args.dump_gradients_every == 0:
+                gradient_dump[steps] = [
+                    param.grad.detach() for param in model.parameters()
+                ]
     if args.differentially_private:
         epsilon, best_alpha = optimizer.privacy_engine.get_privacy_spent(
             args.target_delta
@@ -1567,8 +1593,13 @@ def train(  # never called on websockets
     else:
         epsilon = 0
     if not args.visdom and verbose:
-        print("Train Epoch: {} \tLoss: {:.6f}".format(epoch, np.mean(avg_loss),))
-    return model, epsilon
+        print(
+            "Train Epoch: {} \tLoss: {:.6f}".format(
+                epoch,
+                np.mean(avg_loss),
+            )
+        )
+    return model, epsilon, gradient_dump
 
 
 def stats_table(
@@ -1623,7 +1654,11 @@ def stats_table(
     headers.extend(
         [class_names[i] if class_names else i for i in range(conf_matrix.shape[0])]
     )
-    return tabulate(rows, headers=headers, tablefmt="fancy_grid",)
+    return tabulate(
+        rows,
+        headers=headers,
+        tablefmt="fancy_grid",
+    )
 
 
 def test(
@@ -1781,7 +1816,11 @@ def test(
         if verbose:
             print(
                 "Test set: Epoch: {:d} Average loss: {:.4f}, Recall: {}/{} ({:.0f}%)\n".format(
-                    epoch, test_loss, TP, L, objective,
+                    epoch,
+                    test_loss,
+                    TP,
+                    L,
+                    objective,
                 ),
                 # end="",
             )
