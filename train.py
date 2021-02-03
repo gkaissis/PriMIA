@@ -189,6 +189,8 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             #       --> otherwise: type not subscriptable error                #
             # NOTE: The AlbumentationsTorchTransform wrapper auto. changes     #
             #       (256, 256, 1) back to (1, 256, 256) after the transforms.  # 
+            #       Putting a torch transform in the wrapper leads to          #
+            #       'force_apply...' error                                     #
             # NOTE: Easiest way to do transforms: keep as PIL images.          #
             ####################################################################
 
@@ -210,9 +212,8 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             extra_channel_tf = transforms.Lambda(
                 lambda x: x.view(
                     -1, args.train_resolution, args.train_resolution
-                    )
                 )
-
+            )
             # dataset to calculate stats
             dataset = MSD_data_images(
                 args.data_dir + "/train",

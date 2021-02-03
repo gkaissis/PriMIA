@@ -23,6 +23,7 @@ from collections import Counter
 from copy import deepcopy
 from warnings import warn, filterwarnings
 from torchvision import datasets, transforms
+from cv2 import INTER_NEAREST
 
 from .dataloader import (
     AlbumentationsTorchTransform,
@@ -652,39 +653,70 @@ def setup_pysyft(args, hook, verbose=False):
 
         # Segmentation
         elif args.bin_seg:
-            # Imagepath to the two the parent directory of the two label files
+            # NOTE: the different other segmentation datasets were left commented out 
+
             ## MSRC dataset ##
             # dataset = SegmentationData(image_paths_file='data/segmentation_data/train.txt')
 
             ## MSD dataset ##
-            """
-            PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
-            RES = 256
-            RES_Z = 64
-            CROP_HEIGHT = 16
+            # PATH = "data/MSD/Task03_Liver"
+            # RES = 256
+            # RES_Z = 64
+            # CROP_HEIGHT = 16
 
-            sample_limit = 9
-            dataset = MSD_data(
-                path_string=PATH,
-                res=RES,
-                res_z=RES_Z,
-                crop_height=CROP_HEIGHT,
-                sample_limit=sample_limit,
-            )
+            # sample_limit = 9
+            # dataset = MSD_data(
+            #     path_string=PATH,
+            #     res=RES,
+            #     res_z=RES_Z,
+            #     crop_height=CROP_HEIGHT,
+            #     sample_limit=sample_limit,
+            # )
 
-            #TODO: Does it make sense to split already here?
-            #      Different than normal for the other datasets.
-            # split into val and train set
-            train_size = int(0.8 * len(dataset))
-            val_size = len(dataset) - train_size
-            dataset, valset = torch.utils.data.random_split(dataset, [train_size, val_size])
-            """
+            # # possibly split later 
+            # # split into val and train set
+            # train_size = int(0.8 * len(dataset))
+            # val_size = len(dataset) - train_size
+            # dataset, valset = torch.utils.data.random_split(dataset, [train_size, val_size])
 
             ## MSD dataset preprocessed version ##
-            # PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
-            # PATH = "/home/NiWaRe/PriMIA/Task03_Liver"
-            dataset = MSD_data_images(args.data_dir + "/train")
-
+            # transforms applied to get the stats: mean and val 
+            stats_tf = AlbumentationsTorchTransform(
+                a.Compose(
+                    [
+                        a.Resize(
+                            args.inference_resolution,
+                            args.inference_resolution,
+                            INTER_NEAREST,
+                        ),
+                        a.RandomCrop(args.train_resolution, args.train_resolution),
+                        a.ToFloat(max_value=255.0),
+                    ]
+                )
+            )
+            # add extra channel to be compatible with nn.Conv2D
+            extra_channel_tf = transforms.Lambda(
+                lambda x: x.view(
+                    -1, args.train_resolution, args.train_resolution
+                )
+            )
+            dataset = MSD_data_images(
+                args.data_dir + "/train",
+                # input transforms are added after splitting
+                transform=transforms.Compose(
+                    [
+                        stats_tf,
+                        extra_channel_tf,
+                    ]
+                ),
+                target_transform=transforms.Compose(
+                    [
+                        stats_tf,
+                        extra_channel_tf,
+                    ]
+                ),
+            )
+  
             lengths = [int(len(dataset) / len(workers)) for _ in workers]
             ##assert sum of lenghts is whole dataset on the cost of the last worker
             ##-> because int() floors division, means that rest is send to last worker
@@ -706,23 +738,88 @@ def setup_pysyft(args, hook, verbose=False):
         ):
             if args.data_dir == "mnist":
                 dataset = mnist_datasets[worker.id]
-                mean, std = calc_mean_std(dataset)
+                mean, std = calc_mean_std(
+                    dataset, 
+                    epsilon=args.dpsse_eps if args.DPSSE else None,
+                )
                 dataset.dataset.transform.transform.transforms.transforms.append(  # beautiful
                     a.Normalize(mean, std, max_pixel_value=1.0)
                 )
             # Segmentation
             elif args.bin_seg:
-                # TODO: Add transforms if necessary
-                # For now only empty structure
-
+                # get dataset
                 dataset = seg_datasets[worker.id]
-                # print(len(dataset))
-                # print(dataset)
-                mean, std = calc_mean_std(dataset)
+                mean, std = calc_mean_std(
+                    dataset, 
+                    epsilon=args.dpsse_eps if args.DPSSE else None,
+                )
+                dataset.dataset.transform.transforms.append(  
+                    AlbumentationsTorchTransform(
+                        a.Normalize(mean, std, max_pixel_value=1.0)
+                    )
+                )
 
-                # TODO: For now no transforms necessary - possibly add later (same as in local training case)
-                # dataset.dataset.transform.transform.transforms.transforms.append(  # beautiful
-                #    a.Normalize(mean, std, max_pixel_value=1.0)
+                # TODO: uncomment, when distribute_data.py is also available for segmentation
+                # data_dir = join(args.data_dir, "worker{:d}".format(i + 1))
+                # dataset = MSD_data_images(
+                #     data_dir,
+                #     transform=stats_tf,
+                #     target_transform=stats_tf,
+                # )
+                # # get stats
+                # mean, std = calc_mean_std(
+                #     stats_dataset,
+                #     save_folder=data_dir,
+                #     epsilon=args.dpsse_eps if args.DPSSE else None,
+                # )
+                # del stats_dataset
+                # # transforms 
+                # stats_tf = AlbumentationsTorchTransform(
+                #     a.Compose(
+                #         [
+                #             a.Resize(
+                #                 args.inference_resolution,
+                #                 args.inference_resolution,
+                #                 INTER_NEAREST,
+                #             ),
+                #             a.RandomCrop(args.train_resolution, args.train_resolution),
+                #             a.ToFloat(max_value=255.0),
+                #         ]
+                #     )
+                # )
+                # # normalizing layer - extra because not considered for labels
+                # norm_tf = AlbumentationsTorchTransform(
+                #     a.Normalize(mean, std, max_pixel_value=1.0),
+                # )
+                # # add extra channel to be compatible with nn.Conv2D
+                # extra_channel_tf = transforms.Lambda(
+                #     lambda x: x.view(
+                #         -1, args.train_resolution, args.train_resolution
+                #     )
+                # )
+                # # new dataset based on calculated new stats
+                # dataset = MSD_data_images(
+                #     args.data_dir + "/train",
+                #     transform=transforms.Compose(
+                #         [
+                #             create_albu_transform(args, mean, std),
+                #             extra_channel_tf,
+                #         ]
+                #     ),
+                #     target_transform=transforms.Compose(
+                #         [
+                #             stats_tf,
+                #             extra_channel_tf,
+                #             # binarize labels, rm if issue #7 is solved
+                #             lambda x: np.where(
+                #                 x > 0.0,
+                #                 torch.ones_like(x),
+                #                 torch.zeros_like(
+                #                     x
+                #                 ),  
+                #             ),
+                #         ]
+                #     ),
                 # )
 
             else:
@@ -807,19 +904,17 @@ def setup_pysyft(args, hook, verbose=False):
                     data.append(d)
                     targets.append(t)
             selected_data = torch.stack(data)  # pylint:disable=no-member
-            # Segmentation
-            if args.bin_seg:
-                # Problem with the "torch.tensor(targets)"
-                # this is normally used to convert list of scalar tensors into a torch array
-                # however in segmentation we don't have only one scalar as target per sample but a whole mask (2D array)
-                selected_targets = torch.stack(targets)
 
-            else:
-                selected_targets = (
-                    torch.stack(targets)  # pylint:disable=no-member
-                    if args.mixup or args.weight_classes
-                    else torch.tensor(targets)  # pylint:disable=not-callable
-                )
+            # NOTE: Segmentation (args.bin_seg)
+            # Problem with the "torch.tensor(targets)"
+            # this is normally used to convert list of scalar tensors into a torch array
+            # however in segmentation we don't have only one scalar as target per sample but a whole mask (2D array)
+
+            selected_targets = (
+                torch.stack(targets)  # pylint:disable=no-member
+                if args.mixup or args.weight_classes or args.bin_seg
+                else torch.tensor(targets)  # pylint:disable=not-callable
+            )
             if args.mixup:
                 selected_data = selected_data.squeeze(1)
                 selected_targets = selected_targets.squeeze(1)
@@ -904,17 +999,45 @@ def setup_pysyft(args, hook, verbose=False):
         )
     # Segmentation
     elif args.bin_seg:
-        # TODO: possibly add transforms (also for local case)
-        # Again for now WITHOUT transforms, just play loading of the valset
-
-        ## MSCR dataset
+        ## MSCR dataset ##
         # valset = SegmentationData(image_paths_file='data/segmentation_data/val.txt')
 
-        ## MSD dataset
-        # PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
-        # PATH = "/home/NiWaRe/PriMIA/Task03_Liver"
-        # PATH = args.data_dir
-        valset = MSD_data_images(args.data_dir + "/val")
+        ## MSD preprocessed dataset ##
+        val_tf = AlbumentationsTorchTransform(
+            a.Compose(
+                [
+                    a.Resize(args.inference_resolution, args.inference_resolution),
+                    a.CenterCrop(args.train_resolution, args.train_resolution),
+                    a.ToFloat(max_value=255.0),
+                ]
+            )
+        )
+        # based on retrieved means, stds from grid
+        norm_tf = AlbumentationsTorchTransform(
+            a.Normalize(mean, std, max_pixel_value=1.0),
+        )
+        # add extra channel to be compatible with nn.Conv2D
+        extra_channel_tf = transforms.Lambda(
+            lambda x: x.view(
+                -1, args.train_resolution, args.train_resolution
+            )
+        )
+        valset = MSD_data_images(
+            args.data_dir + "/val",
+            transform = transforms.Compose(
+                [
+                    val_tf, 
+                    norm_tf,
+                    extra_channel_tf,
+                ]
+            ),
+            target_transform = transforms.Compose(
+                [
+                    val_tf,
+                    extra_channel_tf, 
+                ]
+            )
+        )
     else:
 
         val_tf = [
@@ -926,7 +1049,9 @@ def setup_pysyft(args, hook, verbose=False):
         valset = datasets.ImageFolder(
             join(args.data_dir, "validation"),
             loader=loader,
-            transform=AlbumentationsTorchTransform(a.Compose(val_tf)),
+            transform=AlbumentationsTorchTransform(
+                a.Compose(val_tf)
+                ),
         )
         assert (
             len(valset.classes) == 3
