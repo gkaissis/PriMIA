@@ -60,6 +60,12 @@ if __name__ == "__main__":
         required=True,
         help="Finds the midpoint of the labels along the z-axis and crops [..., zmiddle-(crop_height//2):zmiddle+(crop_height//2)].",
     )
+    parser.add_argument(
+        "--num_samples",
+        type=int,
+        required=False,
+        help="In case the number of samples should be set to a specific value",
+    )
 
     cmd_args = parser.parse_args()
     #args = Arguments(cmd_args)
@@ -71,11 +77,8 @@ if __name__ == "__main__":
     RES = cmd_args.res
     RES_Z = cmd_args.res_z
     CROP_HEIGHT = cmd_args.crop_height
-
-    #PATH = "/Volumes/NWR/TUM-EI Studium/Master/DEA/03_semester/GR-PriMIA/Task03_Liver"
-    #RES = 256
-    #RES_Z = 64
-    #CROP_HEIGHT = 16
+    # 281 is the whole datset (for liver)
+    NUM_SAMPLES = cmd_args.num_samples if cmd_args.num_samples is not None else 281
 
     # Preprocessing
     print("## preprocessing ##")
@@ -83,6 +86,7 @@ if __name__ == "__main__":
                                                                                     PATH,
                                                                                     res=RES,
                                                                                     res_z=RES_Z,
+                                                                                    num_samples=NUM_SAMPLES
                                                                                 )
     print("## converting and saving ##")
     save_to_img(PATH+'/train/inputs/', X_train_partial, False)

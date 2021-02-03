@@ -1843,10 +1843,11 @@ def test(
                 torch.cat(total_scores).cpu().numpy()  # pylint: disable=no-member
             )
             thresh = 1_000_000
+            indices = torch.floor(torch.rand(thresh) * len(total_pred)).int()
             if total_pred.shape[0] > thresh:
-                total_pred = total_pred[:thresh]
-                total_target = total_target[:thresh]
-                total_scores = total_scores[:thresh]
+                total_pred = total_pred[indices]
+                total_target = total_target[indices]
+                total_scores = total_scores[indices]
             # total_scores -= total_scores.min(axis=1)[:, np.newaxis]
             # total_scores = total_scores / total_scores.sum(axis=1)[:, np.newaxis]
             # print(total_target.shape)

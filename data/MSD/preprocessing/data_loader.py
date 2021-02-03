@@ -256,7 +256,7 @@ def prepare_data(
             cropped_scan, (res, res, res_z), preserve_range=True, order=1
         ).astype(np.float32)
         label = resize(
-            cropped_label, (res, res, res_z), preserve_range=True, order=0
+            cropped_label, (res, res, res_z), preserve_range=True, anti_aliasing=True, order=0
         ).astype(np.uint8)
 
         if label_mode == "bbox-coord":

@@ -42,7 +42,7 @@ small_server_folders: symbolic_server_folders
 # automated script to create image segmentation dataset (jpg) from Medical Decathlon Segmentation dataset 
 # possibly easy to adapt for other medical datasets 
 create_processed_jpg_from_MSD: 
-	python data/MSD/msd_to_jpg.py --data data/MSD/Task03_Liver --res 256 --res_z 64 --crop_height 64
+	python data/MSD/msd_to_jpg.py --data data/MSD/Task03_Liver --res 256 --res_z 64 --crop_height 64 --num_samples 281
 
 # Training
 federated_secure:

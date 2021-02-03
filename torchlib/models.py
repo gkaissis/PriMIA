@@ -1052,7 +1052,7 @@ class MoNet(nn.Module):
                 out = torch.cat((out, skip.pop()), dim=-1)
 
         # header
-        out = self.header(out).squeeze()
+        out = self.header(out)
 
         if self.activation:
              out = self.activation(out)
