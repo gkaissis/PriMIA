@@ -150,35 +150,31 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
                 [int(ceil(total_L * (1.0 - fraction))), int(floor(total_L * fraction))],
             )
         elif args.bin_seg:
-
-            #### MSRC dataset ####
+            # NOTE: the different other segmentation datasets were left commented out 
+    
+            ## MSRC dataset ##
             # dataset = SegmentationData(image_paths_file='data/segmentation_data/train.txt')
             # valset = SegmentationData(image_paths_file='data/segmentation_data/val.txt')
 
-            #### MSD dataset ####
-            """
-            RES = 256
-            RES_Z = 64
-            CROP_HEIGHT = 16
+            ## MSD dataset ##
+            # RES = 256
+            # RES_Z = 64
+            # CROP_HEIGHT = 16
 
-            sample_limit = 2
-            dataset = MSD_data(
-                path_string=PATH,
-                res=RES,
-                res_z=RES_Z,
-                crop_height=CROP_HEIGHT,
-                sample_limit=sample_limit,
-            )
+            # sample_limit = 2
+            # dataset = MSD_data(
+            #     path_string=PATH,
+            #     res=RES,
+            #     res_z=RES_Z,
+            #     crop_height=CROP_HEIGHT,
+            #     sample_limit=sample_limit,
+            # )
 
-            # split into val and train set
-            train_size = int(0.8 * len(dataset))
-            val_size = len(dataset) - train_size
-            dataset, valset = torch.utils.data.random_split(dataset, [train_size, val_size])
-            """
+            # # split into val and train set
+            # train_size = int(0.8 * len(dataset))
+            # val_size = len(dataset) - train_size
+            # dataset, valset = torch.utils.data.random_split(dataset, [train_size, val_size])
 
-            # NOTE: next steps:
-            # anti-aliasing ausstellen um den border nicht zu bekomemn in den labels, beim preprocessing
-            # finish albumentation federated + DP
             # gradient-dump, every 100 einstellen
             # hyperopt einstellen und training für MoNet starten
 

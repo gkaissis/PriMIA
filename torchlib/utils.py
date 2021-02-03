@@ -1821,51 +1821,18 @@ def test(
             if verbose
             else val_loader
         ):
-            # TODO: ONLY MSD DATASET (NOT PREPROCESSED)
+            # NOTE: only for raw MSD dataset (not preprocessed)
             # res = data.shape[-1]
             # data, target = data.view(-1, 1, res, res).to(device), target.view(-1, res, res).to(device)
+
             data, target = data.to(device), target.to(device)
-            # dim = 256*256
-            # dim_2 = int(dim/2)
-            # model = nn.Sequential(
-            #                    nn.Flatten(),
-            #                    nn.Linear(dim, 100),
-            #                    nn.ReLU(),
-            #                    nn.Linear(100, dim),
-            #                    ).to(device)
-
-            # num_classes = 1
-            # model = smp.Unet("resnet18", classes=num_classes, activation="sigmoid")
-            # inpt_channels = 1
-            # if inpt_channels != 3:
-            #    new_encoder = [nn.Conv2d(inpt_channels, 3, 1), model.encoder.conv1]
-            #    model.encoder.conv1 = nn.Sequential(*new_encoder)
-            # model = model.to(device)
-
-            # not necessary
-            # if (
-            #     device if isinstance(device, str) else device.type
-            # ) != "cpu":  # TODO ugly bugfix
-            #     model = model.to(device)
-
-            # is on CUDA
             output = model(data)
-            # output = output.view_as(target)
-
-            # output, target = output.cpu(), target.cpu() # for loss_fn
-            # loss = loss_fn(output, oh_converter(target if oh_converter else target)
-
-            # tp = torch.sum(output[target==1.] >= .5)
-            # tn = torch.sum(output[target==0.] < .5)
-            # fn = torch.sum(output[target==1.] < .5)
-            # fp = torch.sum(output[target==0.] >= .5)
-            # loss = 2 * tp / (2*fp + fn + fp)
 
             # NOTE: if loss negative (dice) check if output and target have the same shape
             loss = loss_fn(output, target)
 
             test_loss += loss
-            # test_loss += loss.item()  # sum up batch loss
+           
             # Segmentation
             # TODO: Adapt for all use-cases (train, inference, encrypted, uncencrypted)
             if args.bin_seg:
@@ -1875,7 +1842,7 @@ def test(
                 # _, pred = torch.max(output, 1)
                 # pred = torch.round(output).type(torch.LongTensor).view(-1).cpu().numpy()
 
-                # TODO: Mask only for MSRC
+                # NOTE: Mask only for MSRC
                 # Only allow images/pixels with label >= 0 e.g. for segmentation
                 # (because of unlabeled datapoints with label: -1)
                 # targets_mask = target >= 0
@@ -1903,10 +1870,6 @@ def test(
 
                 # test_dices.append(test_dice)
 
-                # Added from above (TO BE EXTENDED)
-                # total_pred.append(pred)
-                # total_target.append(target)
-
                 # Make segmentation compatible with classification eval pipeline
                 output = output.view(-1)
                 total_scores.append(output)
@@ -1929,11 +1892,6 @@ def test(
                 else equal.sum().item()
             )
     test_loss /= len(val_loader)
-
-    # if args.data_dir == "seg_data":
-    # Segmentation - TEMPORARY
-    #    print(f"VALIDATION: Epoch: {epoch}, Val-Loss: {test_loss}, \
-    #        Val-Acc.: {np.mean(test_accs)}, Dice: {np.mean(test_dices)}")
 
     if args.encrypted_inference:
         objective = 100.0 * TP / (len(val_loader) * args.test_batch_size)
@@ -1973,11 +1931,7 @@ def test(
                 total_pred = total_pred[indices]
                 total_target = total_target[indices]
                 total_scores = total_scores[indices]
-            # total_scores -= total_scores.min(axis=1)[:, np.newaxis]
-            # total_scores = total_scores / total_scores.sum(axis=1)[:, np.newaxis]
-            # print(total_target.shape)
-            # print(total_scores.shape)
-            # roc_auc = mt.roc_auc_score(total_target, total_scores, multi_class="ovo")
+
             # TODO: the whole stats block until the print of the stats table takes around 40 sec.?
             try:
                 roc_auc = mt.roc_auc_score(total_target, total_scores)
@@ -1988,15 +1942,7 @@ def test(
                     category=UserWarning,
                 )
                 roc_auc = 0.0
-            # print((total_target==-1).sum())
-            # print((total_target==1).sum())
-            # print((total_target==0).sum())
-            # print(((total_target!=0).any() and (total_target!=1).any()).sum())
-
-            # print((total_pred==-1).sum())
-            # print((total_pred==1).sum())
-            # print((total_pred==0).sum())
-
+            
             matthews_coeff = mt.matthews_corrcoef(total_target, total_pred)
             objective = 100.0 * matthews_coeff
             if verbose:

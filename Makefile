@@ -42,7 +42,9 @@ small_server_folders: symbolic_server_folders
 # automated script to create image segmentation dataset (jpg) from Medical Decathlon Segmentation dataset 
 # possibly easy to adapt for other medical datasets 
 create_processed_jpg_from_MSD: 
+	@echo Converting raw MSD dataset to jpegs
 	python data/MSD/msd_to_jpg.py --data data/MSD/Task03_Liver --res 256 --res_z 64 --crop_height 64 --num_samples 281
+	@echo Finished conversion from raw MSD data to jpegs
 
 # Training
 federated_secure:
@@ -52,16 +54,20 @@ federated_secure:
 
 # Segmentation 
 federated_secure_segmentation:
-	@echo Training a Seg-Net on VirtualWorkers without SecAgg
+	@echo Training a Seg-Net on VirtualWorkers with SecAgg
 	python train.py --config configs/torch/segmentation.ini --train_federated --cuda --data_dir data/MSD/Task03_Liver
 	@echo Finished Training on VirtualWorkers with SecAgg
 
 make federated_DP_secure:
+	@echo Training on VirtualWorkers with SecAgg and DP
 	python train.py --config configs/torch/pneumonia-resnet-pretrained-DP.ini --train_federated --data_dir data/server_simulation
+	@echo Finished Training on VirtualWorkers with SecAgg and DP
 
 # Segmenation 
 make federated_DP_secure_segmentation:
-	python train.py --config configs/torch/segmentation-DP.ini --train_federated --cuda --data_dir data/MSD/Task03_Liver
+	@echo Training a Seg-Net on VirtualWorkers with SecAgg and DP
+	python train.py --config configs/torch/segmentation-DP.ini --train_federated --cuda --data_dir data/MSD/Task03_Liver --dump_gradients_every 100
+	@echo Finished Training on VirtualWorkers with SecAgg and DP
 
 federated_insecure:
 	@echo Training on VirtualWorkers without SecAgg
