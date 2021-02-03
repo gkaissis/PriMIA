@@ -15,7 +15,7 @@ global cmdln_args
 
 
 def objective(trial: opt.trial):
-    lr = trial.suggest_loguniform("lr", 1e-5, 2e-1,)
+    lr = trial.suggest_loguniform("lr", 1e-5, 1e-3,)
     repetitions_dataset = (
         trial.suggest_int("repetitions_dataset", 1, 3) if cmdln_args.federated else 1
     )
@@ -23,7 +23,7 @@ def objective(trial: opt.trial):
     if cmdln_args.federated:
         epochs = int(epochs // repetitions_dataset)
     args = Namespace(
-        config=f"optuna_DP{cmdln_args.trial_name}",
+        config=f"optuna{cmdln_args.trial_name}",
         resume_checkpoint=None,
         train_federated=cmdln_args.federated,
         data_dir=cmdln_args.data_dir,
@@ -31,7 +31,7 @@ def objective(trial: opt.trial):
         encrypted_inference=False,
         cuda=True, #not cmdln_args.federated,
         websockets=cmdln_args.websockets,
-        batch_size=trial.suggest_int("batch_size", 32, 200),
+        batch_size=trial.suggest_int("batch_size", 32, 128),
         train_resolution=256,
         inference_resolution=256,
         test_batch_size=128,
@@ -44,52 +44,96 @@ def objective(trial: opt.trial):
         beta1=trial.suggest_float("beta1", 0.25, 0.95),
         beta2=trial.suggest_float("beta2", 0.9, 1.0),
         ## zero not possible but loguniform makes most sense
-        weight_decay=0,
+        weight_decay=trial.suggest_loguniform("weight_decay", 1e-12, 1e-3),
         seed=1,
         log_interval=10,
         deterministic=False,
+        differentially_private=False,
         optimizer="Adam",
         model="MoNet",
         pretrained=True,
-        weight_classes=trial.suggest_categorical("weight_classes", [True, False]),
+        weight_classes=False,
         pooling_type="max",
-        rotation=0,
-        translate=0.0,  # trial.suggest_float("translate", 0, 0.2),
-        scale=0,
-        shear=0,
-        noise_std=0,
-        noise_prob=0,
-        mixup=False,
+        rotation=trial.suggest_int("rotation", 0, 90),
+        translate=trial.suggest_float("translate", 0, 0.2),
+        scale=trial.suggest_float("scale", 0.0, 0.5),
+        shear=0, #trial.suggest_int("shear", 0, 10),
+        noise_std=trial.suggest_float("noise_std", 0.0, 0.1),
+        noise_prob=trial.suggest_float("noise_prob", 0.0, 1.0),
+        mixup=False, #trial.suggest_categorical("mixup", [True, False]),
         repetitions_dataset=repetitions_dataset,
         num_threads=0,  ## somehow necessary for optuna
         save_file=f"model_weights/completed_trainings{cmdln_args.trial_name}.csv",
         name=f"optuna{cmdln_args.trial_name}",
     )
-    args.albu_prob = 0.0
-    args.individual_albu_probs = 0.0
-    args.clahe = False
-    args.randomgamma = False
-    args.randombrightness = False
-    args.blur = False
-    args.elastic = False
-    args.optical_distortion = False
-    args.grid_distortion = False
-    args.grid_shuffle = False
-    args.hsv = False
-    args.invert = False
-    args.cutout = False
-    args.shadow = False
-    args.fog = False
-    args.sun_flare = False
-    args.solarize = False
-    args.equalize = False
-    args.grid_dropout = False
-
-    args.differentially_private = True
-    args.target_delta = 1e-5
-    args.noise_multiplier = trial.suggest_float("DP_noise", 0.1, 1.0)
-    args.max_grad_norm = trial.suggest_float("max_grad_norm", 0.1, 2.0)
-
+    apply_albu = trial.suggest_categorical("apply albu transforms", [True, False])
+    args.albu_prob = trial.suggest_float("albu_prob", 0.0, 1.0) if apply_albu else 0.0
+    # args.individual_albu_probs = (
+    #     trial.suggest_float("individual_albu_probs", 0.0, 1.0) if apply_albu else 0.0
+    # )
+    # # args.clahe = (
+    #     trial.suggest_categorical("clahe", [True, False]) if apply_albu else False
+    # )
+    # args.randomgamma = (
+    #     trial.suggest_categorical("randomgamma", [True, False]) if apply_albu else False
+    # )
+    # args.randombrightness = (
+    #     trial.suggest_categorical("randombrightness", [True, False])
+    #     if apply_albu
+    #     else False
+    # )
+    # args.blur = (
+    #     trial.suggest_categorical("blur", [True, False]) if apply_albu else False
+    # )
+    # args.elastic = (
+    #     trial.suggest_categorical("elastic", [True, False]) if apply_albu else False
+    # )
+    # args.optical_distortion = (
+    #     trial.suggest_categorical("optical_distortion", [True, False])
+    #     if apply_albu
+    #     else False
+    # )
+    # args.grid_distortion = (
+    #     trial.suggest_categorical("grid_distortion", [True, False])
+    #     if apply_albu
+    #     else False
+    # )
+    # args.grid_shuffle = (
+    #     trial.suggest_categorical("grid_shuffle", [True, False])
+    #     if apply_albu
+    #     else False
+    # )
+    # args.hsv = trial.suggest_categorical("hsv", [True, False]) if apply_albu else False
+    # args.invert = (
+    #     trial.suggest_categorical("invert", [True, False]) if apply_albu else False
+    # )
+    # args.cutout = (
+    #     trial.suggest_categorical("cutout", [True, False]) if apply_albu else False
+    # )
+    # args.shadow = (
+    #     trial.suggest_categorical("shadow", [True, False]) if apply_albu else False
+    # )
+    # args.fog = trial.suggest_categorical("fog", [True, False]) if apply_albu else False
+    # args.sun_flare = (
+    #     trial.suggest_categorical("sun_flare", [True, False]) if apply_albu else False
+    # )
+    # args.solarize = (
+    #     trial.suggest_categorical("solarize", [True, False]) if apply_albu else False
+    # )
+    # args.equalize = (
+    #     trial.suggest_categorical("equalize", [True, False]) if apply_albu else False
+    # )
+    # args.grid_dropout = (
+    #     trial.suggest_categorical("grid_dropout", [True, False])
+    #     if apply_albu
+    #     else False
+    # )
+    # if args.mixup:  # pylint:disable=no-member
+    #     args.mixup_lambda = trial.suggest_categorical(
+    #         "mixup_lambda",
+    #         (0.1, 0.25, 0.49999, None),  # 0.5 breaks federated weight calculation
+    #     )
+    #     args.mixup_prob = trial.suggest_float("mixup_prob", 0.0, 1.0)
     if cmdln_args.federated:
         args.unencrypted_aggregation = cmdln_args.unencrypted_aggregation
         args.sync_every_n_batch = trial.suggest_int("sigma", 1, 5)
@@ -104,16 +148,12 @@ def objective(trial: opt.trial):
             "weighted_averaging", [True, False]
         )
         args.DPSSE = False
-        args.dpsse_eps = 1.0
-        args.microbatch_size = args.batch_size
     try:
         best_val_acc, epsilon = main(args, verbose=False, optuna_trial=trial)
     except Exception as e:
         print(f"Trial failed with exception {e} and arguments {str(args)}.")
         return 0
-    if epsilon < 1:
-        warn(f"Epsilon is only {epsilon:.2f}. Seems very low.")
-    return best_val_acc / max(epsilon, 1)
+    return best_val_acc
 
 
 if __name__ == "__main__":
@@ -127,7 +167,7 @@ if __name__ == "__main__":
     parser.add_argument("--trial_name", type=str, default="", help="Assign identifier")
     parser.add_argument("--websockets", action="store_true", help="Use websockets")
     parser.add_argument(
-        "--num_trials", default=40, type=int, help="how many trials to perform"
+        "--num_trials", default=30, type=int, help="how many trials to perform"
     )
     parser.add_argument(
         "--visualize", action="store_true", help="Visualize optuna results."
@@ -135,7 +175,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--db_file",
         type=str,
-        default="sqlite:///model_weights/pneumonia_search_DP.db",
+        default="sqlite:///model_weights/private_segmentation.db",
         help="Database file to store results.",
     )
     parser.add_argument(
@@ -146,11 +186,11 @@ if __name__ == "__main__":
     cmdln_args = parser.parse_args()
     try:
         study = opt.create_study(
-            study_name="federated_pneumonia{:s}".format(
+            study_name="private_segmentation{:s}".format(
                 "_unencrypted" if cmdln_args.unencrypted_aggregation else ""
             )
             if cmdln_args.federated
-            else "vanilla_pneumonia",
+            else "private_segmentation",
             storage=cmdln_args.db_file,
             load_if_exists=True,
             direction="maximize",
@@ -191,3 +231,4 @@ if __name__ == "__main__":
             n_jobs=1,
             gc_after_trial=True,
         )
+

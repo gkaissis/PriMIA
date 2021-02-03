@@ -66,7 +66,7 @@ make federated_DP_secure:
 # Segmenation 
 make federated_DP_secure_segmentation:
 	@echo Training a Seg-Net on VirtualWorkers with SecAgg and DP
-	python train.py --config configs/torch/segmentation-DP.ini --train_federated --cuda --data_dir data/MSD/Task03_Liver --dump_gradients_every 100
+	python train.py --config configs/torch/segmentation-DP.ini --train_federated --cuda --data_dir data/MSD/Task03_Liver
 	@echo Finished Training on VirtualWorkers with SecAgg and DP
 
 federated_insecure:
@@ -94,7 +94,7 @@ local:
 # Segmentation 
 local_segmentation:
 	@echo Segmentation Training Locally
-	python train.py --config configs/torch/segmentation.ini --cuda --verbose --data_dir data/MSD/Task03_Liver 
+	python train.py --config configs/torch/segmentation.ini --cuda --verbose --data_dir data/MSD/Task03_Liver --dump_gradients_every 100
 	@echo Finished Training Locally
 
 # Gridnode ensemble shortcut
@@ -133,3 +133,7 @@ unencrypted_inference_ws:
 unencrypted_inference_http:
 	@echo HTTP encrypted inference
 	python inference.py --data_dir .inference --model_weights .pretrained_weights/local_873.pt --websockets_config configs/websetting/config_inference.csv --http_protocol	
+
+# Hyperparam-search 
+private_seg_search: 
+	python torchlib/find_config_seg.py --trial_name "MoNet_pretrained_local_1" --data_dir data/MSD/Task03_Liver

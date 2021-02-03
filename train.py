@@ -175,9 +175,6 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             # val_size = len(dataset) - train_size
             # dataset, valset = torch.utils.data.random_split(dataset, [train_size, val_size])
 
-            # gradient-dump, every 100 einstellen
-            # hyperopt einstellen und training für MoNet starten
-
             ####              MSD dataset preprocessed version              ####
             # NOTE: Albumentations need the input (width, height, channel)     #
             #       --> otherwise: instead (1, 256, 256) -> (256, 256, 256)    #
