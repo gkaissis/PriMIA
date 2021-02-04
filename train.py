@@ -188,82 +188,49 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             ####################################################################
 
             # transforms applied to get the stats: mean and val
-            stats_tf_imgs = AlbumentationsTorchTransform(
-                a.Compose(
-                    [
-                        a.Resize(
-                            args.inference_resolution,
-                            args.inference_resolution,
-                        ),
-                        a.RandomCrop(args.train_resolution, args.train_resolution),
-                        a.ToFloat(max_value=255.0),
-                    ]
-                )
-            )
-            stats_tf_labels = AlbumentationsTorchTransform(
-                a.Compose(
-                    [
-                        a.Resize(
-                            args.inference_resolution,
-                            args.inference_resolution,
-                            INTER_NEAREST,
-                        ),
-                        a.RandomCrop(args.train_resolution, args.train_resolution),
-                        a.ToFloat(max_value=255.0),
-                    ]
-                )
-            )
-            # add extra channel to be compatible with nn.Conv2D
-            extra_channel_tf = transforms.Lambda(
-                lambda x: x.view(-1, args.train_resolution, args.train_resolution)
-            )
+            basic_tfs = [
+                a.Resize(
+                    args.inference_resolution,
+                    args.inference_resolution,
+                ),
+                a.RandomCrop(args.train_resolution, args.train_resolution),
+                a.ToFloat(max_value=255.0),
+            ]
+            stats_tf_imgs = AlbumentationsTorchTransform(a.Compose(basic_tfs))
             # dataset to calculate stats
             dataset = MSD_data_images(
                 args.data_dir + "/train",
                 transform=stats_tf_imgs,
-                target_transform=stats_tf_labels,
             )
             # get stats
             val_mean_std = calc_mean_std(dataset)
             mean, std = val_mean_std
 
             # change transforms based on stats
-            dataset.transform = transforms.Compose(
+            train_tf = create_albu_transform(args, mean, std)
+
+            dataset.transform = train_tf
+            val_trans = a.Compose(
                 [
-                    create_albu_transform(args, mean, std),
-                    extra_channel_tf,
-                ]
-            )
-            # separate transform for labels
-            label_transform = transforms.Compose(
-                [
-                    stats_tf_labels,
-                    extra_channel_tf,
-                    # binarize labels, rm if issue #7 is solved # TODO to preprocessing
-                    lambda x: torch.where(
-                        x > 0.5,
-                        torch.ones_like(x),
-                        torch.zeros_like(x),
+                    *basic_tfs,
+                    a.Normalize(mean, std, max_pixel_value=1.0),
+                    a.Lambda(
+                        image=lambda x, **kwargs: x.reshape(
+                            -1, args.train_resolution, args.train_resolution
+                        ),
+                        mask=lambda x, **kwargs: np.where(
+                            x.reshape(-1, args.train_resolution, args.train_resolution)
+                            / 255.0
+                            > 0.5,
+                            np.ones_like(x),
+                            np.zeros_like(x),
+                        ).astype(np.float32),
                     ),
                 ]
             )
-            dataset.target_transform = label_transform
-
-            # valset
-            # don't use create_albu_transforms but just add normalization
-            norm_tf = AlbumentationsTorchTransform(
-                a.Normalize(mean, std, max_pixel_value=1.0),
-            )
             valset = MSD_data_images(
                 args.data_dir + "/val",
-                transform=transforms.Compose(
-                    [
-                        stats_tf_imgs,
-                        norm_tf,
-                        extra_channel_tf,
-                    ]
-                ),
-                target_transform=label_transform,
+                transform=AlbumentationsTorchTransform(val_trans),
             )
 
         else:

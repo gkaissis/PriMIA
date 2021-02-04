@@ -189,7 +189,12 @@ class Arguments:
         self.rotation = config.getfloat("augmentation", "rotation")  # , fallback=0.0)
         self.translate = config.getfloat("augmentation", "translate")  # , fallback=0.0)
         self.scale = config.getfloat("augmentation", "scale")  # , fallback=0.0)
-        self.shear = config.getfloat("augmentation", "shear")  # , fallback=0.0)
+        self.shear = config.getfloat("augmentation", "shear", fallback=0.0)
+        if self.shear > 0.0:
+            warn(
+                "Shearing not supported any more.",
+                category=DeprecationWarning,
+            )
         self.albu_prob = config.getfloat(
             "albumentations", "overall_prob"
         )  # , fallback=1.0)
@@ -653,13 +658,13 @@ def setup_pysyft(args, hook, verbose=False):
 
         # Segmentation
         elif args.bin_seg:
-            # NOTE: the different other segmentation datasets were left commented out 
+            # NOTE: the different other segmentation datasets were left commented out
 
             ## MSRC dataset ##
             # dataset = SegmentationData(image_paths_file='data/segmentation_data/train.txt')
 
             ## MSD dataset ##
-            # PATH = "data/MSD/Task03_Liver"
+            #  PATH = "data/MSD/Task03_Liver"
             # RES = 256
             # RES_Z = 64
             # CROP_HEIGHT = 16
@@ -673,14 +678,14 @@ def setup_pysyft(args, hook, verbose=False):
             #     sample_limit=sample_limit,
             # )
 
-            # # possibly split later 
+            # # possibly split later
             # # split into val and train set
             # train_size = int(0.8 * len(dataset))
             # val_size = len(dataset) - train_size
             # dataset, valset = torch.utils.data.random_split(dataset, [train_size, val_size])
 
             ## MSD dataset preprocessed version ##
-            # transforms applied to get the stats: mean and val 
+            # transforms applied to get the stats: mean and val
             stats_tf = AlbumentationsTorchTransform(
                 a.Compose(
                     [
@@ -696,9 +701,7 @@ def setup_pysyft(args, hook, verbose=False):
             )
             # add extra channel to be compatible with nn.Conv2D
             extra_channel_tf = transforms.Lambda(
-                lambda x: x.view(
-                    -1, args.train_resolution, args.train_resolution
-                )
+                lambda x: x.view(-1, args.train_resolution, args.train_resolution)
             )
             dataset = MSD_data_images(
                 args.data_dir + "/train",
@@ -716,7 +719,7 @@ def setup_pysyft(args, hook, verbose=False):
                     ]
                 ),
             )
-  
+
             lengths = [int(len(dataset) / len(workers)) for _ in workers]
             ##assert sum of lenghts is whole dataset on the cost of the last worker
             ##-> because int() floors division, means that rest is send to last worker
@@ -739,7 +742,7 @@ def setup_pysyft(args, hook, verbose=False):
             if args.data_dir == "mnist":
                 dataset = mnist_datasets[worker.id]
                 mean, std = calc_mean_std(
-                    dataset, 
+                    dataset,
                     epsilon=args.dpsse_eps if args.DPSSE else None,
                 )
                 dataset.dataset.transform.transform.transforms.transforms.append(  # beautiful
@@ -750,10 +753,10 @@ def setup_pysyft(args, hook, verbose=False):
                 # get dataset
                 dataset = seg_datasets[worker.id]
                 mean, std = calc_mean_std(
-                    dataset, 
+                    dataset,
                     epsilon=args.dpsse_eps if args.DPSSE else None,
                 )
-                dataset.dataset.transform.transforms.append(  
+                dataset.dataset.transform.transforms.append(
                     AlbumentationsTorchTransform(
                         a.Normalize(mean, std, max_pixel_value=1.0)
                     )
@@ -773,7 +776,7 @@ def setup_pysyft(args, hook, verbose=False):
                 #     epsilon=args.dpsse_eps if args.DPSSE else None,
                 # )
                 # del stats_dataset
-                # # transforms 
+                # # transforms
                 # stats_tf = AlbumentationsTorchTransform(
                 #     a.Compose(
                 #         [
@@ -816,7 +819,7 @@ def setup_pysyft(args, hook, verbose=False):
                 #                 torch.ones_like(x),
                 #                 torch.zeros_like(
                 #                     x
-                #                 ),  
+                #                 ),
                 #             ),
                 #         ]
                 #     ),
@@ -1018,25 +1021,23 @@ def setup_pysyft(args, hook, verbose=False):
         )
         # add extra channel to be compatible with nn.Conv2D
         extra_channel_tf = transforms.Lambda(
-            lambda x: x.view(
-                -1, args.train_resolution, args.train_resolution
-            )
+            lambda x: x.view(-1, args.train_resolution, args.train_resolution)
         )
         valset = MSD_data_images(
             args.data_dir + "/val",
-            transform = transforms.Compose(
+            transform=transforms.Compose(
                 [
-                    val_tf, 
+                    val_tf,
                     norm_tf,
                     extra_channel_tf,
                 ]
             ),
-            target_transform = transforms.Compose(
+            target_transform=transforms.Compose(
                 [
                     val_tf,
-                    extra_channel_tf, 
+                    extra_channel_tf,
                 ]
-            )
+            ),
         )
     else:
 
@@ -1049,9 +1050,7 @@ def setup_pysyft(args, hook, verbose=False):
         valset = datasets.ImageFolder(
             join(args.data_dir, "validation"),
             loader=loader,
-            transform=AlbumentationsTorchTransform(
-                a.Compose(val_tf)
-                ),
+            transform=AlbumentationsTorchTransform(a.Compose(val_tf)),
         )
         assert (
             len(valset.classes) == 3
@@ -1832,7 +1831,7 @@ def test(
             loss = loss_fn(output, target)
 
             test_loss += loss
-           
+
             # Segmentation
             # TODO: Adapt for all use-cases (train, inference, encrypted, uncencrypted)
             if args.bin_seg:
@@ -1926,8 +1925,8 @@ def test(
                 torch.cat(total_scores).cpu().numpy()  # pylint: disable=no-member
             )
             thresh = 1_000_000
-            indices = torch.floor(torch.rand(thresh) * len(total_pred)).int()
             if total_pred.shape[0] > thresh:
+                indices = torch.randperm(total_pred.shape[0])[:thresh]
                 total_pred = total_pred[indices]
                 total_target = total_target[indices]
                 total_scores = total_scores[indices]
@@ -1942,7 +1941,7 @@ def test(
                     category=UserWarning,
                 )
                 roc_auc = 0.0
-            
+
             matthews_coeff = mt.matthews_corrcoef(total_target, total_pred)
             objective = 100.0 * matthews_coeff
             if verbose:
