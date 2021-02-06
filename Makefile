@@ -94,7 +94,7 @@ local:
 # Segmentation 
 local_segmentation:
 	@echo Segmentation Training Locally
-	python train.py --config configs/torch/segmentation.ini --cuda --verbose --data_dir data/MSD/Task03_Liver --dump_gradients_every 100
+	python train.py --config configs/torch/segmentation.ini --cuda --verbose --data_dir data/MSD/Task03_Liver --dump_gradients_every 500
 	@echo Finished Training Locally
 
 # Gridnode ensemble shortcut

@@ -1649,23 +1649,6 @@ def train(  # never called on websockets
         # res = data.shape[-1]
         # data, target = data.view(-1, 1, res, res).to(device), target.view(-1, res, res).to(device)
         data, target = data.to(device), target.to(device)
-        # dim = 256*256
-        # dim_2 = int(dim/2)
-        # model = nn.Sequential(
-        #                        nn.Flatten(),
-        #                        nn.Linear(dim, 100),
-        #                        nn.ReLU(),
-        #                        nn.Linear(100, dim),
-        #                    ).to(device)
-
-        # num_classes = 1
-        # model = smp.Unet("resnet18", classes=num_classes, activation="sigmoid")
-        # inpt_channels = 1
-        # if inpt_channels != 3:
-        #    new_encoder = [nn.Conv2d(inpt_channels, 3, 1), model.encoder.conv1]
-        #    model.encoder.conv1 = nn.Sequential(*new_encoder)
-
-        # print(data.shape, target.shape)
 
         if args.mixup:
             with torch.no_grad():
@@ -1673,22 +1656,7 @@ def train(  # never called on websockets
                 data, target = mixup((data, target))
         optimizer.zero_grad()
         output = model(data)
-
-        # output = output.view_as(target)
-
-        #### manual calculation of the dice loss ####
-        # L = 1 - 2 * precision * recall / (precision + recall)
-        # recall = tp/(tp+fn)
-        # precision = tp/(tp+fp)
-        # def.: pos = 1
-        # tp = torch.sum(output[target==1.] >= .5)
-        # tn = torch.sum(output[target==0.] < .5)
-        # fn = torch.sum(output[target==1.] < .5)
-        # fp = torch.sum(output[target==0.] >= .5)
-        # loss = 2 * tp / (2*fp + fn + fp)
         loss = loss_fn(output, target)
-
-        # loss = loss_fn(output, target)
 
         loss.backward()
         optimizer.step()
