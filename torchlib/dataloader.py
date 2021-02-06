@@ -43,19 +43,32 @@ class AlbumentationsTorchTransform:
         self.transform = transform
         self.kwargs = kwargs
 
-    def __call__(self, img):
+    def __call__(self, img, mask=None):
         # print("call albu transform wrapper")
         if Image.isImageType(img):
             img = np.array(img)
         elif is_tensor(img):
             img = img.cpu().numpy()
-        img = self.transform(image=img, **self.kwargs)["image"]
-        # if img.max() > 1:
-        #     img = a.augmentations.functional.to_float(img, max_value=255)
+        if mask is not None:
+            if Image.isImageType(mask):
+                mask = np.array(mask)
+            elif is_tensor(mask):
+                mask = mask.cpu().numpy()
+        img = self.transform(image=img, mask=mask, **self.kwargs)
+        if mask is not None:
+            mask = img["mask"]
+        img = img["image"]
         img = from_numpy(img)
         if img.shape[-1] < img.shape[0]:
             img = img.permute(2, 0, 1)
-        return img
+        if mask is not None:
+            mask = from_numpy(mask)
+            if mask.shape[-1] < mask.shape[0]:
+                mask = mask.permute(2, 0, 1)
+        if mask is None:
+            return img
+        else:
+            return img, mask
 
 
 class PoissonSampler(torch.utils.data.Sampler):
@@ -163,94 +176,91 @@ class CombinedLoader:
 
 
 def create_albu_transform(args, mean, std):
-    train_tf = transforms.RandomAffine(
-        degrees=args.rotation,
-        translate=(args.translate, args.translate),
-        scale=(1.0 - args.scale, 1.0 + args.scale),
-        shear=args.shear,
-        #    fillcolor=0,
-    )
-    start_transformations = [
+
+    transformations = [
         a.Resize(args.inference_resolution, args.inference_resolution),
         a.RandomCrop(args.train_resolution, args.train_resolution),
+        a.ShiftScaleRotate(
+            shift_limit=args.translate,
+            scale_limit=args.scale,
+            rotate_limit=args.rotation,
+        ),
+        a.VerticalFlip(p=args.individual_albu_probs),
     ]
     if args.clahe:
-        start_transformations.extend(
+        transformations.extend(
             [
                 a.FromFloat(dtype="uint8", max_value=1.0),
                 a.CLAHE(always_apply=True, clip_limit=(1, 1)),
             ]
         )
-    train_tf_albu = [
-        a.VerticalFlip(p=args.individual_albu_probs),
-    ]
     if args.randomgamma:
-        train_tf_albu.append(a.RandomGamma(p=args.individual_albu_probs))
+        transformations.append(a.RandomGamma(p=args.individual_albu_probs))
     if args.randombrightness:
-        train_tf_albu.append(a.RandomBrightness(p=args.individual_albu_probs))
+        transformations.append(a.RandomBrightness(p=args.individual_albu_probs))
     if args.blur:
-        train_tf_albu.append(a.Blur(p=args.individual_albu_probs))
+        transformations.append(a.Blur(p=args.individual_albu_probs))
     if args.elastic:
-        train_tf_albu.append(a.ElasticTransform(p=args.individual_albu_probs))
+        transformations.append(a.ElasticTransform(p=args.individual_albu_probs))
     if args.optical_distortion:
-        train_tf_albu.append(a.OpticalDistortion(p=args.individual_albu_probs))
+        transformations.append(a.OpticalDistortion(p=args.individual_albu_probs))
     if args.grid_distortion:
-        train_tf_albu.append(a.GridDistortion(p=args.individual_albu_probs))
+        transformations.append(a.GridDistortion(p=args.individual_albu_probs))
     if args.grid_shuffle:
-        train_tf_albu.append(a.RandomGridShuffle(p=args.individual_albu_probs))
+        transformations.append(a.RandomGridShuffle(p=args.individual_albu_probs))
     if args.hsv:
-        train_tf_albu.append(a.HueSaturationValue(p=args.individual_albu_probs))
+        transformations.append(a.HueSaturationValue(p=args.individual_albu_probs))
     if args.invert:
-        train_tf_albu.append(a.InvertImg(p=args.individual_albu_probs))
+        transformations.append(a.InvertImg(p=args.individual_albu_probs))
     if args.cutout:
-        train_tf_albu.append(
+        transformations.append(
             a.Cutout(
                 num_holes=5, max_h_size=80, max_w_size=80, p=args.individual_albu_probs
             )
         )
     if args.shadow:
         assert args.pretrained, "RandomShadows needs 3 channels"
-        train_tf_albu.append(a.RandomShadow(p=args.individual_albu_probs))
+        transformations.append(a.RandomShadow(p=args.individual_albu_probs))
     if args.fog:
         assert args.pretrained, "RandomFog needs 3 channels"
-        train_tf_albu.append(a.RandomFog(p=args.individual_albu_probs))
+        transformations.append(a.RandomFog(p=args.individual_albu_probs))
     if args.sun_flare:
         assert args.pretrained, "RandomSunFlare needs 3 channels"
-        train_tf_albu.append(a.RandomSunFlare(p=args.individual_albu_probs))
+        transformations.append(a.RandomSunFlare(p=args.individual_albu_probs))
     if args.solarize:
-        train_tf_albu.append(a.Solarize(p=args.individual_albu_probs))
+        transformations.append(a.Solarize(p=args.individual_albu_probs))
     if args.equalize:
-        train_tf_albu.append(a.Equalize(p=args.individual_albu_probs))
+        transformations.append(a.Equalize(p=args.individual_albu_probs))
     if args.grid_dropout:
-        train_tf_albu.append(a.GridDropout(p=args.individual_albu_probs))
-    train_tf_albu.append(a.GaussNoise(var_limit=args.noise_std ** 2, p=args.noise_prob))
-    end_transformations = [
-        a.ToFloat(max_value=255.0),
-        a.Normalize(mean, std, max_pixel_value=1.0),
-    ]
+        transformations.append(a.GridDropout(p=args.individual_albu_probs))
+    transformations.append(
+        a.GaussNoise(var_limit=args.noise_std ** 2, p=args.noise_prob)
+    )
+
+    transformations.append(a.ToFloat(max_value=255.0))
+    transformations.append(a.Normalize(mean=mean, std=std, max_pixel_value=1.0))
     if not args.pretrained and not args.bin_seg:
-        end_transformations.append(
-            a.Lambda(image=lambda x, **kwargs: x[:, :, np.newaxis])
+        transformations.append(a.Lambda(image=lambda x, **kwargs: x[:, :, np.newaxis]))
+    if args.bin_seg:
+        transformations.append(
+            a.Lambda(
+                image=lambda x, **kwargs: x.reshape(
+                    -1, args.train_resolution, args.train_resolution
+                ),
+                mask=lambda x, **kwargs: np.where(
+                    x.reshape(-1, args.train_resolution, args.train_resolution) / 255.0
+                    > 0.5,
+                    np.ones_like(x),
+                    np.zeros_like(x),
+                ).astype(np.float32),
+            )
         )
     train_tf_albu = AlbumentationsTorchTransform(
         a.Compose(
-            [
-                a.Compose(start_transformations),
-                a.Compose(train_tf_albu, p=args.albu_prob),
-                a.Compose(end_transformations),
-            ]
+            transformations,
         )
     )
-    return transforms.Compose(
-        [
-            train_tf,
-            # TODO: How did that work without that?
-            # [Alex] wtf is this
-            # transforms.Lambda(lambda x: x.squeeze()),
-            # transforms.Lambda(lambda x: x.unsqueeze(dim=-1)),
-            train_tf_albu,
-        ]
-    )
+    return train_tf_albu
 
 
 def l1_sensitivity(query: Callable, d: tensor) -> float:
@@ -266,7 +276,9 @@ def l1_sensitivity(query: Callable, d: tensor) -> float:
 
 
 def calc_mean_std(
-    dataset, save_folder=None, epsilon=None,
+    dataset,
+    save_folder=None,
+    epsilon=None,
 ):
     """
     Calculates the mean and standard deviation of `dataset` and
@@ -281,7 +293,7 @@ def calc_mean_std(
     for d in tqdm(
         dataset, total=len(dataset), leave=False, desc="accumulate data in dataset"
     ):
-        if type(d) is tuple or type(d) is list:
+        while type(d) is tuple or type(d) is list:
             d = d[0]
         accumulated_data.append(d)
     if isinstance(dataset, torchdata.Dataset):
@@ -434,7 +446,11 @@ class ImageFolderFromCSV(torchdata.Dataset):
 
 class PPPP(torchdata.Dataset):
     def __init__(
-        self, label_path="data/Labels.csv", train=False, transform=None, seed=1,
+        self,
+        label_path="data/Labels.csv",
+        train=False,
+        transform=None,
+        seed=1,
     ):
         super().__init__()
         random.seed(seed)
@@ -483,7 +499,8 @@ class PPPP(torchdata.Dataset):
     def __compute_mean_std__(self):
 
         calc_mean_std(
-            self, save_folder="data",
+            self,
+            save_folder="data",
         )
 
 
@@ -538,17 +555,19 @@ from tqdm import tqdm
 
 
 def scale_array(array: np.array) -> np.array:
-    """ Scales a numpy array from 0 to 1. Works in 3D 
-        Return np.array """
+    """Scales a numpy array from 0 to 1. Works in 3D
+    Return np.array"""
     assert array.max() - array.min() > 0
 
     return ((array - array.min()) / (array.max() - array.min())).astype(np.float32)
 
 
 def preprocess_scan(scan) -> np.array:
-    """ Performs Preprocessing: (1) clips vales to -150 to 200, (2) scales values to lie in between 0 and 1, 
-        (3) peforms rotations and flipping to move patient into referen position 
-        Return: np.array """
+    """Performs Preprocessing: (1) clips vales to -150 to 200, (2) scales values to lie in between 0 and 1,
+    (3) peforms rotations and flipping to move patient into referen position
+        (3) peforms rotations and flipping to move patient into referen position
+    (3) peforms rotations and flipping to move patient into referen position
+    Return: np.array"""
     scan = np.clip(scan, -150, 200)
     scan = scale_array(scan)
     scan = np.rot90(scan)
@@ -558,8 +577,8 @@ def preprocess_scan(scan) -> np.array:
 
 
 def rotate_label(label_volume) -> np.array:
-    """ Rotates and flips the label in the same way the scans were rotated and flipped
-        Return: np.array """
+    """Rotates and flips the label in the same way the scans were rotated and flipped
+    Return: np.array"""
 
     label_volume = np.rot90(label_volume)
     label_volume = np.fliplr(label_volume)
@@ -570,8 +589,8 @@ def rotate_label(label_volume) -> np.array:
 def preprocess_and_convert_to_numpy(
     nifti_scan: nib.Nifti1Image, nifti_mask: nib.Nifti1Image
 ) -> list:
-    """ Convert scan and label to numpy arrays and perform preprocessing
-            Return: Tuple(np.array, np.array)  """
+    """Convert scan and label to numpy arrays and perform preprocessing
+    Return: Tuple(np.array, np.array)"""
     np_scan = nifti_scan.get_fdata()
     np_label = nifti_mask.get_fdata()
     nifti_mask.uncache()
@@ -594,9 +613,9 @@ def get_name(nifti: nib.Nifti1Image, path: Path) -> str:
 
 
 def merge_labels(label_volume: np.array) -> np.array:
-    """ Merges Tumor and Pancreas labels into one volume with background=0, pancreas & tumor = 1
-        Input: label_volume = 3D numpy array
-        Return: Merged Label volume """
+    """Merges Tumor and Pancreas labels into one volume with background=0, pancreas & tumor = 1
+    Input: label_volume = 3D numpy array
+    Return: Merged Label volume"""
     merged_label = np.zeros(label_volume.shape, dtype=np.float32)
     merged_label[label_volume == 1] = 1.0
     merged_label[label_volume == 2] = 1.0
@@ -605,8 +624,10 @@ def merge_labels(label_volume: np.array) -> np.array:
 
 def bbox_dim_3D(img: np.array):
     """Finds the corresponding dimensions for the 3D Bounding Box from the Segmentation Label volume
-       Input: img = 3D numpy array, 
-       Return: row-min, row-max, collumn-min, collumn-max, z-min, z_max """
+    Input: img = 3D numpy array,
+       Input: img = 3D numpy array,
+    Input: img = 3D numpy array,
+    Return: row-min, row-max, collumn-min, collumn-max, z-min, z_max"""
     if np.nonzero(img)[0].size == 0:
         print("Warning Empty Label Mask")
         return None
@@ -622,9 +643,9 @@ def bbox_dim_3D(img: np.array):
 
 
 def create_2D_label(rmin: int, rmax: int, cmin: int, cmax: int, res: int) -> np.array:
-    """Creates a 2D Label from a Bounding Box 
-        Input: rmin, rmax, cmin, cmax = dimensions of Bounding Box, res = resolution of required label
-        Return: 2D numpy array """
+    """Creates a 2D Label from a Bounding Box
+    Input: rmin, rmax, cmin, cmax = dimensions of Bounding Box, res = resolution of required label
+    Return: 2D numpy array"""
     label = np.zeros((res, res), dtype=np.float32)
     label[rmin:rmax, cmin:cmax] = 1
     return label
@@ -640,17 +661,17 @@ def create_3D_label(
     res: int,
     num_slices: int,
 ) -> np.array:
-    """Creates a 3D Label from a Bounding Box 
-        Input: rmin, rmax, cmin, cmax, zmin, zmax = dimensions of Bounding Box, res = resolution of required label
-        Return: 3D numpy array """
+    """Creates a 3D Label from a Bounding Box
+    Input: rmin, rmax, cmin, cmax, zmin, zmax = dimensions of Bounding Box, res = resolution of required label
+    Return: 3D numpy array"""
     label_volume = np.zeros((res, res, num_slices), dtype=np.float32)
     label_volume[rmin:rmax, cmin:cmax, zmin:zmax] = 1.0
     return label_volume
 
 
 def convert_to_2d(arr: np.array) -> np.array:
-    """Takes a 4d array of shape: (num_samples, res_x, res_y, sample_height) and destacks the 3d scans 
-        converting it to a 3d array of shape: (num_samples*sample_height, res_x, res_y)"""
+    """Takes a 4d array of shape: (num_samples, res_x, res_y, sample_height) and destacks the 3d scans
+    converting it to a 3d array of shape: (num_samples*sample_height, res_x, res_y)"""
     assert len(arr.shape) == 4
     reshaped = np.concatenate(arr, axis=-1)
     assert len(reshaped.shape) == 3
@@ -661,7 +682,7 @@ def crop_volume(
     data_volume: np.array, label_volume: np.array, crop_height: int = 32
 ) -> np.array:
     """Crops two 3D Numpy array along the zaxis to crop_height. Finds the midpoint of the pancreas label along the z-axis and crops [..., zmiddle-(crop_height//2):zmiddle+(crop_height//2)].
-       Return: two np.array s """
+    Return: two np.array s"""
     rmin, rmax, cmin, cmax, zmin, zmax = bbox_dim_3D(label_volume)
 
     zmiddle = (zmin + zmax) // 2
@@ -741,8 +762,8 @@ class MSD_data(torchdata.Dataset):
     # TODO: Possible change that? The same way as in Moritzes version?
     def __len__(self):
         """
-            If we don't specify how many samples we want we get all samples
-            that are present in the directories (see in __init__())
+        If we don't specify how many samples we want we get all samples
+        that are present in the directories (see in __init__())
         """
         return len(self.scan_names) if self.sample_limit == -1 else self.sample_limit
 
@@ -784,7 +805,14 @@ class MSD_data(torchdata.Dataset):
                 )
             # creating label mask from bounding box dimensions
             label = create_3D_label(
-                b[0], b[1], b[2], b[3], b[4], b[5], label.shape[1], label.shape[2],
+                b[0],
+                b[1],
+                b[2],
+                b[3],
+                b[4],
+                b[5],
+                label.shape[1],
+                label.shape[2],
             )
 
         # cropping scan and label volumes to reduce the number of non-pancreas slices
@@ -897,20 +925,8 @@ class MSD_data_images(torchdata.Dataset):
         scan_img = Image.open(scan_path)
         label_img = Image.open(label_path)
 
-        ## [Alex] do this as transform!
-
-        # scan_np = np.array(scan_img, dtype=np.float32)  / 255
-        # label_np = np.array(label_img, dtype=np.float32) / 255
-
-        # # MoNet expects a tensor of shape channel x xres x yres
-        # # channel = 1
-        # # scan_np = np.expand_dims(scan_np, axis=0)
-        # scan = from_numpy(scan_np)
-        # # BCELoss expects float tensors and not byte tensors
-        # label = from_numpy(label_np)
-
-        return self.transform(scan_img), self.target_transform(label_img)
-
+        img, label = self.transform(scan_img, mask=label_img)
+        return img, self.target_transform(label)
 
 
 # pylint: disable=C0326
@@ -1048,7 +1064,11 @@ if __name__ == "__main__":
     img.show()
 
     tf = transforms.Compose(
-        [transforms.Resize(224), transforms.CenterCrop(224), transforms.ToTensor(),]
+        [
+            transforms.Resize(224),
+            transforms.CenterCrop(224),
+            transforms.ToTensor(),
+        ]
     )
     ds = PPPP(train=True, transform=tf)
 

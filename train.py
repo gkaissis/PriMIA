@@ -150,8 +150,8 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
                 [int(ceil(total_L * (1.0 - fraction))), int(floor(total_L * fraction))],
             )
         elif args.bin_seg:
-            # NOTE: the different other segmentation datasets were left commented out 
-    
+            # NOTE: the different other segmentation datasets were left commented out
+
             ## MSRC dataset ##
             # dataset = SegmentationData(image_paths_file='data/segmentation_data/train.txt')
             # valset = SegmentationData(image_paths_file='data/segmentation_data/val.txt')
@@ -181,81 +181,56 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             # NOTE: Torch transforms need the input (channel, width, height)   #
             #       --> otherwise: type not subscriptable error                #
             # NOTE: The AlbumentationsTorchTransform wrapper auto. changes     #
-            #       (256, 256, 1) back to (1, 256, 256) after the transforms.  # 
+            #       (256, 256, 1) back to (1, 256, 256) after the transforms.  #
             #       Putting a torch transform in the wrapper leads to          #
             #       'force_apply...' error                                     #
             # NOTE: Easiest way to do transforms: keep as PIL images.          #
             ####################################################################
 
-            # transforms applied to get the stats: mean and val 
-            stats_tf = AlbumentationsTorchTransform(
-                a.Compose(
-                    [
-                        a.Resize(
-                            args.inference_resolution,
-                            args.inference_resolution,
-                            INTER_NEAREST,
-                        ),
-                        a.RandomCrop(args.train_resolution, args.train_resolution),
-                        a.ToFloat(max_value=255.0),
-                    ]
-                )
-            )
-            # add extra channel to be compatible with nn.Conv2D
-            extra_channel_tf = transforms.Lambda(
-                lambda x: x.view(
-                    -1, args.train_resolution, args.train_resolution
-                )
-            )
+            # transforms applied to get the stats: mean and val
+            basic_tfs = [
+                a.Resize(
+                    args.inference_resolution,
+                    args.inference_resolution,
+                ),
+                a.RandomCrop(args.train_resolution, args.train_resolution),
+                a.ToFloat(max_value=255.0),
+            ]
+            stats_tf_imgs = AlbumentationsTorchTransform(a.Compose(basic_tfs))
             # dataset to calculate stats
             dataset = MSD_data_images(
                 args.data_dir + "/train",
-                transform=stats_tf,
-                target_transform=stats_tf,
+                transform=stats_tf_imgs,
             )
             # get stats
             val_mean_std = calc_mean_std(dataset)
             mean, std = val_mean_std
-            
+
             # change transforms based on stats
-            dataset.transform = transforms.Compose(
+            train_tf = create_albu_transform(args, mean, std)
+
+            dataset.transform = train_tf
+            val_trans = a.Compose(
                 [
-                    create_albu_transform(args, mean, std),
-                    extra_channel_tf,
-                ]
-            )
-            # separate transform for labels
-            label_transform = transforms.Compose(
-                [
-                    stats_tf,
-                    extra_channel_tf,
-                    # binarize labels, rm if issue #7 is solved
-                    lambda x: np.where(
-                        x > 0.0,
-                        torch.ones_like(x),
-                        torch.zeros_like(
-                            x
-                        ),  
+                    *basic_tfs,
+                    a.Normalize(mean, std, max_pixel_value=1.0),
+                    a.Lambda(
+                        image=lambda x, **kwargs: x.reshape(
+                            -1, args.train_resolution, args.train_resolution
+                        ),
+                        mask=lambda x, **kwargs: np.where(
+                            x.reshape(-1, args.train_resolution, args.train_resolution)
+                            / 255.0
+                            > 0.5,
+                            np.ones_like(x),
+                            np.zeros_like(x),
+                        ).astype(np.float32),
                     ),
                 ]
             )
-            dataset.target_transform = label_transform
-
-            # valset
-            # don't use create_albu_transforms but just add normalization
-            norm_tf = AlbumentationsTorchTransform(
-                a.Normalize(mean, std, max_pixel_value=1.0),
-            )
             valset = MSD_data_images(
                 args.data_dir + "/val",
-                transform=transforms.Compose(
-                    [
-                        stats_tf,
-                        norm_tf,
-                        extra_channel_tf,
-                    ]
-                ),
-                target_transform=label_transform,
+                transform=AlbumentationsTorchTransform(val_trans),
             )
 
         else:
