@@ -686,38 +686,19 @@ def setup_pysyft(args, hook, verbose=False):
 
             ## MSD dataset preprocessed version ##
             # transforms applied to get the stats: mean and val
-            stats_tf = AlbumentationsTorchTransform(
-                a.Compose(
-                    [
-                        a.Resize(
-                            args.inference_resolution,
-                            args.inference_resolution,
-                            INTER_NEAREST,
-                        ),
-                        a.RandomCrop(args.train_resolution, args.train_resolution),
-                        a.ToFloat(max_value=255.0),
-                    ]
-                )
-            )
-            # add extra channel to be compatible with nn.Conv2D
-            extra_channel_tf = transforms.Lambda(
-                lambda x: x.view(-1, args.train_resolution, args.train_resolution)
-            )
+            basic_tfs = [
+                a.Resize(
+                    args.inference_resolution,
+                    args.inference_resolution,
+                    INTER_NEAREST,
+                ),
+                a.RandomCrop(args.train_resolution, args.train_resolution),
+                a.ToFloat(max_value=255.0),
+            ]
+            stats_tf_imgs = AlbumentationsTorchTransform(a.Compose(basic_tfs))
             dataset = MSD_data_images(
                 args.data_dir + "/train",
-                # input transforms are added after splitting
-                transform=transforms.Compose(
-                    [
-                        stats_tf,
-                        extra_channel_tf,
-                    ]
-                ),
-                target_transform=transforms.Compose(
-                    [
-                        stats_tf,
-                        extra_channel_tf,
-                    ]
-                ),
+                transform=stats_tf_imgs,
             )
 
             lengths = [int(len(dataset) / len(workers)) for _ in workers]
@@ -746,7 +727,7 @@ def setup_pysyft(args, hook, verbose=False):
                     epsilon=args.dpsse_eps if args.DPSSE else None,
                 )
                 dataset.dataset.transform.transform.transforms.transforms.append(  # beautiful
-                    a.Normalize(mean, std, max_pixel_value=1.0)
+                    a.Normalize(mean, std, max_pixel_value=1.0),
                 )
             # Segmentation
             elif args.bin_seg:
@@ -756,9 +737,25 @@ def setup_pysyft(args, hook, verbose=False):
                     dataset,
                     epsilon=args.dpsse_eps if args.DPSSE else None,
                 )
-                dataset.dataset.transform.transforms.append(
-                    AlbumentationsTorchTransform(
-                        a.Normalize(mean, std, max_pixel_value=1.0)
+                dataset.dataset.transform.transform.transforms.transforms.append(
+                        a.Compose(
+                        [
+                                a.Normalize(mean, std, max_pixel_value=1.0),
+                                a.Lambda(
+                                    image=lambda x, **kwargs: x.reshape(
+                                    # add extra channel to be compatible with nn.Conv2D
+                                    -1, args.train_resolution, args.train_resolution
+                                ),
+                                    mask=lambda x, **kwargs: np.where(
+                                    # binarize masks 
+                                    x.reshape(-1, args.train_resolution, args.train_resolution)
+                                    / 255.0
+                                    > 0.5,
+                                    np.ones_like(x),
+                                    np.zeros_like(x),
+                                ).astype(np.float32),
+                            ),
+                        ]
                     )
                 )
 
@@ -1006,38 +1003,36 @@ def setup_pysyft(args, hook, verbose=False):
         # valset = SegmentationData(image_paths_file='data/segmentation_data/val.txt')
 
         ## MSD preprocessed dataset ##
-        val_tf = AlbumentationsTorchTransform(
-            a.Compose(
-                [
-                    a.Resize(args.inference_resolution, args.inference_resolution),
-                    a.CenterCrop(args.train_resolution, args.train_resolution),
-                    a.ToFloat(max_value=255.0),
-                ]
-            )
-        )
-        # based on retrieved means, stds from grid
-        norm_tf = AlbumentationsTorchTransform(
-            a.Normalize(mean, std, max_pixel_value=1.0),
-        )
-        # add extra channel to be compatible with nn.Conv2D
-        extra_channel_tf = transforms.Lambda(
-            lambda x: x.view(-1, args.train_resolution, args.train_resolution)
-        )
+        val_tf = [
+            a.Resize(args.inference_resolution, args.inference_resolution),
+            a.CenterCrop(args.train_resolution, args.train_resolution),
+            a.ToFloat(max_value=255.0),
+        ]
         valset = MSD_data_images(
             args.data_dir + "/val",
-            transform=transforms.Compose(
-                [
-                    val_tf,
-                    norm_tf,
-                    extra_channel_tf,
-                ]
-            ),
-            target_transform=transforms.Compose(
-                [
-                    val_tf,
-                    extra_channel_tf,
-                ]
-            ),
+            transform=AlbumentationsTorchTransform(
+                a.Compose(
+                    [
+                        *val_tf,
+                        # based on retrieved means, stds from grid
+                        a.Normalize(mean, std, max_pixel_value=1.0),
+                        a.Lambda(
+                            image=lambda x, **kwargs: x.reshape(
+                                # add extra channel to be compatible with nn.Conv2D
+                                -1, args.train_resolution, args.train_resolution
+                            ),
+                            mask=lambda x, **kwargs: np.where(
+                                # binarize masks 
+                                x.reshape(-1, args.train_resolution, args.train_resolution)
+                                / 255.0
+                                > 0.5,
+                                np.ones_like(x),
+                                np.zeros_like(x),
+                            ).astype(np.float32),
+                        ),
+                    ]
+                ),
+            )
         )
     else:
 

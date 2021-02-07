@@ -209,6 +209,7 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             # change transforms based on stats
             train_tf = create_albu_transform(args, mean, std)
 
+            # mask is a special keyword in albumentations 
             dataset.transform = train_tf
             val_trans = a.Compose(
                 [
@@ -216,9 +217,11 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
                     a.Normalize(mean, std, max_pixel_value=1.0),
                     a.Lambda(
                         image=lambda x, **kwargs: x.reshape(
+                            # add extra channel to be compatible with nn.Conv2D
                             -1, args.train_resolution, args.train_resolution
                         ),
                         mask=lambda x, **kwargs: np.where(
+                            # binarize masks 
                             x.reshape(-1, args.train_resolution, args.train_resolution)
                             / 255.0
                             > 0.5,
