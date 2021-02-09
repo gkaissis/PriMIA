@@ -15,7 +15,11 @@ global cmdln_args
 
 
 def objective(trial: opt.trial):
-    lr = trial.suggest_loguniform("lr", 1e-5, 1e-3,)
+    lr = trial.suggest_loguniform(
+        "lr",
+        1e-5,
+        1e-3,
+    )
     repetitions_dataset = (
         trial.suggest_int("repetitions_dataset", 1, 3) if cmdln_args.federated else 1
     )
@@ -27,11 +31,11 @@ def objective(trial: opt.trial):
         resume_checkpoint=None,
         train_federated=cmdln_args.federated,
         data_dir=cmdln_args.data_dir,
-        visdom=True,
+        visdom=cmdln_args.visdom,
         encrypted_inference=False,
-        cuda=True, #not cmdln_args.federated,
+        cuda=True,  # not cmdln_args.federated,
         websockets=cmdln_args.websockets,
-        batch_size=64, #trial.suggest_int("batch_size", 32, 128),
+        batch_size=64,  # trial.suggest_int("batch_size", 32, 128),
         train_resolution=256,
         inference_resolution=256,
         test_batch_size=128,
@@ -40,11 +44,11 @@ def objective(trial: opt.trial):
         epochs=epochs,
         lr=lr,
         end_lr=trial.suggest_loguniform("end_lr", 1e-6, lr),
-        restarts=0, #trial.suggest_int("restarts", 0, 1),
+        restarts=0,  # trial.suggest_int("restarts", 0, 1),
         beta1=trial.suggest_float("beta1", 0.25, 0.95),
         beta2=trial.suggest_float("beta2", 0.9, 1.0),
         ## zero not possible but loguniform makes most sense
-        weight_decay= 0, #trial.suggest_loguniform("weight_decay", 1e-12, 1e-3),
+        weight_decay=0,  # trial.suggest_loguniform("weight_decay", 1e-12, 1e-3),
         seed=1,
         log_interval=10,
         deterministic=False,
@@ -59,83 +63,35 @@ def objective(trial: opt.trial):
         rotation=trial.suggest_int("rotation", 0, 90),
         translate=trial.suggest_float("translate", 0, 0.5),
         scale=trial.suggest_float("scale", 0.0, 0.5),
-        shear=0, #trial.suggest_int("shear", 0, 10),
-        noise_std=0.0, #trial.suggest_float("noise_std", 0.0, 0.1),
-        noise_prob=0.0, #trial.suggest_float("noise_prob", 0.0, 1.0),
-        mixup=False, #trial.suggest_categorical("mixup", [True, False]),
+        shear=0,  # trial.suggest_int("shear", 0, 10),
+        noise_std=0.0,  # trial.suggest_float("noise_std", 0.0, 0.1),
+        noise_prob=0.0,  # trial.suggest_float("noise_prob", 0.0, 1.0),
+        mixup=False,  # trial.suggest_categorical("mixup", [True, False]),
         repetitions_dataset=repetitions_dataset,
         num_threads=0,  ## somehow necessary for optuna
-        save_file=f"model_weights/completed_trainings{cmdln_args.trial_name}.csv",
+        save_file=f"model_weights/completed_trainings_segmentation{cmdln_args.trial_name}.csv",
         name=f"optuna{cmdln_args.trial_name}",
     )
-    apply_albu = False, #trial.suggest_categorical("apply albu transforms", [True, False])
-    args.albu_prob = trial.suggest_float("albu_prob", 0.0, 1.0) if apply_albu else 0.0
-    args.individual_albu_probs = (
-        trial.suggest_float("individual_albu_probs", 0.0, 1.0) if apply_albu else 0.0
-    )
-    args.clahe = (
-        trial.suggest_categorical("clahe", [True, False]) if apply_albu else False
-    )
-    args.randomgamma = (
-        trial.suggest_categorical("randomgamma", [True, False]) if apply_albu else False
-    )
-    args.randombrightness = (
-        trial.suggest_categorical("randombrightness", [True, False])
-        if apply_albu
-        else False
-    )
-    args.blur = (
-        trial.suggest_categorical("blur", [True, False]) if apply_albu else False
-    )
-    args.elastic = (
-        trial.suggest_categorical("elastic", [True, False]) if apply_albu else False
-    )
-    args.optical_distortion = (
-        trial.suggest_categorical("optical_distortion", [True, False])
-        if apply_albu
-        else False
-    )
-    args.grid_distortion = (
-        trial.suggest_categorical("grid_distortion", [True, False])
-        if apply_albu
-        else False
-    )
-    args.grid_shuffle = (
-        trial.suggest_categorical("grid_shuffle", [True, False])
-        if apply_albu
-        else False
-    )
-    args.hsv = trial.suggest_categorical("hsv", [True, False]) if apply_albu else False
-    args.invert = (
-        trial.suggest_categorical("invert", [True, False]) if apply_albu else False
-    )
-    args.cutout = (
-        trial.suggest_categorical("cutout", [True, False]) if apply_albu else False
-    )
-    args.shadow = (
-        trial.suggest_categorical("shadow", [True, False]) if apply_albu else False
-    )
-    args.fog = trial.suggest_categorical("fog", [True, False]) if apply_albu else False
-    args.sun_flare = (
-        trial.suggest_categorical("sun_flare", [True, False]) if apply_albu else False
-    )
-    args.solarize = (
-        trial.suggest_categorical("solarize", [True, False]) if apply_albu else False
-    )
-    args.equalize = (
-        trial.suggest_categorical("equalize", [True, False]) if apply_albu else False
-    )
-    args.grid_dropout = (
-        trial.suggest_categorical("grid_dropout", [True, False])
-        if apply_albu
-        else False
-    )
-    if args.mixup:  # pylint:disable=no-member
-        args.mixup_lambda = trial.suggest_categorical(
-            "mixup_lambda",
-            (0.1, 0.25, 0.49999, None),  # 0.5 breaks federated weight calculation
-        )
-        args.mixup_prob = trial.suggest_float("mixup_prob", 0.0, 1.0)
+    # apply_albu = False
+    args.albu_prob = 0.0
+    args.individual_albu_probs = 0.0
+    args.clahe = False
+    args.randomgamma = False
+    args.randombrightness = False
+    args.blur = False
+    args.elastic = False
+    args.optical_distortion = False
+    args.grid_distortion = False
+    args.grid_shuffle = False
+    args.hsv = False
+    args.invert = False
+    args.cutout = False
+    args.shadow = False
+    args.fog = False
+    args.sun_flare = False
+    args.solarize = False
+    args.equalize = False
+    args.grid_dropout = False
     if cmdln_args.federated:
         args.unencrypted_aggregation = cmdln_args.unencrypted_aggregation
         args.sync_every_n_batch = trial.suggest_int("sigma", 1, 5)
@@ -150,8 +106,9 @@ def objective(trial: opt.trial):
             "weighted_averaging", [True, False]
         )
         args.DPSSE = False
+    print(args)
     try:
-        best_val_acc, epsilon = main(args, verbose=True, optuna_trial=trial)
+        best_val_acc, epsilon = main(args, verbose=False, optuna_trial=trial)
     except Exception as e:
         print(f"Trial failed with exception {e} and arguments {str(args)}.")
         return 0
@@ -185,6 +142,7 @@ if __name__ == "__main__":
         action="store_true",
         help="Train model without secure aggregation",
     )
+    parser.add_argument("--visdom", action="store_true", help="Log on visdom server.")
     cmdln_args = parser.parse_args()
     try:
         study = opt.create_study(
@@ -233,4 +191,3 @@ if __name__ == "__main__":
             n_jobs=1,
             gc_after_trial=True,
         )
-
