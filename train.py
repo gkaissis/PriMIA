@@ -336,13 +336,24 @@ def main(args, verbose=True, optuna_trial=None, cmd_args=None):
             legend=["train_loss"],
         )
         vis.line(
-            X=np.zeros((1, 3)),
-            Y=np.zeros((1, 3)),
+            X=np.zeros((1, 2)),
+            Y=np.zeros((1, 2)),
             win="loss_win",
             opts={
-                "legend": ["train_loss", "val_loss", "matthews coeff"],
+                "legend": ["train_loss", "val_loss"],
                 "xlabel": "epochs",
-                "ylabel": "loss / m coeff [%]",
+                "ylabel": "loss",
+            },
+            env=vis_env,
+        )
+        vis.line(
+            X=np.zeros((1, 3)),
+            Y=np.zeros((1, 3)),
+            win="metrics_win",
+            opts={
+                "legend": ["matthews coeff", "dice (verbose)", "ROC AUC (verbose)"],
+                "xlabel": "epochs",
+                "ylabel": "m coeff [%] / dice [%] / ROC AUC",
             },
             env=vis_env,
         )

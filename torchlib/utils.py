@@ -1877,6 +1877,7 @@ def test(
         # objective = np.mean(test_accs)
         # for now set objective to F1-score
         #    objective = np.mean(test_dices)
+        report = 0
         if True:  # TEMPORARY
             total_pred = (
                 torch.cat(total_pred).cpu().numpy()
@@ -1925,7 +1926,7 @@ def test(
         if args.visdom and vis_params:
             vis_params["vis"].line(
                 X=np.asarray([epoch]),
-                Y=np.asarray([test_loss]),
+                Y=np.asarray([test_loss.cpu().numpy()]),
                 win="loss_win",
                 name="val_loss",
                 update="append",
@@ -1934,8 +1935,24 @@ def test(
             vis_params["vis"].line(
                 X=np.asarray([epoch]),
                 Y=np.asarray([objective / 100.0]),
-                win="loss_win",
+                win="metrics_win",
                 name="matthews coeff",
+                update="append",
+                env=vis_params["vis_env"],
+            )
+            vis_params["vis"].line(
+                X=np.asarray([epoch]),
+                Y=np.asarray([report["macro avg"]["f1-score"]]),
+                win="metrics_win",
+                name="dice",
+                update="append",
+                env=vis_params["vis_env"],
+            )
+            vis_params["vis"].line(
+                X=np.asarray([epoch]),
+                Y=np.asarray([roc_auc]),
+                win="metrics_win",
+                name="ROC AUC",
                 update="append",
                 env=vis_params["vis_env"],
             )

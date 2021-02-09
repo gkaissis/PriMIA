@@ -27,11 +27,11 @@ def objective(trial: opt.trial):
         resume_checkpoint=None,
         train_federated=cmdln_args.federated,
         data_dir=cmdln_args.data_dir,
-        visdom=False,
+        visdom=True,
         encrypted_inference=False,
         cuda=True, #not cmdln_args.federated,
         websockets=cmdln_args.websockets,
-        batch_size=trial.suggest_int("batch_size", 32, 128),
+        batch_size=64, #trial.suggest_int("batch_size", 32, 128),
         train_resolution=256,
         inference_resolution=256,
         test_batch_size=128,
@@ -40,22 +40,24 @@ def objective(trial: opt.trial):
         epochs=epochs,
         lr=lr,
         end_lr=trial.suggest_loguniform("end_lr", 1e-6, lr),
-        restarts=trial.suggest_int("restarts", 0, 1),
+        restarts=0, #trial.suggest_int("restarts", 0, 1),
         beta1=trial.suggest_float("beta1", 0.25, 0.95),
         beta2=trial.suggest_float("beta2", 0.9, 1.0),
         ## zero not possible but loguniform makes most sense
-        weight_decay=trial.suggest_loguniform("weight_decay", 1e-12, 1e-3),
+        weight_decay= 0, #trial.suggest_loguniform("weight_decay", 1e-12, 1e-3),
         seed=1,
         log_interval=10,
         deterministic=False,
         differentially_private=False,
+        bin_seg=True,
+        dump_gradients_every=500,
         optimizer="Adam",
         model="MoNet",
         pretrained=True,
         weight_classes=False,
         pooling_type="max",
         rotation=trial.suggest_int("rotation", 0, 90),
-        translate=trial.suggest_float("translate", 0, 0.2),
+        translate=trial.suggest_float("translate", 0, 0.5),
         scale=trial.suggest_float("scale", 0.0, 0.5),
         shear=0, #trial.suggest_int("shear", 0, 10),
         noise_std=0.0, #trial.suggest_float("noise_std", 0.0, 0.1),
@@ -71,7 +73,7 @@ def objective(trial: opt.trial):
     args.individual_albu_probs = (
         trial.suggest_float("individual_albu_probs", 0.0, 1.0) if apply_albu else 0.0
     )
-    # args.clahe = (
+    args.clahe = (
         trial.suggest_categorical("clahe", [True, False]) if apply_albu else False
     )
     args.randomgamma = (
@@ -149,7 +151,7 @@ def objective(trial: opt.trial):
         )
         args.DPSSE = False
     try:
-        best_val_acc, epsilon = main(args, verbose=False, optuna_trial=trial)
+        best_val_acc, epsilon = main(args, verbose=True, optuna_trial=trial)
     except Exception as e:
         print(f"Trial failed with exception {e} and arguments {str(args)}.")
         return 0
