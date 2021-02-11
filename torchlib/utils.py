@@ -30,6 +30,7 @@ from .dataloader import (
     calc_mean_std,
     LabelMNIST,
     random_split,
+    Subset,
     create_albu_transform,
     CombinedLoader,
     SegmentationData,  # Segmentation
@@ -701,12 +702,29 @@ def setup_pysyft(args, hook, verbose=False):
                 transform=stats_tf_imgs,
             )
 
-            lengths = [int(len(dataset) / len(workers)) for _ in workers]
-            ##assert sum of lenghts is whole dataset on the cost of the last worker
-            ##-> because int() floors division, means that rest is send to last worker
+            ## random distribution ##
+            # lengths = [int(len(dataset) / len(workers)) for _ in workers]
+            # #assert sum of lenghts is whole dataset on the cost of the last worker
+            # #-> because int() floors division, means that rest is send to last worker
+            # lengths[-1] += len(dataset) - sum(lengths)
+            # seg_datasets = random_split(dataset, lengths)
 
-            lengths[-1] += len(dataset) - sum(lengths)
-            seg_datasets = random_split(dataset, lengths)
+            ## distributing after patients ##
+            Z_LIMIT = 64
+            # ceil because I want to have all data at the cost of the last worker 
+            # too high index at the end will in anycase just take the last element
+            num_blocks = np.ceil(len(dataset)/Z_LIMIT)
+            blocks_per_w = np.ceil(num_blocks/len(workers))
+            # seg_datasets = [
+            #         dataset[
+            #             i:i+int(blocks_per_w*Z_LIMIT)
+            #             ] for i in range(len(workers))
+            #     ]
+            indices = torch.arange(len(dataset)).tolist()
+            seg_datasets = [
+                    Subset(dataset, indices[i:i+int(blocks_per_w*Z_LIMIT)]) for i in range(len(workers))
+                ]
+
             seg_datasets = {worker: d for d, worker in zip(seg_datasets, workers)}
 
         if not args.unencrypted_aggregation:

@@ -16,6 +16,9 @@ def save_to_img(PATH, array, isLabel:bool):
     if isLabel: 
         for i, img_array in tqdm(enumerate(array), total=len(array)):
             formatted = (img_array * 255)
+            #img_array[img_array==2]=255
+            #img_array[img_array==1]=0
+            #formatted = img_array
             img = Image.fromarray(formatted)
             img.save(PATH+f"{i}.jpg")
     else: 
