@@ -193,8 +193,7 @@ class Arguments:
         self.shear = config.getfloat("augmentation", "shear", fallback=0.0)
         if self.shear > 0.0:
             warn(
-                "Shearing not supported any more.",
-                category=DeprecationWarning,
+                "Shearing not supported any more.", category=DeprecationWarning,
             )
         self.albu_prob = config.getfloat(
             "albumentations", "overall_prob"
@@ -380,8 +379,7 @@ class MixUp(torch.nn.Module):
         self.λ = λ
 
     def forward(
-        self,
-        x: Tuple[Union[torch.tensor, Tuple[torch.tensor]], Tuple[torch.Tensor]],
+        self, x: Tuple[Union[torch.tensor, Tuple[torch.tensor]], Tuple[torch.Tensor]],
     ):
         assert len(x) == 2, "need data and target"
         x, y = x
@@ -689,17 +687,14 @@ def setup_pysyft(args, hook, verbose=False):
             # transforms applied to get the stats: mean and val
             basic_tfs = [
                 a.Resize(
-                    args.inference_resolution,
-                    args.inference_resolution,
-                    INTER_NEAREST,
+                    args.inference_resolution, args.inference_resolution, INTER_NEAREST,
                 ),
                 a.RandomCrop(args.train_resolution, args.train_resolution),
                 a.ToFloat(max_value=255.0),
             ]
             stats_tf_imgs = AlbumentationsTorchTransform(a.Compose(basic_tfs))
             dataset = MSD_data_images(
-                args.data_dir + "/train",
-                transform=stats_tf_imgs,
+                args.data_dir + "/train", transform=stats_tf_imgs,
             )
 
             ## random distribution ##
@@ -711,10 +706,10 @@ def setup_pysyft(args, hook, verbose=False):
 
             ## distributing after patients ##
             Z_LIMIT = 64
-            # ceil because I want to have all data at the cost of the last worker 
+            # ceil because I want to have all data at the cost of the last worker
             # too high index at the end will in anycase just take the last element
-            num_blocks = np.ceil(len(dataset)/Z_LIMIT)
-            blocks_per_w = np.ceil(num_blocks/len(workers))
+            num_blocks = np.ceil(len(dataset) / Z_LIMIT)
+            blocks_per_w = np.ceil(num_blocks / len(workers))
             # seg_datasets = [
             #         dataset[
             #             i:i+int(blocks_per_w*Z_LIMIT)
@@ -722,8 +717,9 @@ def setup_pysyft(args, hook, verbose=False):
             #     ]
             indices = torch.arange(len(dataset)).tolist()
             seg_datasets = [
-                    Subset(dataset, indices[i:i+int(blocks_per_w*Z_LIMIT)]) for i in range(len(workers))
-                ]
+                Subset(dataset, indices[i : i + int(blocks_per_w * Z_LIMIT)])
+                for i in range(len(workers))
+            ]
 
             seg_datasets = {worker: d for d, worker in zip(seg_datasets, workers)}
 
@@ -741,8 +737,7 @@ def setup_pysyft(args, hook, verbose=False):
             if args.data_dir == "mnist":
                 dataset = mnist_datasets[worker.id]
                 mean, std = calc_mean_std(
-                    dataset,
-                    epsilon=args.dpsse_eps if args.DPSSE else None,
+                    dataset, epsilon=args.dpsse_eps if args.DPSSE else None,
                 )
                 dataset.dataset.transform.transform.transforms.transforms.append(  # beautiful
                     a.Normalize(mean, std, max_pixel_value=1.0),
@@ -752,8 +747,7 @@ def setup_pysyft(args, hook, verbose=False):
                 # get dataset
                 dataset = seg_datasets[worker.id]
                 mean, std = calc_mean_std(
-                    dataset,
-                    epsilon=args.dpsse_eps if args.DPSSE else None,
+                    dataset, epsilon=args.dpsse_eps if args.DPSSE else None,
                 )
                 dataset.dataset.transform.transform.transforms.transforms.append(
                     a.Compose(
@@ -898,10 +892,7 @@ def setup_pysyft(args, hook, verbose=False):
             data, targets = [], []
             if args.mixup:
                 dataset = torch.utils.data.DataLoader(
-                    dataset,
-                    batch_size=1,
-                    shuffle=True,
-                    num_workers=args.num_threads,
+                    dataset, batch_size=1, shuffle=True, num_workers=args.num_threads,
                 )
                 mixup = MixUp(λ=args.mixup_lambda, p=args.mixup_prob)
                 last_set = None
@@ -941,12 +932,8 @@ def setup_pysyft(args, hook, verbose=False):
                 selected_data = selected_data.squeeze(1)
                 selected_targets = selected_targets.squeeze(1)
             del data, targets
-            selected_data.tag(
-                "#traindata",
-            )
-            selected_targets.tag(
-                "#traintargets",
-            )
+            selected_data.tag("#traindata",)
+            selected_targets.tag("#traintargets",)
             worker.load_data([selected_data, selected_targets])
     if crypto_provider is not None:
         grid = sy.PrivateGridNetwork(*(list(workers.values()) + [crypto_provider]))
@@ -959,8 +946,7 @@ def setup_pysyft(args, hook, verbose=False):
     for worker in data.keys():
         dist_dataset = [  # TODO: in the future transform here would be nice but currently raise errors
             sy.BaseDataset(
-                data[worker][0],
-                target[worker][0],
+                data[worker][0], target[worker][0],
             )  # transform=federated_tf
         ]
         fed_dataset = sy.FederatedDataset(dist_dataset)
@@ -1231,12 +1217,7 @@ def train_federated(
         )
     else:
         if verbose:
-            print(
-                "Train Epoch: {} \tLoss: {:.6f}".format(
-                    epoch,
-                    avg_loss,
-                )
-            )
+            print("Train Epoch: {} \tLoss: {:.6f}".format(epoch, avg_loss,))
     return model, epsilon
 
 
@@ -1453,11 +1434,7 @@ def secure_aggregation_epoch(
 
             if args.differentially_private and args.batch_size > args.microbatch_size:
                 batch = next(dataloader)
-                for i in range(
-                    0,
-                    batch[0].shape[0],
-                    args.microbatch_size,
-                ):
+                for i in range(0, batch[0].shape[0], args.microbatch_size,):
                     data, target = (
                         batch[0][i : i + args.microbatch_size].to(device),
                         batch[1][i : i + args.microbatch_size].to(device),
@@ -1706,12 +1683,7 @@ def train(  # never called on websockets
     else:
         epsilon = 0
     if not args.visdom and verbose:
-        print(
-            "Train Epoch: {} \tLoss: {:.6f}".format(
-                epoch,
-                np.mean(avg_loss),
-            )
-        )
+        print("Train Epoch: {} \tLoss: {:.6f}".format(epoch, np.mean(avg_loss),))
     return model, epsilon, gradient_dump
 
 
@@ -1767,11 +1739,7 @@ def stats_table(
     headers.extend(
         [class_names[i] if class_names else i for i in range(conf_matrix.shape[0])]
     )
-    return tabulate(
-        rows,
-        headers=headers,
-        tablefmt="fancy_grid",
-    )
+    return tabulate(rows, headers=headers, tablefmt="fancy_grid",)
 
 
 def test(
@@ -1793,6 +1761,7 @@ def test(
     model.eval()
     test_loss, TP = 0, 0
     total_pred, total_target, total_scores = [], [], []
+    true_dice = []
 
     with torch.no_grad():
         for data, target in (
@@ -1814,6 +1783,15 @@ def test(
 
             # NOTE: if loss negative (dice) check if output and target have the same shape
             loss = loss_fn(output, target)
+
+            output_n = output.detach().cpu().numpy().squeeze()
+            target_n = target.detach().cpu().numpy().squeeze()
+            threshold = lambda x: np.where(x > 0.5, 1.0, 0.0)
+            dice = 1 - smp.utils.losses.DiceLoss()(
+                torch.from_numpy(threshold(output_n)), torch.from_numpy(target_n)
+            )
+
+            true_dice.append(dice)
 
             test_loss += loss
 
@@ -1889,7 +1867,10 @@ def test(
         )
     if args.bin_seg:
         if verbose:
-            print(f"Dice score on test set: {(1.0 - test_loss)*100.0:.2f}%")
+            print(
+                f"True Dice Score @ threshold 0.5: {torch.mean(torch.stack(true_dice)).item():.2f}"
+            )
+            # print(f"Dice score on test set: {(1.0 - test_loss)*100.0:.2f}%")
         return test_loss, 1.0 - test_loss
 
     if args.encrypted_inference:
@@ -1898,11 +1879,7 @@ def test(
         if verbose:
             print(
                 "Test set: Epoch: {:d} Average loss: {:.4f}, Recall: {}/{} ({:.0f}%)\n".format(
-                    epoch,
-                    test_loss,
-                    TP,
-                    L,
-                    objective,
+                    epoch, test_loss, TP, L, objective,
                 ),
                 # end="",
             )
