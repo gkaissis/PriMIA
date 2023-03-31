@@ -24,7 +24,7 @@ sqlalchemy_mixins ==1.2.1
 pyjwt ==1.7.1
 psycopg2-binary ==2.8.5
 requests-toolbelt ==0.9.1
-redis ==3.5.3
+redis ==4.4.4
 sqlalchemy_utils ==0.36.8
 wsaccel ==0.6.2
 papermill ==2.0.0
